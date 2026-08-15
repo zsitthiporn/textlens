@@ -1,6 +1,6 @@
 # Textlens MVP — Issue Backlog
 
-แตกจาก [feature-spec.md](../feature-spec.md) และ [architecture design](../superpowers/specs/2026-08-15-textlens-design.md)
+แตกจาก [feature-spec.md](https://github.com/zsitthiporn/textlens/blob/main/docs/feature-spec.md) และ [architecture design](https://github.com/zsitthiporn/textlens/blob/main/docs/superpowers/specs/2026-08-15-textlens-design.md)
 
 - 43 issues / 10 milestones — ครอบคลุม P0 ครบทั้ง 44 features
 - สร้างขึ้น GitHub ด้วย `scripts/create-issues.ps1`
@@ -256,7 +256,7 @@ depends: M1-02
 
 ## Context
 
-Feature O8 — พบใน [spike S1](../spikes/2026-08-15-s1-ocr-engine.md) ว่าเครื่องทดสอบมี recognizer แค่ `en-US` ตัวเดียว **ถ้าเครื่องผู้ใช้ไม่มี English language pack แอปใช้งานไม่ได้เลย** ต้องตรวจและบอกวิธีแก้ ไม่ใช่ล้มเงียบ
+Feature O8 — พบใน [spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) ว่าเครื่องทดสอบมี recognizer แค่ `en-US` ตัวเดียว **ถ้าเครื่องผู้ใช้ไม่มี English language pack แอปใช้งานไม่ได้เลย** ต้องตรวจและบอกวิธีแก้ ไม่ใช่ล้มเงียบ
 
 ## Scope
 
@@ -290,7 +290,7 @@ depends: M1-02
 
 ## Context
 
-Feature C1 — จับเฉพาะ region ไม่ใช่ทั้งจอ [Spike S1](../spikes/2026-08-15-s1-ocr-engine.md) วัดได้ว่า region crop เร็วกว่าเต็มจอ 4 เท่าและแม่นกว่าด้วย
+Feature C1 — จับเฉพาะ region ไม่ใช่ทั้งจอ [Spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) วัดได้ว่า region crop เร็วกว่าเต็มจอ 4 เท่าและแม่นกว่าด้วย
 
 ## Scope
 
@@ -364,7 +364,7 @@ depends: M2-02, M2-01
 
 ## Context
 
-Feature O1 — [Spike S1](../spikes/2026-08-15-s1-ocr-engine.md) ยืนยันแล้วว่า Windows.Media.Ocr เร็วกว่า PaddleOCR 6 เท่าและแม่นกว่าในเนื้อหาเกม
+Feature O1 — [Spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) ยืนยันแล้วว่า Windows.Media.Ocr เร็วกว่า PaddleOCR 6 เท่าและแม่นกว่าในเนื้อหาเกม
 
 ## Scope
 
@@ -1152,7 +1152,7 @@ depends: M6-01
 
 ## Context
 
-Feature R1 — **reference โฆษณาว่ามีแต่ไม่มีจริง** เขาจับเต็มจอทุกครั้ง [Spike S1](../spikes/2026-08-15-s1-ocr-engine.md) วัดได้ว่า region crop เร็วกว่า 4 เท่าและแม่นกว่าด้วย นี่คือข้อได้เปรียบหลักของเรา
+Feature R1 — **reference โฆษณาว่ามีแต่ไม่มีจริง** เขาจับเต็มจอทุกครั้ง [Spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) วัดได้ว่า region crop เร็วกว่า 4 เท่าและแม่นกว่าด้วย นี่คือข้อได้เปรียบหลักของเรา
 
 ## Scope
 
@@ -1189,7 +1189,7 @@ depends: M6-02
 
 ## Context
 
-Feature R7 — **ค้นพบจาก [spike S1](../spikes/2026-08-15-s1-ocr-engine.md)**: crop ที่กินขอบตัวอักษรทำให้ OCR พังทันที วัดได้จริงว่า `Logician` กลายเป็น `ogician`, `arithmetic` กลายเป็น `cithmetic`
+Feature R7 — **ค้นพบจาก [spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md)**: crop ที่กินขอบตัวอักษรทำให้ OCR พังทันที วัดได้จริงว่า `Logician` กลายเป็น `ogician`, `arithmetic` กลายเป็น `cithmetic`
 
 ## Scope
 
@@ -1724,6 +1724,10 @@ manual + `debugFrame` — นี่คือ acceptance test ตัวจริ�
 
 ---
 
+<!-- END ISSUES -->
+
+> ทุกอย่างใต้เส้นนี้เป็นเนื้อหาของเอกสาร ไม่ใช่ issue — `create-issues.ps1` จะไม่หยิบไป
+
 ## Dependency graph (ระดับ milestone)
 
 ```
@@ -1781,6 +1785,6 @@ M1 Walking skeleton
 
 ## หมายเหตุ
 
-- ตัวเลข threshold ทุกตัวที่อ้างในนี้มาจาก [spike S1](../spikes/2026-08-15-s1-ocr-engine.md) ซึ่งวัดจากภาพจริง ไม่ใช่ค่าที่เดาหรือลอกจาก reference
+- ตัวเลข threshold ทุกตัวที่อ้างในนี้มาจาก [spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) ซึ่งวัดจากภาพจริง ไม่ใช่ค่าที่เดาหรือลอกจาก reference
 - ความเสี่ยง S2 (content protection) และ S3 (Google rate limit) ยังไม่ได้ spike — S2 ฝังอยู่ใน M10-04 ส่วน S3 จะรู้ผลตอนทดสอบ M8-03 กับวิดีโอจริง
 - ทุก issue ที่แตะพิกัดต้องใช้ converter จาก M3-01 เท่านั้น (architecture invariant ข้อ 3)

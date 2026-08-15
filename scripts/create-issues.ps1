@@ -16,7 +16,10 @@
 param(
     [string]$BacklogPath = '',
     [string]$Repo = '',
-    [switch]$DryRun
+    [switch]$DryRun,
+    # Update the body, milestone and labels of issues that already exist,
+    # matched by exact title. Creates nothing.
+    [switch]$Sync
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +57,12 @@ if ($Repo) { $repoArgs = @('--repo', $Repo) }
 # --- parse -------------------------------------------------------------------
 
 $raw = Get-Content $BacklogPath -Raw -Encoding utf8
+
+# Everything after the END marker is document prose, not issue content. Without
+# this the trailing sections get appended to the final issue's body.
+$endIdx = $raw.IndexOf('<!-- END ISSUES -->')
+if ($endIdx -ge 0) { $raw = $raw.Substring(0, $endIdx) }
+
 $blocks = $raw -split '<!-- ISSUE -->' | Select-Object -Skip 1
 
 $issues = @()
@@ -118,6 +127,44 @@ if ($DryRun) {
         Write-Host "`nWARNING - suspiciously short bodies:" -ForegroundColor Yellow
         $short | ForEach-Object { Write-Host "   $($_.Title) ($($_.Body.Length) chars)" }
     }
+    exit 0
+}
+
+# --- sync mode ---------------------------------------------------------------
+
+if ($Sync) {
+    $listJson = gh issue list --state all --limit 300 --json number,title @repoArgs
+    $existing = $listJson | ConvertFrom-Json
+    $byTitle = @{}
+    foreach ($e in $existing) { $byTitle[$e.title] = $e.number }
+
+    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) 'textlens-issues-sync'
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+
+    $updated = 0
+    $missing = 0
+    foreach ($iss in $issues) {
+        if (-not $byTitle.ContainsKey($iss.Title)) {
+            Write-Host "SKIP (no such issue) $($iss.Title)" -ForegroundColor Yellow
+            $missing++
+            continue
+        }
+        $num = $byTitle[$iss.Title]
+        $bodyFile = Join-Path $tmpDir "$num.md"
+        [System.IO.File]::WriteAllText($bodyFile, $iss.Body, (New-Object System.Text.UTF8Encoding $false))
+
+        $ghArgs = @('issue', 'edit', "$num", '--body-file', $bodyFile) + $repoArgs
+        if ($iss.Milestone) { $ghArgs += @('--milestone', $iss.Milestone) }
+        try {
+            & gh @ghArgs *> $null
+            if ($?) { Write-Host "SYNCED #$num  $($iss.Title)" -ForegroundColor Green; $updated++ }
+            else { Write-Host "FAIL #$num  $($iss.Title)" -ForegroundColor Red }
+        }
+        catch { Write-Host "FAIL #$num - $($_.Exception.Message)" -ForegroundColor Red }
+        Start-Sleep -Milliseconds 300
+    }
+    Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "`nSynced $updated, not found $missing." -ForegroundColor Cyan
     exit 0
 }
 
