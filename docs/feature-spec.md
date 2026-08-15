@@ -168,12 +168,12 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 | ID | Feature | P | Src | รายละเอียด |
 |----|---------|---|-----|-----------|
-| S1 | Config 2 ชั้น | P0 | 🔵 | default (ติดมากับ app) + user override (persist) |
-| S2 | **Schema validation** | P0 | 🔵🟢 | validate ด้วย schema library — config พังแล้วไม่ล่ม fallback default |
-| S3 | Hot-reload | P0 | 🔵 | เปลี่ยนแล้วมีผลทันที |
-| S4 | Settings UI | P0 | 🔵 | engine, lang, display, font, opacity, hotkey, region, monitor, mode |
-| S5 | Engine health check | P1 | 🔵🟢 | ปุ่มทดสอบการเชื่อมต่อ + สถานะ — สำคัญตอนต่อ LM Studio |
-| S6 | Import / Export settings | P2 | 🔴 | |
+| ST1 | Config 2 ชั้น | P0 | 🔵 | default (ติดมากับ app) + user override (persist) |
+| ST2 | **Schema validation** | P0 | 🔵🟢 | validate ด้วย schema library — config พังแล้วไม่ล่ม fallback default |
+| ST3 | Hot-reload | P0 | 🔵 | เปลี่ยนแล้วมีผลทันที |
+| ST4 | Settings UI | P0 | 🔵 | engine, lang, display, font, opacity, hotkey, region, monitor, mode |
+| ST5 | Engine health check | P1 | 🔵🟢 | ปุ่มทดสอบการเชื่อมต่อ + สถานะ — สำคัญตอนต่อ LM Studio |
+| ST6 | Import / Export settings | P2 | 🔴 | |
 
 ### 1.11 Observability
 
@@ -189,10 +189,10 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 | ID | Feature | P | Src | รายละเอียด |
 |----|---------|---|-----|-----------|
-| P1 | บอกให้ชัดว่าข้อมูลไปไหน | P0 | 🟢 | ใช้ Google = ข้อความบนจอถูกส่งออกนอกเครื่อง |
-| P2 | Local-only mode | P1 | 🟢 | บังคับ local engine + block network |
-| P3 | ไม่ log ข้อความจริงใน production | P1 | 🟢 | default log แค่ metrics |
-| P4 | API key เก็บปลอดภัย | P1 | 🔴 | ไม่เก็บ plaintext ใน config ที่ backup ได้ |
+| PR1 | บอกให้ชัดว่าข้อมูลไปไหน | P0 | 🟢 | ใช้ Google = ข้อความบนจอถูกส่งออกนอกเครื่อง |
+| PR2 | Local-only mode | P1 | 🟢 | บังคับ local engine + block network |
+| PR3 | ไม่ log ข้อความจริงใน production | P1 | 🟢 | default log แค่ metrics |
+| PR4 | API key เก็บปลอดภัย | P1 | 🔴 | ไม่เก็บ plaintext ใน config ที่ backup ได้ |
 
 ### 1.13 Build & Distribution
 
@@ -220,7 +220,9 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
   → engine ล่ม → เห็นข้อความบอก ไม่ใช่เงียบ
 ```
 
-**P0**: R1 R2 R6 C1 C2 C3 · G1 G3 G4 G5 G6 · O1 O4 O5 O6 · T1 T2 T6 T7 T9 T10 · K1 K2 · A1 A3 A4 A5 A6 A7 A8 A9 · F1 F2 F3 · U1 U2 U3 U4 U5 U6 U7 · H1 H2 H3 H5 · S1 S2 S3 S4 · L1 L3 L5 · P1
+**P0**: R1 R2 R6 C1 C2 C3 · G1 G3 G4 G5 G6 · O1 O4 O5 O6 · T1 T2 T6 T7 T9 T10 · K1 K2 · A1 A3 A4 A5 A6 A7 A8 A9 · F1 F2 F3 · U1 U2 U3 U4 U5 U6 U7 · H1 H2 H3 H5 · ST1 ST2 ST3 ST4 · L1 L3 L5 · PR1
+
+> **หมายเหตุเรื่อง ID**: `S1`–`S3` สงวนไว้สำหรับ **spike ในหัวข้อ 5** เท่านั้น — feature ของ settings ใช้ `ST*` และ privacy ใช้ `PR*` เพื่อไม่ให้ชนกับ spike ID และ priority label (P0/P1/P2)
 
 ---
 

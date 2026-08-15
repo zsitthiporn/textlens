@@ -35,7 +35,7 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 ```
 
 - **Electron** ได้ Chromium มาด้วย → ได้ ICU Thai line breaking ฟรี ซึ่งจำเป็นเพราะภาษาไทยไม่เว้นวรรคระหว่างคำ และได้ transparent click-through overlay ที่พิสูจน์แล้วว่าทำงานได้
-- **.NET sidecar** ได้ Windows Graphics Capture (เคารพ exclude-from-capture → กัน overlay อ่านตัวเอง) และ Windows.Media.Ocr (ไม่ต้อง bundle OCR model)
+- **.NET sidecar** ได้ Windows Graphics Capture (เคารพ exclude-from-capture → กัน overlay อ่านตัวเอง — *รอยืนยันใน spike S2*) และ Windows.Media.Ocr (ไม่ต้อง bundle OCR model)
 
 รายละเอียดเต็มอยู่ใน [Architecture Design](docs/superpowers/specs/2026-08-15-textlens-design.md)
 
