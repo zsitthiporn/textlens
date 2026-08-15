@@ -1,0 +1,49 @@
+# === Secrets / local config ===
+.env
+.env.local
+.env.*.local
+
+# === Node / Electron ===
+node_modules/
+dist/
+out/
+build/
+release/
+*.tsbuildinfo
+.npm/
+.eslintcache
+coverage/
+.vite/
+
+# === .NET sidecar ===
+[Bb]in/
+[Oo]bj/
+publish/
+*.user
+*.suo
+artifacts/
+
+# === Runtime data ===
+*.log
+logs/
+*.db
+*.db-shm
+*.db-wal
+user-config.yaml
+
+# === OCR / model assets (ดาวน์โหลดตอน setup ไม่ commit) ===
+models/
+
+# === Editors / OS ===
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# === Scratch ===
+tmp/
+scratch/
