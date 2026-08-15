@@ -63,19 +63,35 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 
 ## สถานะปัจจุบัน
 
-**กำลังวางราง** — M1-01 (Electron + TS pipeline) และ M1-02 (.NET sidecar scaffold) เสร็จแล้ว
-ยังไม่มี capture / OCR / แปล ของจริง · ลำดับงานที่ใช้อยู่คือหัวข้อ **Execution order** ใน [backlog](docs/backlog/mvp-issues.md)
+**Phase 0–2 เสร็จแล้ว (2026-08-16) — ฝั่ง pixel ครบเส้น ฝั่ง text ยังไม่เริ่ม**
 
-**Spike S1 ผ่านแล้ว** ([รายงาน](docs/spikes/2026-08-15-s1-ocr-engine.md)) — Windows.Media.Ocr เร็วกว่า PaddleOCR ~6 เท่า
-(p50 99ms เต็มจอ / 30ms บน region เทียบกับ 580ms) และอ่านเนื้อหาเกมแม่นกว่า → สถาปัตยกรรม .NET sidecar ยืนยันแล้ว
+sidecar รันเดี่ยวได้จริง: พิมพ์ `configure` แล้ว `start` ใส่ stdin → ได้ `frame` พร้อม text + bbox + timings ออกมาต่อเนื่อง
+(ดู [docs/sidecar-protocol.md](docs/sidecar-protocol.md) มีตัวอย่าง copy ไปวางได้เลย)
 
-ขั้นถัดไป: **spike S2** ยืนยันว่า Windows Graphics Capture เคารพ exclude-from-capture จริง — ดูหัวข้อ 10 ของ design doc
+ฝั่ง Node มี SidecarClient, logging, overlay ที่ click-through แล้ว **แต่ยังไม่มีอะไรเชื่อมสองฝั่งเข้าด้วยกัน**
+ยังไม่มี: coordinate converter · text grouping · filter · dedup · แปล · render — คือ Phase 3 เป็นต้นไป
+
+ลำดับงานที่ใช้อยู่คือหัวข้อ **Execution order** ใน [backlog](docs/backlog/mvp-issues.md) ไม่ใช่การไล่ตามกลุ่ม M1→M10
+
+**Spike ผ่านแล้วทั้งสอง**
+- **S1** ([รายงาน](docs/spikes/2026-08-15-s1-ocr-engine.md)) — Windows.Media.Ocr เร็วกว่า PaddleOCR ~6 เท่าและแม่นกว่าในเนื้อหาเกม
+- **S2** ([รายงาน](docs/spikes/2026-08-16-s2-content-protection.md)) — WGC เคารพ content protection จริง ครบ 3 จอ **ชั้นที่ 1 ของ feedback-loop defence มีอยู่จริง** (แต่ F2/F3 ยังต้องมี — flag ต้องการ Win10 2004+ และทดสอบบน build เดียว)
+- **S3** (Google rate limit) ยังไม่ทำ → [#44](https://github.com/zsitthiporn/textlens/issues/44) ทำตอน Phase 4
+
+**สองเรื่องที่รอคุณตัดสินก่อนไปต่อ**
+- [#47](https://github.com/zsitthiporn/textlens/issues/47) — **`Windows.Media.Ocr` ไม่มี confidence เลย** (ยืนยันด้วย reflection) → O4 (#14) และ U4 (#27) อ้างถึง field ที่ไม่มีวันถูกส่งมา
+- [#46](https://github.com/zsitthiporn/textlens/issues/46) — `setContentProtection` ล้มเงียบบน Windows เก่ากว่า 2004 ผิด invariant #4
 
 ข้อควรรู้จาก S1 ที่กระทบการเขียนโค้ด:
 - ต้องมี **en-US OCR recognizer** ติดตั้งบนเครื่องผู้ใช้ ไม่งั้นใช้งานไม่ได้เลย → feature `O8` preflight check
 - **region ที่ตัดโดนตัวอักษรทำให้ OCR พังทันที** → feature `R7` padding + edge warning
 - ~~เครื่อง dev ยังไม่มี .NET 10~~ → **เครื่องนี้มี .NET 10 SDK แล้ว (10.0.111/303/400) sidecar target `net10.0-windows10.0.19041.0`** ตามที่ design doc §2 ตั้งใจไว้แต่แรก · NativeAOT + WinRT publish ผ่านแล้วจริง ได้ exe เดี่ยว 1.64MB
 - ข้อผิดพลาดที่ Windows OCR ทำประจำ: `o`↔`O`, `I`↔`1`, ตกเลขลำดับ, ช่องว่างหายบางจุด — ไม่กระทบความหมาย ไม่ต้องพยายามแก้ที่ post-processing
+
+ข้อควรรู้จาก S2 ที่กระทบการเขียนโค้ด:
+- **overlay ที่ถูก exclude จาก capture ยังคงกระตุ้นการส่งเฟรมอยู่** — จอนิ่ง + overlay นิ่ง = 3 เฟรมใน 13.2 วิ แต่จอนิ่ง + **overlay ขยับ** = 120 เฟรมใน 2.6 วิ (~46fps) ทุกเฟรมเนื้อหาเหมือนกันเป๊ะ
+  → **capture loop ต้องเป็น interval-driven เท่านั้น** ถ้าเป็น frame-driven พอ M5 ใส่ crossfade เข้ามา overlay ของเราเองจะขับ capture+diff ที่ 60fps ตลอดเวลาโดยไม่เจออะไร กินคอร์ทิ้งแบบเงียบๆ
+  → `CaptureService.WaitForFrame` ยังอยู่แต่ production ไม่ใช้แล้ว (เหลือไว้ให้ `CaptureProbe`) **อย่าเอากลับมาต่อ**
 
 ---
 
