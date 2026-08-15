@@ -46,4 +46,8 @@ desktop.ini
 
 # === Scratch ===
 tmp/
+temp/
 scratch/
+
+# === Test images (ภาพเกมมีลิขสิทธิ์ ห้าม commit) ===
+spikes/**/images/

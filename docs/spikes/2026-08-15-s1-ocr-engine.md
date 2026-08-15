@@ -143,11 +143,59 @@ Paddle เองก็อ่านเพี้ยน (`UP DATELES`) — กา�
 
 ---
 
+## 5.1 รอบเพิ่มเติม — ภาพจริงจากผู้ใช้ (Helldivers 2 briefing)
+
+ภาพ briefing panel ขนาด 895×608 (webp — WinRT `BitmapDecoder` อ่านได้เลยไม่ต้องแปลง)
+
+**Latency: 40ms (cold) → 22–27ms (warm)**
+
+**Accuracy: อ่านถูกทุกคำ** ผิดจุดเดียวคือไอคอนนาฬิกา `⏱` ถูกอ่านเป็นตัวอักษร `Ö`
+
+```
+PANDION-XXIV                                          ✓
+TERMINID CONTROL                                      ✓
+BRIEFING                                              ✓
+MISSION                    |  Ö 40 MINUTES            ⚠ icon → "Ö"
+EMERGENCY EVACUATION                                  ✓
+A group of Class-A citizens are stranded at a priority ✓
+evacuation port. We cannot leave these patriots to     ✓
+be slaughtered by the Terminids.                       ✓
+Get to the port and secure the evacuation of as        ✓
+many civilians as can fit aboard the designated        ✓
+transport shuttle.                                     ✓
+```
+
+แถบ progress ลายทแยงกับเลข `1` ไม่ถูกอ่าน — ดี เพราะเป็น noise ที่ไม่ต้องแปล
+
+### ตัวเลข tuning สำหรับ text grouping (O5)
+
+วัดช่องว่างแนวตั้งระหว่างบรรทัดจากภาพจริง หารด้วยความสูงบรรทัด:
+
+| ความสัมพันธ์ | gap ratio |
+|---|---|
+| บรรทัดในย่อหน้าเดียวกัน | **0.08** |
+| หัวข้อ → เนื้อความ | **0.92** |
+| ข้ามย่อหน้า | **1.16** |
+
+Reference ใช้ `verticalThresholdRatio = 1.0` และ `paragraphGapRatio = 2.0`
+→ 1.16 กับ 1.0 ห่างกันแค่ 16% เสี่ยงพลิกได้ง่ายถ้า font/spacing ต่างไปนิดเดียว
+→ 0.92 < 1.0 แปลว่า**หัวข้อจะถูกกลืนรวมกับย่อหน้า**
+
+**ควรตั้ง threshold ราว 0.4–0.5** — ห่างจาก 0.08 และ 0.92 ทั้งสองฝั่ง ทนความแปรปรวนได้มากกว่า
+(ตัวเลขนี้มาจากภาพเดียว ต้องยืนยันกับภาพชุดใหญ่ตอน implement)
+
+### กรณี 2 คอลัมน์บนแถวเดียวกัน
+
+`MISSION` (x=187) กับ `40 MINUTES` (x=589) อยู่แถวเดียวกัน ช่องว่างแนวนอน 299px
+→ column detection ของ O5 แยกออกจากกันได้ถูกต้อง ไม่รวมเป็นประโยคเดียว
+
+---
+
 ## 6. ข้อจำกัดของการทดสอบนี้
 
 **ยังไม่ได้ทดสอบเคสที่ยากที่สุด**: subtitle ตัวอักษรขาวลอยบนวิดีโอที่เคลื่อนไหว **โดยไม่มีกล่องพื้นหลัง**
 
-ภาพทั้ง 92 ที่ใช้เป็น official promo shot ซึ่งเป็น**กล่องข้อความ/หน้าจอ UI** ทั้งหมด — เป็นเนื้อหาประเภทเดียวกับ Helldivers 2 briefing panel ที่เป็นตัวอย่างตั้งต้น แต่ไม่ครอบคลุม subtitle แบบลอยบนภาพ
+ภาพทั้งหมดที่ทดสอบ (92 promo shot + 1 ภาพจริงจากผู้ใช้) เป็น**กล่องข้อความ/หน้าจอ UI** ที่มีพื้นหลังทึบหรือกึ่งทึบทั้งสิ้น ยังไม่ครอบคลุม subtitle แบบลอยบนภาพ
 
 ยังไม่ได้ทดสอบ:
 - ข้อความขาวไม่มีพื้นหลัง บนฉากสว่าง (contrast ต่ำ)
