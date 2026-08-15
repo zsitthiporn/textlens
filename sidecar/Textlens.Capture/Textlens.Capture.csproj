@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Windows-only by design (CLAUDE.md invariant 5). The 10.0.19041.0 SDK
+         suffix is what pulls in the WinRT projections for Windows.Media.Ocr
+         and Windows.Graphics.Capture. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Windows 10 2004 is the floor for the WGC region-capture API we need. -->
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Textlens.Capture</AssemblyName>
+    <RootNamespace>Textlens.Capture</RootNamespace>
+    <Version>0.1.0</Version>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Publish shape: self-contained NativeAOT single native exe.
+       NativeAOT already emits one standalone native binary, so PublishSingleFile
+       (a CoreCLR bundler feature) is neither needed nor applicable here.
+       RuntimeIdentifier is publish-scoped so that `dotnet build` and the test
+       project's ProjectReference stay RID-agnostic. -->
+  <PropertyGroup>
+    <!-- PublishAot already implies SelfContained at publish time, so setting
+         SelfContained here too would only force a RID onto plain `dotnet build`
+         and drag the test project's ProjectReference along with it. -->
+    <PublishAot>true</PublishAot>
+    <RuntimeIdentifier Condition="'$(_IsPublishing)' == 'true'">win-x64</RuntimeIdentifier>
+    <!-- Sidecar is a console process; keep symbols out of the shipped exe. -->
+    <DebugType>portable</DebugType>
+    <StripSymbols>true</StripSymbols>
+    <!-- Favour size: this exe ships next to the Electron app. -->
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <!-- Deliberately NOT setting UseSystemResourceKeys: it strips exception
+         messages down to bare resource keys, which would turn a sidecar crash
+         into an undiagnosable one (CLAUDE.md invariant 4). We are ~1.6MB against
+         a 20MB budget, so there is no reason to buy size with legibility. -->
+  </PropertyGroup>
+
+</Project>
