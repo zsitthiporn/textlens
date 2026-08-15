@@ -476,11 +476,19 @@ Feature O6 — **จุดที่ reference พลาด** เขาเอา�
 
 ฟังก์ชันเดียวที่แปลง bbox จาก physical px (อ้างอิง region) → logical px (อ้างอิง virtual desktop)
 
-```
-logicalX = (regionX + bboxX) / scale + monitorBoundsX
+```ts
+// logical origin ของจอ มาจาก Electron ไม่ใช่จาก wire
+logicalX = (regionX + bboxX) / scale + display.bounds.x
 ```
 
-- ห้ามมีการหาร/คูณ scale ที่อื่นในโค้ดเบสอีก
+- **ห้ามมีการหาร/คูณ scale ที่อื่นในโค้ดเบสอีก**
+- `display` คือ Electron `Display` object ที่ M6-01 เลือกไว้และถือไว้ — **ไม่ใช่ `monitor.bounds` ที่มาจาก wire**
+
+> ⚠️ **สูตรเดิมในเอกสารนี้เคยเขียนว่า `+ monitorBoundsX` โดยหมายถึงค่าจาก wire ซึ่งผิด** (ตัดสินแล้ว 2026-08-16)
+> `monitor.bounds` บน wire เป็น **physical px** ดิบจาก Win32 — sidecar ไม่คำนวณ scale เลย ตาม invariant #1
+> แต่ **logical origin ของจอคำนวณจาก physical origin ไม่ได้** เมื่อจอมี DPI ต่างกัน เพราะ Chromium จัด DIP layout ให้จอติดกันในพื้นที่ logical ไม่ใช่หาร physical ด้วย scale ของจอตัวเอง
+> ตัวอย่างที่พิสูจน์: จอ A 3840×2160 @200% ที่ physical (0,0) + จอ B 1920×1080 @100% ที่ physical (3840,0) → Electron ให้ B อยู่ที่ DIP x = **1920** ไม่ใช่ `3840 / 1.0 = 3840`
+> ดังนั้น origin ต้องมาจาก `screen.getAllDisplays()` เท่านั้น — และไม่ต้อง match `\\.\DISPLAY1` กับ Electron id เพราะ M6-01 เป็นคนเลือกจอฝั่ง Node อยู่แล้ว จึงถือ `Display` object ไว้ได้ตั้งแต่ต้น
 
 ## Acceptance criteria
 

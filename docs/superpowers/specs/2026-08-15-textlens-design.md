@@ -117,9 +117,22 @@ Textlens จับภาพพื้นที่บนหน้าจอ อ่�
 | ชั้น | หน่วย | origin |
 |---|---|---|
 | sidecar | physical px | มุมซ้ายบนของ **region** |
-| wire | physical px + `scale` + `monitor.bounds` + `region` มาด้วยเสมอ | |
+| wire | physical px + `scale` + `monitor.bounds` + `region` มาด้วยเสมอ — **`monitor.bounds` เป็น physical px ดิบจาก Win32** | |
 | Node | แปลงเป็น **logical px, screen-global** ที่จุดเดียว | มุมซ้ายบนของ virtual desktop |
 | renderer | CSS px | มุมซ้ายบนของ overlay window |
+
+**logical origin ของจอมาจาก Electron ไม่ใช่จาก wire** (ตัดสิน 2026-08-16 หลัง M1-03 ชี้ความกำกวมนี้)
+
+```ts
+logicalX = (regionX + bboxX) / scale + display.bounds.x   // display = Electron Display ที่ M6-01 เลือกไว้
+```
+
+เหตุผล: เมื่อจอมี DPI ต่างกัน **คำนวณ logical origin จาก physical origin ไม่ได้** เพราะ Chromium จัด DIP layout ให้จอติดกันในพื้นที่ logical ไม่ใช่หาร physical ด้วย scale ของจอตัวเอง
+
+> จอ A 3840×2160 @200% ที่ physical (0,0) · จอ B 1920×1080 @100% ที่ physical (3840,0)
+> → Electron รายงาน B อยู่ที่ DIP x = **1920** ไม่ใช่ `3840 / 1.0 = 3840`
+
+`monitor.bounds` บน wire จึงเป็นข้อมูลประกอบ/diagnostic — sidecar ไม่คำนวณ scale เลย (invariant #1) และ scale math ทั้งหมดยังอยู่ใน `coordinates.ts` ไฟล์เดียว (invariant #3)
 
 มี converter ตัวเดียว มี unit test ครอบทุกกรณี (scale 1.0 / 1.25 / 1.5, จอเดี่ยว / หลายจอ / จอซ้ายของ primary ที่ x ติดลบ)
 
