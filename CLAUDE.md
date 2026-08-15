@@ -88,6 +88,9 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 | **Node/npm ใน Git Bash** | `node -v` ล้มด้วย `stdin is not a tty` → รัน node/npm ผ่าน PowerShell |
 | **WinRT interop จาก PowerShell** | ต้อง Windows PowerShell 5.1 เท่านั้น ไม่ใช่ pwsh 7 |
 | **Electron binary** | Electron 43 ไม่มี postinstall — `npm install` **ไม่** โหลด binary มาให้ มันโหลดตอนเรียกครั้งแรก (~226MB) CI ควร warm ด้วย `npx install-electron` |
+| **Electron ESM main + top-level await** | main entry ที่เป็น ESM แล้วมี top-level `await` จะ**ค้าง** — message loop ไม่เริ่มจนกว่า entry module จะ evaluate จบ |
+| **bounds ของ BrowserWindow บนจอรอง** | ขนาดที่ส่งใน constructor **เชื่อไม่ได้บนจอที่ไม่ใช่ primary** — ขอ 1080×1920 บน `DISPLAY2` ได้กลับมา 1080×**1872** (เท่ากับ workArea พอดี) จอ primary ไม่เป็น → บั๊กแบบนี้หลุดไปได้ง่าย **ต้อง `setBounds` ซ้ำหลังสร้าง แล้วตรวจผล** |
+| **winston ใช้ไม่ได้กับงานนี้** | วัดจริงแล้ว: File transport + `maxsize` เขียนได้ **0 byte** เมื่อ burst ใน tick เดียว (ข้อมูลหายหมด) · `winston-daily-rotate-file` ไม่เคารพ `maxFiles` เหลือ 28 ไฟล์ทั้งที่ขอ 3 → ใช้ `pino` + `pino-roll` แบบ direct destination stream (ไม่ใช่ `pino.transport()` เพราะ worker thread หา path ใน asar ไม่เจอ) |
 | **TypeScript** | pin ไว้ที่ 5.9.3 · `latest` บน npm ตอนนี้คือ 7.0.2 (native port) — `npm i -D typescript` เปล่าๆ จะดึง TS 7 มาทั้งโปรเจกต์ |
 
 ## Commands

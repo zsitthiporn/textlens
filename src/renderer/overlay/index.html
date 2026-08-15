@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'"
+    />
+    <title>Textlens overlay</title>
+    <link rel="stylesheet" href="./overlay.css" />
+  </head>
+  <body>
+    <!--
+      Everything here is the M1-05 test target, not the real overlay UI (that is M5).
+      It exists to make three otherwise invisible properties visible: that the window
+      covers the whole display, that the parts we did not paint are genuinely
+      see-through, and that what we did paint is legible over anything.
+    -->
+    <div class="edge edge--top"></div>
+    <div class="edge edge--right"></div>
+    <div class="edge edge--bottom"></div>
+    <div class="edge edge--left"></div>
+
+    <div class="corner corner--tl">TL</div>
+    <div class="corner corner--tr">TR</div>
+    <div class="corner corner--bl">BL</div>
+    <div class="corner corner--br">BR</div>
+
+    <div class="probe">
+      <p class="probe__label">Textlens overlay — M1-05 test box</p>
+      <!-- Thai on purpose: three stacked diacritic levels are what the 1.7 line-height
+           in overlay.css is for, and a box that looks fine in Latin can still clip them. -->
+      <p class="probe__thai" lang="th">คุณต้องหากุญแจให้เจอก่อนที่ประตูจะปิด</p>
+      <dl class="probe__facts">
+        <dt>viewport</dt>
+        <dd id="viewport">—</dd>
+        <dt>devicePixelRatio</dt>
+        <dd id="dpr">—</dd>
+        <dt>clicks</dt>
+        <dd id="clicks">0 (should stay 0 — clicks pass through)</dd>
+      </dl>
+    </div>
+
+    <script type="module" src="./overlay.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+/*
+ * Overlay chrome for M1-05.
+ *
+ * The one rule that is not cosmetic: **nothing may paint an opaque background on
+ * `html` or `body`**. A transparent BrowserWindow shows whatever the document paints,
+ * so a single `background: #fff` from a reset turns the click-through overlay into an
+ * opaque sheet covering the user's screen.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent; /* load-bearing - see above */
+  overflow: hidden;
+  /* The window ignores mouse events anyway; this stops the renderer from showing a
+     text caret or selection if that ever changes. */
+  user-select: none;
+  cursor: default;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/*
+ * A thin frame right at the window edge. If the overlay were sized to `workArea`
+ * instead of `bounds`, the bottom edge would sit above the taskbar instead of behind
+ * it, and this line is how you see that at a glance.
+ */
+.edge {
+  position: fixed;
+  background: #ff2d95;
+  box-shadow: 0 0 8px rgb(255 45 149 / 90%);
+}
+
+.edge--top,
+.edge--bottom {
+  left: 0;
+  width: 100%;
+  height: 3px;
+}
+
+.edge--top {
+  top: 0;
+}
+
+.edge--bottom {
+  bottom: 0;
+}
+
+.edge--left,
+.edge--right {
+  top: 0;
+  width: 3px;
+  height: 100%;
+}
+
+.edge--left {
+  left: 0;
+}
+
+.edge--right {
+  right: 0;
+}
+
+.corner {
+  position: fixed;
+  padding: 4px 8px;
+  background: #ff2d95;
+  color: #12000a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.corner--tl {
+  top: 3px;
+  left: 3px;
+}
+
+.corner--tr {
+  top: 3px;
+  right: 3px;
+}
+
+.corner--bl {
+  bottom: 3px;
+  left: 3px;
+}
+
+.corner--br {
+  bottom: 3px;
+  right: 3px;
+}
+
+/*
+ * The solid test box. Opaque fill plus a light outline, so it reads against a white
+ * document, a dark game and a photograph alike.
+ */
+.probe {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 420px;
+  padding: 20px 26px;
+  background: #10041b;
+  border: 3px solid #ff2d95;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 65%), 0 18px 48px rgb(0 0 0 / 65%);
+  color: #f4f0ff;
+}
+
+.probe__label {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/*
+ * Thai stacks a vowel above, a tone mark above that, and a vowel below - three levels
+ * on one line. Anything under about 1.6 clips the tone marks (CLAUDE.md).
+ */
+.probe__thai {
+  margin: 0 0 14px;
+  font-size: 22px;
+  line-height: 1.7;
+  color: #ffe14d;
+}
+
+.probe__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 13px;
+  color: #c9bfe0;
+}
+
+.probe__facts dt {
+  text-align: right;
+  color: #8d81ab;
+}
+
+.probe__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

@@ -7,7 +7,7 @@
   "type": "module",
   "main": "dist/main/index.js",
   "engines": {
-    "node": ">=20.19.0",
+    "node": ">=22.12.0",
     "npm": ">=10"
   },
   "scripts": {
@@ -26,5 +26,9 @@
     "typescript": "^5.9.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "pino": "^10.3.1",
+    "pino-roll": "^4.0.0"
   }
 }
