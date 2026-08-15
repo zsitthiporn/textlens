@@ -1,15 +1,14 @@
-using System.Reflection;
 using System.Text;
-using System.Text.Json;
+using Textlens.Capture.Protocol;
 
 namespace Textlens.Capture;
 
 /// <summary>
 /// Sidecar entry point.
 ///
-/// Scaffold only (issue M1-02). The real capture/diff/OCR pipeline lands in M2,
-/// and the full command/event schema lands in M1-03 — this file deliberately
-/// implements neither. It does exactly three things:
+/// Scaffold only (issue M1-02). The real capture/diff/OCR pipeline lands in M2 and
+/// the stdin command dispatcher lands in M2-06 — this file deliberately implements
+/// neither. It does exactly three things:
 ///
 ///   1. proves WinRT is reachable from the published (NativeAOT) binary,
 ///   2. emits the <c>ready</c> event on stdout,
@@ -48,15 +47,19 @@ internal static class Program
             return 1;
         }
 
-        stdout.WriteLine(BuildReadyEvent(Version));
+        stdout.WriteLine(ProtocolCodec.Encode(new ReadyEvent
+        {
+            Version = Version,
+            OcrLanguages = InstalledOcrLanguages(),
+        }));
 
-        // Hold the process open on stdin. M1-03 replaces this with the command
+        // Hold the process open on stdin. M2-06 replaces this with the command
         // dispatcher; for now every line is consumed and ignored. A null read means
         // the parent closed the pipe, which is our shutdown signal.
         using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
         while (stdin.ReadLine() is not null)
         {
-            // Intentionally empty — see M1-03.
+            // Intentionally empty — see M2-06.
         }
 
         return 0;
@@ -73,22 +76,29 @@ internal static class Program
     }
 
     /// <summary>
-    /// Builds the single event this scaffold emits. Written with
-    /// <see cref="Utf8JsonWriter"/> rather than a serialized DTO: it is
-    /// reflection-free (so NativeAOT-safe) and avoids inventing protocol types
-    /// that belong to M1-03.
+    /// BCP-47 tags of the OCR recognizers installed on this machine.
+    ///
+    /// Enumerated at runtime, never hardcoded: the design doc's example lists
+    /// <c>["en-US","th-TH"]</c> but that is an illustration, and the whole point of
+    /// shipping this list is that feature O8 can tell the user which recognizer is
+    /// missing. An empty array is a legitimate answer and a meaningful one.
     /// </summary>
-    private static string BuildReadyEvent(string version)
+    private static string[] InstalledOcrLanguages()
     {
-        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
+        try
         {
-            writer.WriteStartObject();
-            writer.WriteString("ev", "ready");
-            writer.WriteString("version", version);
-            writer.WriteEndObject();
+            return Windows.Media.Ocr.OcrEngine.AvailableRecognizerLanguages
+                .Select(language => language.LanguageTag)
+                .ToArray();
         }
-
-        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+        catch (Exception ex)
+        {
+            // Distinguish "the query failed" from "nothing is installed" in the log,
+            // since both end up as an empty array on the wire. Not fatal: the
+            // preflight check that acts on this is feature O8.
+            Console.Error.WriteLine(
+                $"WARN: could not enumerate OCR recognizers: {ex.GetType().FullName}: {ex.Message}");
+            return [];
+        }
     }
 }

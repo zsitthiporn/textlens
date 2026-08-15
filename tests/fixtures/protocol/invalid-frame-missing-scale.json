@@ -1,0 +1,1 @@
+{"ev":"frame","seq":44,"timings":{"capture":12,"diff":3,"ocr":58},"monitor":{"id":"\\\\.\\DISPLAY1","bounds":[0,0,3840,2160]},"region":[400,1800,1200,150],"lines":[{"text":"You must find the key","bbox":[120,80,540,32],"conf":0.93}]}
