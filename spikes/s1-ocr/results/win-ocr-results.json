@@ -1,0 +1,4986 @@
+﻿[
+    {
+        "file":  "bg3_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  99,
+        "ocrMs":  132,
+        "lineCount":  1,
+        "charCount":  3,
+        "text":  "1),",
+        "lines":  [
+                      {
+                          "text":  "1),",
+                          "bbox":  [
+                                       1656,
+                                       154,
+                                       40,
+                                       37
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "bg3_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  12,
+        "ocrMs":  73,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  21,
+        "ocrMs":  130,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  78,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  41,
+        "ocrMs":  112,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  167,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  152,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "bg3_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  85,
+        "lineCount":  1,
+        "charCount":  5,
+        "text":  "10/10",
+        "lines":  [
+                      {
+                          "text":  "10/10",
+                          "bbox":  [
+                                       36,
+                                       1024,
+                                       34,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "cyberpunk_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  26,
+        "ocrMs":  63,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  59,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  79,
+        "lineCount":  35,
+        "charCount":  233,
+        "text":  "SET V\u0027S APPEARANCE IN NIGHT CITY, L PROTOCOL o 6S20-A44 PRESETS lhe Night City Resident Database YTHING. HAIRSTYLE HAIR COLOR EYE COLOR EYEBROWS 000 000 ooo ooo RANDOMIZE data EYEBROW COLOR 000 ooo EYELASH COLOR ooo ooo RFAPn @BACK CUSTOMIZE YOUR LOOK 50 nq CON FIRM SELECT SCROLL",
+        "lines":  [
+                      {
+                          "text":  "SET V\u0027S APPEARANCE",
+                          "bbox":  [
+                                       683,
+                                       21,
+                                       298,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "IN NIGHT CITY, L",
+                          "bbox":  [
+                                       607,
+                                       73,
+                                       120,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "PROTOCOL o",
+                          "bbox":  [
+                                       52,
+                                       83,
+                                       134,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "6S20-A44",
+                          "bbox":  [
+                                       52,
+                                       95,
+                                       59,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "PRESETS",
+                          "bbox":  [
+                                       76,
+                                       135,
+                                       87,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "lhe",
+                          "bbox":  [
+                                       203,
+                                       984,
+                                       15,
+                                       7
+                                   ]
+                      },
+                      {
+                          "text":  "Night City",
+                          "bbox":  [
+                                       129,
+                                       985,
+                                       63,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "Resident",
+                          "bbox":  [
+                                       129,
+                                       1004,
+                                       56,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Database",
+                          "bbox":  [
+                                       129,
+                                       1023,
+                                       60,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "YTHING.",
+                          "bbox":  [
+                                       846,
+                                       74,
+                                       58,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "HAIRSTYLE",
+                          "bbox":  [
+                                       1289,
+                                       171,
+                                       106,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "HAIR COLOR",
+                          "bbox":  [
+                                       1289,
+                                       283,
+                                       117,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "EYE COLOR",
+                          "bbox":  [
+                                       1289,
+                                       395,
+                                       105,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "EYEBROWS",
+                          "bbox":  [
+                                       1289,
+                                       508,
+                                       108,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1487,
+                                       331,
+                                       25,
+                                       10
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1487,
+                                       344,
+                                       25,
+                                       10
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1487,
+                                       444,
+                                       24,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1487,
+                                       457,
+                                       24,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "RANDOMIZE",
+                          "bbox":  [
+                                       235,
+                                       824,
+                                       97,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "data",
+                          "bbox":  [
+                                       222,
+                                       984,
+                                       20,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "EYEBROW COLOR",
+                          "bbox":  [
+                                       1289,
+                                       620,
+                                       166,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1487,
+                                       668,
+                                       25,
+                                       10
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1487,
+                                       681,
+                                       25,
+                                       10
+                                   ]
+                      },
+                      {
+                          "text":  "EYELASH COLOR",
+                          "bbox":  [
+                                       1289,
+                                       732,
+                                       159,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1487,
+                                       781,
+                                       25,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1487,
+                                       794,
+                                       25,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "RFAPn",
+                          "bbox":  [
+                                       1289,
+                                       844,
+                                       64,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "@BACK",
+                          "bbox":  [
+                                       1344,
+                                       918,
+                                       81,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "CUSTOMIZE YOUR LOOK",
+                          "bbox":  [
+                                       1521,
+                                       94,
+                                       231,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "50",
+                          "bbox":  [
+                                       1698,
+                                       170,
+                                       23,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "nq",
+                          "bbox":  [
+                                       1697,
+                                       845,
+                                       24,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "CON",
+                          "bbox":  [
+                                       1617,
+                                       926,
+                                       33,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "FIRM",
+                          "bbox":  [
+                                       1652,
+                                       926,
+                                       38,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "SELECT",
+                          "bbox":  [
+                                       1644,
+                                       1006,
+                                       72,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "SCROLL",
+                          "bbox":  [
+                                       1795,
+                                       1007,
+                                       76,
+                                       18
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "cyberpunk_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  108,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  132,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  138,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  30,
+        "ocrMs":  144,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "cyberpunk_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  20,
+        "ocrMs":  117,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "deathstranding_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  85,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  12,
+        "ocrMs":  80,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  57,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  56,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  11,
+        "ocrMs":  72,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  35,
+        "ocrMs":  102,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  12,
+        "ocrMs":  54,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "deathstranding_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  55,
+        "lineCount":  1,
+        "charCount":  169,
+        "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+        "lines":  [
+                      {
+                          "text":  "Captured from PC. 02020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. 0 2020 CD PROJEKT S.A.",
+                          "bbox":  [
+                                       618,
+                                       964,
+                                       1294,
+                                       13
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "detroit_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  110,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_1.jpg",
+        "width":  1920,
+        "height":  1079,
+        "decodeMs":  20,
+        "ocrMs":  165,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_2.jpg",
+        "width":  1920,
+        "height":  1079,
+        "decodeMs":  32,
+        "ocrMs":  138,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  24,
+        "ocrMs":  269,
+        "lineCount":  1,
+        "charCount":  3,
+        "text":  "700",
+        "lines":  [
+                      {
+                          "text":  "700",
+                          "bbox":  [
+                                       171,
+                                       854,
+                                       21,
+                                       12
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "detroit_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  99,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  90,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  22,
+        "ocrMs":  83,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "detroit_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  148,
+        "lineCount":  2,
+        "charCount":  12,
+        "text":  "ANDROID RK800",
+        "lines":  [
+                      {
+                          "text":  "ANDROID",
+                          "bbox":  [
+                                       718,
+                                       691,
+                                       446,
+                                       83
+                                   ]
+                      },
+                      {
+                          "text":  "RK800",
+                          "bbox":  [
+                                       828,
+                                       905,
+                                       217,
+                                       51
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  141,
+        "lineCount":  5,
+        "charCount":  34,
+        "text":  "\"Nice one, Cuno!!\" 500 12:00 Day I ooo ooo",
+        "lines":  [
+                      {
+                          "text":  "\"Nice one, Cuno!!\"",
+                          "bbox":  [
+                                       400,
+                                       206,
+                                       187,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "500 12:00",
+                          "bbox":  [
+                                       1692,
+                                       976,
+                                       154,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Day I",
+                          "bbox":  [
+                                       1861,
+                                       987,
+                                       38,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1233,
+                                       1017,
+                                       44,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1233,
+                                       1039,
+                                       44,
+                                       20
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  147,
+        "lineCount":  64,
+        "charCount":  538,
+        "text":  "INTELLECT PSYCHE PHYSIQUE MOTORICS LOGIC 000000 VOLITION 00 000000 ENDURANCE ooe HAND / EYE COORDINATION LACCEPT ENCYCLOPEDIA 00 INLAND EMPIRE 000060 PAIN THRESHOLD RCEPTION RHETORIC 00 EMPATHY 0 00 PHYSICAL INSTRUMENT 00 REACTION SPEED DRAMA AUTHORITY 000000 ELECTRO- CHEMISTRY 00 SAVOIRFAIRE 5 CONCEPTUALIZATION ESPRIT DE CORPS •0080\u0026 SHIVERS INTERFACING VISUAL CALCULUS 00 ooo SUGGESTION 000000 HALF LIGHT COMPOSURE ooo ooo CHARACTER SHEET 000000 AUTHORITY Intimidate the public. Assert yourself. Psyche:+5 Learned skill:O Bonus from items: Bonus from thoughts: EXPERIENCE: 75/100 SKILL POINTS:. o o TOTAL: O BEVERT x _ / CHR",
+        "lines":  [
+                      {
+                          "text":  "INTELLECT",
+                          "bbox":  [
+                                       137,
+                                       276,
+                                       107,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "PSYCHE",
+                          "bbox":  [
+                                       151,
+                                       506,
+                                       78,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "PHYSIQUE",
+                          "bbox":  [
+                                       139,
+                                       738,
+                                       102,
+                                       22
+                                   ]
+                      },
+                      {
+                          "text":  "MOTORICS",
+                          "bbox":  [
+                                       137,
+                                       965,
+                                       106,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "LOGIC",
+                          "bbox":  [
+                                       405,
+                                       278,
+                                       43,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "000000",
+                          "bbox":  [
+                                       369,
+                                       473,
+                                       116,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "VOLITION",
+                          "bbox":  [
+                                       391,
+                                       509,
+                                       70,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00",
+                          "bbox":  [
+                                       409,
+                                       685,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "000000",
+                          "bbox":  [
+                                       369,
+                                       703,
+                                       116,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "ENDURANCE",
+                          "bbox":  [
+                                       381,
+                                       739,
+                                       92,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "ooe",
+                          "bbox":  [
+                                       409,
+                                       929,
+                                       55,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "HAND / EYE",
+                          "bbox":  [
+                                       377,
+                                       952,
+                                       85,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COORDINATION",
+                          "bbox":  [
+                                       363,
+                                       968,
+                                       113,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "LACCEPT",
+                          "bbox":  [
+                                       345,
+                                       1012,
+                                       118,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "ENCYCLOPEDIA",
+                          "bbox":  [
+                                       535,
+                                       279,
+                                       115,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00",
+                          "bbox":  [
+                                       622,
+                                       473,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "INLAND EMPIRE",
+                          "bbox":  [
+                                       536,
+                                       509,
+                                       114,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "000060",
+                          "bbox":  [
+                                       542,
+                                       692,
+                                       116,
+                                       27
+                                   ]
+                      },
+                      {
+                          "text":  "PAIN THRESHOLD",
+                          "bbox":  [
+                                       524,
+                                       739,
+                                       128,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "RCEPTION",
+                          "bbox":  [
+                                       572,
+                                       967,
+                                       74,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "RHETORIC",
+                          "bbox":  [
+                                       737,
+                                       279,
+                                       74,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00",
+                          "bbox":  [
+                                       795,
+                                       473,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "EMPATHY",
+                          "bbox":  [
+                                       738,
+                                       508,
+                                       71,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "0 00",
+                          "bbox":  [
+                                       755,
+                                       703,
+                                       76,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "PHYSICAL",
+                          "bbox":  [
+                                       733,
+                                       723,
+                                       72,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "INSTRUMENT",
+                          "bbox":  [
+                                       720,
+                                       739,
+                                       98,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00",
+                          "bbox":  [
+                                       755,
+                                       933,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "REACTION SPEED",
+                          "bbox":  [
+                                       698,
+                                       968,
+                                       127,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "DRAMA",
+                          "bbox":  [
+                                       917,
+                                       279,
+                                       55,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "AUTHORITY",
+                          "bbox":  [
+                                       903,
+                                       508,
+                                       86,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "000000",
+                          "bbox":  [
+                                       888,
+                                       703,
+                                       116,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "ELECTRO-",
+                          "bbox":  [
+                                       908,
+                                       723,
+                                       76,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "CHEMISTRY",
+                          "bbox":  [
+                                       902,
+                                       739,
+                                       85,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00",
+                          "bbox":  [
+                                       928,
+                                       932,
+                                       38,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "SAVOIRFAIRE",
+                          "bbox":  [
+                                       896,
+                                       967,
+                                       100,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "5",
+                          "bbox":  [
+                                       1007,
+                                       499,
+                                       11,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "CONCEPTUALIZATION",
+                          "bbox":  [
+                                       1043,
+                                       280,
+                                       134,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "ESPRIT",
+                          "bbox":  [
+                                       1092,
+                                       492,
+                                       52,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "DE CORPS",
+                          "bbox":  [
+                                       1082,
+                                       509,
+                                       74,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "•0080\u0026",
+                          "bbox":  [
+                                       1050,
+                                       685,
+                                       134,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "SHIVERS",
+                          "bbox":  [
+                                       1088,
+                                       738,
+                                       63,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "INTERFACING",
+                          "bbox":  [
+                                       1070,
+                                       967,
+                                       98,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "VISUAL",
+                          "bbox":  [
+                                       1267,
+                                       263,
+                                       53,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "CALCULUS",
+                          "bbox":  [
+                                       1255,
+                                       279,
+                                       78,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "00 ooo",
+                          "bbox":  [
+                                       1234,
+                                       473,
+                                       116,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "SUGGESTION",
+                          "bbox":  [
+                                       1244,
+                                       508,
+                                       94,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "000000",
+                          "bbox":  [
+                                       1234,
+                                       703,
+                                       116,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "HALF LIGHT",
+                          "bbox":  [
+                                       1250,
+                                       738,
+                                       84,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COMPOSURE",
+                          "bbox":  [
+                                       1244,
+                                       964,
+                                       95,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1232,
+                                       1015,
+                                       46,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1232,
+                                       1041,
+                                       46,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "CHARACTER SHEET",
+                          "bbox":  [
+                                       1490,
+                                       22,
+                                       344,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "000000",
+                          "bbox":  [
+                                       1523,
+                                       545,
+                                       220,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "AUTHORITY",
+                          "bbox":  [
+                                       1546,
+                                       593,
+                                       181,
+                                       27
+                                   ]
+                      },
+                      {
+                          "text":  "Intimidate the public. Assert yourself.",
+                          "bbox":  [
+                                       1464,
+                                       646,
+                                       271,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "Psyche:+5",
+                          "bbox":  [
+                                       1474,
+                                       711,
+                                       74,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "Learned skill:O",
+                          "bbox":  [
+                                       1474,
+                                       732,
+                                       106,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "Bonus from items:",
+                          "bbox":  [
+                                       1474,
+                                       753,
+                                       130,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "Bonus from thoughts:",
+                          "bbox":  [
+                                       1474,
+                                       774,
+                                       155,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "EXPERIENCE: 75/100",
+                          "bbox":  [
+                                       1444,
+                                       832,
+                                       146,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "SKILL POINTS:. o o",
+                          "bbox":  [
+                                       1444,
+                                       848,
+                                       187,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "TOTAL:",
+                          "bbox":  [
+                                       1713,
+                                       708,
+                                       55,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "O BEVERT x _",
+                          "bbox":  [
+                                       1624,
+                                       909,
+                                       212,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "/ CHR",
+                          "bbox":  [
+                                       1711,
+                                       1014,
+                                       145,
+                                       44
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  120,
+        "lineCount":  37,
+        "charCount":  523,
+        "text":  "INVENTORY INT PSY HEALTH: MORALE: FYS MOT 8/8 BONUSES FROM ITEMS: Logic: - Inland Empire: +2 Empathy: +1 Authority: Suggestion: - Physical Instrument: +4 Electrochemistry: +1 Shivers: +1 Savoir Faire: +3 E UIPPED NECK GLOVES HELD R 000 ooo + 1 Logic: Super logical for a COP to wear this SAMARAN CONICAL HAT -1 Suggestion: Insensitive bachelor party vibes This tawny cone-shaped hat looks like a beacon of Samaran wisdom, its straws sticking up like antennas. Thank god you can\u0027t really see people\u0027s reactions when they see you strolling around in this incredibly insensitive headpiece. TÖÖLS / / ITEMS / INTERACT CLOTHES I NV",
+        "lines":  [
+                      {
+                          "text":  "INVENTORY",
+                          "bbox":  [
+                                       90,
+                                       154,
+                                       209,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "INT",
+                          "bbox":  [
+                                       92,
+                                       287,
+                                       30,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "PSY",
+                          "bbox":  [
+                                       154,
+                                       287,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "HEALTH:",
+                          "bbox":  [
+                                       95,
+                                       353,
+                                       60,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "MORALE:",
+                          "bbox":  [
+                                       95,
+                                       396,
+                                       65,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "FYS",
+                          "bbox":  [
+                                       224,
+                                       287,
+                                       35,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "MOT",
+                          "bbox":  [
+                                       287,
+                                       287,
+                                       41,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "8/8",
+                          "bbox":  [
+                                       283,
+                                       353,
+                                       34,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "BONUSES FROM ITEMS:",
+                          "bbox":  [
+                                       93,
+                                       464,
+                                       163,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "Logic: -",
+                          "bbox":  [
+                                       94,
+                                       495,
+                                       52,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "Inland Empire:",
+                          "bbox":  [
+                                       94,
+                                       516,
+                                       101,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "+2",
+                          "bbox":  [
+                                       204,
+                                       518,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Empathy: +1",
+                          "bbox":  [
+                                       95,
+                                       539,
+                                       89,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Authority:",
+                          "bbox":  [
+                                       94,
+                                       562,
+                                       70,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Suggestion: -",
+                          "bbox":  [
+                                       94,
+                                       585,
+                                       89,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "Physical Instrument: +4",
+                          "bbox":  [
+                                       94,
+                                       607,
+                                       165,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Electrochemistry: +1",
+                          "bbox":  [
+                                       95,
+                                       629,
+                                       142,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Shivers:",
+                          "bbox":  [
+                                       94,
+                                       652,
+                                       53,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "+1",
+                          "bbox":  [
+                                       155,
+                                       653,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Savoir Faire: +3",
+                          "bbox":  [
+                                       94,
+                                       675,
+                                       108,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "E UIPPED",
+                          "bbox":  [
+                                       762,
+                                       220,
+                                       86,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "NECK",
+                          "bbox":  [
+                                       1054,
+                                       449,
+                                       25,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "GLOVES",
+                          "bbox":  [
+                                       1054,
+                                       532,
+                                       38,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "HELD R",
+                          "bbox":  [
+                                       1055,
+                                       695,
+                                       33,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1233,
+                                       1017,
+                                       44,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1233,
+                                       1039,
+                                       44,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "+ 1 Logic: Super logical for a COP to wear this",
+                          "bbox":  [
+                                       1582,
+                                       432,
+                                       297,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "SAMARAN CONICAL HAT",
+                          "bbox":  [
+                                       1302,
+                                       442,
+                                       247,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "-1 Suggestion: Insensitive bachelor party vibes",
+                          "bbox":  [
+                                       1582,
+                                       452,
+                                       312,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "This tawny cone-shaped hat looks like a beacon of Samaran",
+                          "bbox":  [
+                                       1322,
+                                       499,
+                                       424,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "wisdom, its straws sticking up like antennas. Thank god you",
+                          "bbox":  [
+                                       1322,
+                                       523,
+                                       429,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "can\u0027t really see people\u0027s reactions when they see you strolling",
+                          "bbox":  [
+                                       1322,
+                                       547,
+                                       437,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "around in this incredibly insensitive headpiece.",
+                          "bbox":  [
+                                       1322,
+                                       570,
+                                       340,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "TÖÖLS /",
+                          "bbox":  [
+                                       1334,
+                                       627,
+                                       84,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "/ ITEMS / INTERACT",
+                          "bbox":  [
+                                       1534,
+                                       628,
+                                       208,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "CLOTHES",
+                          "bbox":  [
+                                       1442,
+                                       630,
+                                       67,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "I NV",
+                          "bbox":  [
+                                       1793,
+                                       1018,
+                                       64,
+                                       38
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  239,
+        "lineCount":  98,
+        "charCount":  1526,
+        "text":  "THOUGHT CABINET INT PSY HEALTH: MORALE: FYS MOT don\u0027t INDIRECT MODES OF TAXATION s DU DETECTIVE COSTEAU GUILLAUM -MILLION ANTI-OBJECT TASK FORCE KINGDOM OF CONSCIENCE NATIONHOOD 4. SOME Kl SUPERSTA 86% BONUSES FROM THOUGHTS: Logic: - Visual Calculus: Authority: -1 Esprit de Corps: +1 Physical Instrument: -1 Electrochemistry: +1 Endurance: +1 Convalescence: +1 Pain Threshold: +1 Savoir Faire: +1 COMPRESSOR AZOVIAN SOCIO-ECONOMICS HOBOCOP SORT THOUGHTS BY: STATUS • • UILLAUME I.E I AON 20BOCOP LUMETRIC SHIT COMPRESSOR.\u0027 ME KIND OF SUPERSTAR AZOVIAN SOCIO-ECONOMICS S ADVENTURES DETECTIVE COSTEAW WI-OBJECT TASK FORCE NDIRECT MODES OF TAXATION KINGDOM OF CONSCIENCE RIGOROUS SELF -CRITIQUE REMOTE VIEWER COACH PHYSICAL INSTRUMENT COP OF THE APOCALYPSE COL DO MA MA DAQUA INEXPLICABLE FEMINIST AGENDA ACES HIGH ACES LOW LONESOME LONG WAY HOME TORQUE DORK REGULAR LAW OFFICIAL THE BOW COLLECTOR WHITE MOURNING APRICOT CHEWING GUM SCENTED ONE CAUSTIC ECHO BOIADEIRO ACTUAL ART DEGREE OVERPRODUCTIVE HONOUR GLANDS FINGER PISTOLS (9MM) MAGNESIUM-BASED LIFEFORM BRINGING OF THE LAW (LAW-JAW) ADVANCED RACE THEORY ooo ooo HOBOCOP Reveals extra special collector\u0027s edition tare bottles on the map More money from selling tare Learning cap for Shivers raised to 6 PROBLEM SOLUTION Technically, you wouldn\u0027t be a cop any more, but a hobo. That would mean game over for the cop chapter of your adventures — but who knows where the hobo part takes you? To the bar, the old assommoir, to the pier or the sewers? To La Royaume, where for three hundred years they interred the dead? You could plunder royalist crypts for long-forgotten triple malt bourbon, then fight the armakhaan beast that lurks the bottom-most sepulchers„. The secrets of the city are all yours, at last. EXPERIENCE: 50/100 SKILL POINTS: ORGET 0 THC",
+        "lines":  [
+                      {
+                          "text":  "THOUGHT CABINET",
+                          "bbox":  [
+                                       73,
+                                       151,
+                                       339,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "INT",
+                          "bbox":  [
+                                       92,
+                                       287,
+                                       30,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "PSY",
+                          "bbox":  [
+                                       154,
+                                       287,
+                                       36,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "HEALTH:",
+                          "bbox":  [
+                                       95,
+                                       353,
+                                       60,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "MORALE:",
+                          "bbox":  [
+                                       95,
+                                       396,
+                                       65,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "FYS",
+                          "bbox":  [
+                                       224,
+                                       287,
+                                       35,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "MOT",
+                          "bbox":  [
+                                       287,
+                                       287,
+                                       41,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "don\u0027t",
+                          "bbox":  [
+                                       566,
+                                       186,
+                                       52,
+                                       22
+                                   ]
+                      },
+                      {
+                          "text":  "INDIRECT MODES OF",
+                          "bbox":  [
+                                       455,
+                                       449,
+                                       152,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "TAXATION",
+                          "bbox":  [
+                                       492,
+                                       466,
+                                       78,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "s",
+                          "bbox":  [
+                                       590,
+                                       606,
+                                       9,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "DU DETECTIVE",
+                          "bbox":  [
+                                       476,
+                                       623,
+                                       109,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COSTEAU",
+                          "bbox":  [
+                                       495,
+                                       640,
+                                       72,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "GUILLAUM",
+                          "bbox":  [
+                                       476,
+                                       777,
+                                       79,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "-MILLION",
+                          "bbox":  [
+                                       497,
+                                       796,
+                                       65,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "ANTI-OBJECT TASK",
+                          "bbox":  [
+                                       643,
+                                       199,
+                                       146,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "FORCE",
+                          "bbox":  [
+                                       691,
+                                       216,
+                                       50,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "KINGDOM OF",
+                          "bbox":  [
+                                       668,
+                                       364,
+                                       96,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "CONSCIENCE",
+                          "bbox":  [
+                                       668,
+                                       381,
+                                       96,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "NATIONHOOD",
+                          "bbox":  [
+                                       665,
+                                       546,
+                                       102,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "4.",
+                          "bbox":  [
+                                       661,
+                                       664,
+                                       18,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "SOME Kl",
+                          "bbox":  [
+                                       661,
+                                       694,
+                                       62,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "SUPERSTA",
+                          "bbox":  [
+                                       670,
+                                       711,
+                                       82,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "86%",
+                          "bbox":  [
+                                       1033,
+                                       326,
+                                       29,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "BONUSES FROM THOUGHTS:",
+                          "bbox":  [
+                                       94,
+                                       466,
+                                       196,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "Logic: -",
+                          "bbox":  [
+                                       95,
+                                       495,
+                                       51,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "Visual Calculus:",
+                          "bbox":  [
+                                       94,
+                                       516,
+                                       108,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "Authority: -1",
+                          "bbox":  [
+                                       94,
+                                       539,
+                                       89,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Esprit de Corps:",
+                          "bbox":  [
+                                       94,
+                                       562,
+                                       108,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "+1",
+                          "bbox":  [
+                                       210,
+                                       563,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Physical Instrument: -1",
+                          "bbox":  [
+                                       95,
+                                       584,
+                                       158,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "Electrochemistry:",
+                          "bbox":  [
+                                       94,
+                                       606,
+                                       119,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "+1",
+                          "bbox":  [
+                                       221,
+                                       608,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Endurance: +1",
+                          "bbox":  [
+                                       94,
+                                       629,
+                                       101,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "Convalescence:",
+                          "bbox":  [
+                                       94,
+                                       652,
+                                       103,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "+1",
+                          "bbox":  [
+                                       206,
+                                       653,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "Pain Threshold: +1",
+                          "bbox":  [
+                                       95,
+                                       674,
+                                       130,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "Savoir Faire:",
+                          "bbox":  [
+                                       94,
+                                       697,
+                                       83,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "+1",
+                          "bbox":  [
+                                       185,
+                                       698,
+                                       16,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "COMPRESSOR",
+                          "bbox":  [
+                                       848,
+                                       441,
+                                       106,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "AZOVIAN",
+                          "bbox":  [
+                                       872,
+                                       589,
+                                       70,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "SOCIO-ECONOMICS",
+                          "bbox":  [
+                                       827,
+                                       606,
+                                       147,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "HOBOCOP",
+                          "bbox":  [
+                                       864,
+                                       763,
+                                       74,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "SORT THOUGHTS BY:",
+                          "bbox":  [
+                                       1111,
+                                       114,
+                                       145,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "STATUS • •",
+                          "bbox":  [
+                                       1095,
+                                       134,
+                                       95,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "UILLAUME I.E I AON",
+                          "bbox":  [
+                                       1077,
+                                       202,
+                                       146,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "20BOCOP",
+                          "bbox":  [
+                                       1068,
+                                       222,
+                                       67,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "LUMETRIC SHIT COMPRESSOR.\u0027",
+                          "bbox":  [
+                                       1087,
+                                       244,
+                                       220,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "ME KIND OF SUPERSTAR",
+                          "bbox":  [
+                                       1086,
+                                       264,
+                                       164,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "AZOVIAN SOCIO-ECONOMICS",
+                          "bbox":  [
+                                       1078,
+                                       284,
+                                       199,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "S ADVENTURES DETECTIVE COSTEAW",
+                          "bbox":  [
+                                       1080,
+                                       302,
+                                       227,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "WI-OBJECT TASK FORCE",
+                          "bbox":  [
+                                       1077,
+                                       326,
+                                       170,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "NDIRECT MODES OF TAXATION",
+                          "bbox":  [
+                                       1071,
+                                       346,
+                                       206,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "KINGDOM OF CONSCIENCE",
+                          "bbox":  [
+                                       1068,
+                                       367,
+                                       177,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "RIGOROUS SELF -CRITIQUE",
+                          "bbox":  [
+                                       1067,
+                                       388,
+                                       180,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "REMOTE VIEWER",
+                          "bbox":  [
+                                       1067,
+                                       408,
+                                       113,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COACH PHYSICAL INSTRUMENT",
+                          "bbox":  [
+                                       1067,
+                                       428,
+                                       212,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COP OF THE APOCALYPSE",
+                          "bbox":  [
+                                       1067,
+                                       449,
+                                       175,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "COL DO MA MA DAQUA",
+                          "bbox":  [
+                                       1067,
+                                       470,
+                                       153,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "INEXPLICABLE FEMINIST AGENDA",
+                          "bbox":  [
+                                       1067,
+                                       501,
+                                       224,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "ACES HIGH",
+                          "bbox":  [
+                                       1066,
+                                       521,
+                                       75,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "ACES LOW",
+                          "bbox":  [
+                                       1066,
+                                       542,
+                                       74,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "LONESOME LONG WAY HOME",
+                          "bbox":  [
+                                       1067,
+                                       563,
+                                       195,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "TORQUE DORK",
+                          "bbox":  [
+                                       1067,
+                                       583,
+                                       99,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "REGULAR LAW OFFICIAL",
+                          "bbox":  [
+                                       1067,
+                                       604,
+                                       161,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "THE BOW COLLECTOR",
+                          "bbox":  [
+                                       1066,
+                                       624,
+                                       149,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "WHITE MOURNING",
+                          "bbox":  [
+                                       1066,
+                                       645,
+                                       122,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "APRICOT CHEWING GUM SCENTED ONE",
+                          "bbox":  [
+                                       1066,
+                                       667,
+                                       234,
+                                       11
+                                   ]
+                      },
+                      {
+                          "text":  "CAUSTIC ECHO",
+                          "bbox":  [
+                                       1067,
+                                       686,
+                                       100,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "BOIADEIRO",
+                          "bbox":  [
+                                       1067,
+                                       707,
+                                       74,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "ACTUAL ART DEGREE",
+                          "bbox":  [
+                                       1066,
+                                       727,
+                                       144,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "OVERPRODUCTIVE HONOUR GLANDS",
+                          "bbox":  [
+                                       1067,
+                                       749,
+                                       237,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "FINGER PISTOLS (9MM)",
+                          "bbox":  [
+                                       1067,
+                                       767,
+                                       156,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "MAGNESIUM-BASED LIFEFORM",
+                          "bbox":  [
+                                       1067,
+                                       789,
+                                       210,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "BRINGING OF THE LAW (LAW-JAW)",
+                          "bbox":  [
+                                       1067,
+                                       808,
+                                       228,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "ADVANCED RACE THEORY",
+                          "bbox":  [
+                                       1066,
+                                       830,
+                                       176,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1232,
+                                       1015,
+                                       46,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "ooo",
+                          "bbox":  [
+                                       1232,
+                                       1041,
+                                       46,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "HOBOCOP",
+                          "bbox":  [
+                                       1613,
+                                       406,
+                                       189,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "Reveals extra special collector\u0027s edition tare bottles on the map",
+                          "bbox":  [
+                                       1418,
+                                       468,
+                                       373,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "More money from selling tare",
+                          "bbox":  [
+                                       1418,
+                                       487,
+                                       177,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "Learning cap for Shivers raised to 6",
+                          "bbox":  [
+                                       1418,
+                                       507,
+                                       211,
+                                       16
+                                   ]
+                      },
+                      {
+                          "text":  "PROBLEM",
+                          "bbox":  [
+                                       1520,
+                                       566,
+                                       68,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "SOLUTION",
+                          "bbox":  [
+                                       1610,
+                                       566,
+                                       70,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "Technically, you wouldn\u0027t be a cop any more, but a hobo.",
+                          "bbox":  [
+                                       1384,
+                                       596,
+                                       405,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "That would mean game over for the cop chapter of your",
+                          "bbox":  [
+                                       1384,
+                                       617,
+                                       397,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "adventures — but who knows where the hobo part takes you?",
+                          "bbox":  [
+                                       1384,
+                                       638,
+                                       432,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "To the bar, the old assommoir, to the pier or the sewers? To La",
+                          "bbox":  [
+                                       1384,
+                                       659,
+                                       439,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "Royaume, where for three hundred years they interred the",
+                          "bbox":  [
+                                       1384,
+                                       680,
+                                       417,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "dead? You could plunder royalist crypts for long-forgotten",
+                          "bbox":  [
+                                       1384,
+                                       701,
+                                       416,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "triple malt bourbon, then fight the armakhaan beast that",
+                          "bbox":  [
+                                       1384,
+                                       722,
+                                       403,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "lurks the bottom-most sepulchers„. The secrets of the city are",
+                          "bbox":  [
+                                       1384,
+                                       743,
+                                       436,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "all yours, at last.",
+                          "bbox":  [
+                                       1384,
+                                       764,
+                                       115,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "EXPERIENCE: 50/100",
+                          "bbox":  [
+                                       1390,
+                                       833,
+                                       148,
+                                       12
+                                   ]
+                      },
+                      {
+                          "text":  "SKILL POINTS:",
+                          "bbox":  [
+                                       1390,
+                                       848,
+                                       129,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "ORGET",
+                          "bbox":  [
+                                       1528,
+                                       909,
+                                       81,
+                                       27
+                                   ]
+                      },
+                      {
+                          "text":  "0",
+                          "bbox":  [
+                                       1671,
+                                       911,
+                                       23,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "THC",
+                          "bbox":  [
+                                       1783,
+                                       1016,
+                                       73,
+                                       38
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  119,
+        "lineCount":  17,
+        "charCount":  518,
+        "text":  "PERCEPTION (SIGHT) - A crumpled billboard reading \"SAMARAN BUTTER\" soaks in the canal. Two ugly lines mar the bright countenance of the blonde boy depicted. INTERFACING [Medium: success] - The sign billboard has fallen on the water lock, keeping it Open — and thus Out of order. VISUAL CALCULUS [Medium: success] — Judging by the size Of the impact and the parallel lines of burnt rubber, the cause was probably a motor vehicle. . - Look at the crater. 2. - Look at.the roof of the shack. 3. - Look at the sloping metal roof panel. . - Look at the broken posts. 5. - Look at the sign. 6. - Look at the opposite bank. 7. - Blink. [Leave.]",
+        "lines":  [
+                      {
+                          "text":  "PERCEPTION (SIGHT) - A crumpled billboard reading",
+                          "bbox":  [
+                                       1260,
+                                       424,
+                                       424,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "\"SAMARAN BUTTER\" soaks in the canal. Two ugly lines",
+                          "bbox":  [
+                                       1287,
+                                       447,
+                                       424,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "mar the bright countenance of the blonde boy depicted.",
+                          "bbox":  [
+                                       1288,
+                                       469,
+                                       418,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "INTERFACING [Medium: success] - The sign billboard has",
+                          "bbox":  [
+                                       1260,
+                                       509,
+                                       454,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "fallen on the water lock, keeping it Open — and thus Out of",
+                          "bbox":  [
+                                       1287,
+                                       532,
+                                       436,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "order.",
+                          "bbox":  [
+                                       1288,
+                                       555,
+                                       42,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "VISUAL CALCULUS [Medium: success]",
+                          "bbox":  [
+                                       1260,
+                                       594,
+                                       305,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "— Judging by the size",
+                          "bbox":  [
+                                       1571,
+                                       594,
+                                       159,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "Of the impact and the parallel lines of burnt rubber, the",
+                          "bbox":  [
+                                       1287,
+                                       617,
+                                       413,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "cause was probably a motor vehicle.",
+                          "bbox":  [
+                                       1287,
+                                       639,
+                                       273,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  ". - Look at the crater.",
+                          "bbox":  [
+                                       1281,
+                                       680,
+                                       156,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "2. - Look at.the roof of the shack.",
+                          "bbox":  [
+                                       1271,
+                                       701,
+                                       252,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "3. - Look at the sloping metal roof panel.",
+                          "bbox":  [
+                                       1272,
+                                       723,
+                                       310,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  ". - Look at the broken posts.",
+                          "bbox":  [
+                                       1281,
+                                       744,
+                                       212,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "5. - Look at the sign.",
+                          "bbox":  [
+                                       1272,
+                                       765,
+                                       153,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "6. - Look at the opposite bank.",
+                          "bbox":  [
+                                       1272,
+                                       786,
+                                       231,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "7. - Blink. [Leave.]",
+                          "bbox":  [
+                                       1272,
+                                       807,
+                                       135,
+                                       17
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  143,
+        "lineCount":  26,
+        "charCount":  810,
+        "text":  "unau, adventures proceeding?\" INLAND [Easy: Success] — Good, these people know your *true* name. Looks like it has proceeded you, Mr Sunset. More Qn that later. HORRIFIC NECKTIE - 1 like this guy. You should, too. He *respects* you by calling you your *crue name*. YOU — \"Not too hot. I\u0027m on a 50-year losing streak.\" IDIOT DOOM SPIRAL - \"That\u0027s harsh: I\u0027m like three or maybe four years into mine. Wait no, make it five.\" He looks at his shit-stained Lickra(TM) with a grim expression. \"Things aren\u0027t going super well for Idiot Doom Spiral, either. Haven\u0027t found those keys yet; haven\u0027t won that great piece of ass back. No word from my business-buddies...\" He takes a sip from his beer. SUGGESTION [Easy: Success] — This guy\u0027s your buddy-buddy. You feel it immediately: you belong to an organization. A fraternity. Of *drunks*. 1. - n What do you guys do around here?\" 2. - \"VVhat is a... Tequila Sunset? You keep saying it.\" 3. - \"Be seein\u0027 you.\" [Leave.] 40.95 000 000 16:36 Day 3",
+        "lines":  [
+                      {
+                          "text":  "unau,",
+                          "bbox":  [
+                                       1425,
+                                       160,
+                                       37,
+                                       9
+                                   ]
+                      },
+                      {
+                          "text":  "adventures proceeding?\"",
+                          "bbox":  [
+                                       1287,
+                                       174,
+                                       186,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "INLAND [Easy: Success] — Good, these people know",
+                          "bbox":  [
+                                       1261,
+                                       214,
+                                       466,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "your *true* name. Looks like it has proceeded you, Mr",
+                          "bbox":  [
+                                       1287,
+                                       236,
+                                       409,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "Sunset. More Qn that later.",
+                          "bbox":  [
+                                       1287,
+                                       259,
+                                       196,
+                                       17
+                                   ]
+                      },
+                      {
+                          "text":  "HORRIFIC NECKTIE - 1 like this guy. You should, too. He",
+                          "bbox":  [
+                                       1260,
+                                       299,
+                                       444,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "*respects* you by calling you your *crue name*.",
+                          "bbox":  [
+                                       1288,
+                                       321,
+                                       357,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "YOU — \"Not too hot. I\u0027m on a 50-year losing streak.\"",
+                          "bbox":  [
+                                       1260,
+                                       361,
+                                       386,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "IDIOT DOOM SPIRAL - \"That\u0027s harsh: I\u0027m like three or maybe",
+                          "bbox":  [
+                                       1260,
+                                       401,
+                                       473,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "four years into mine. Wait no, make it five.\" He looks at his",
+                          "bbox":  [
+                                       1287,
+                                       424,
+                                       442,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "shit-stained Lickra(TM) with a grim expression.",
+                          "bbox":  [
+                                       1287,
+                                       446,
+                                       360,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "\"Things aren\u0027t going super well for Idiot Doom Spiral,",
+                          "bbox":  [
+                                       1287,
+                                       486,
+                                       403,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "either. Haven\u0027t found those keys yet; haven\u0027t won that great",
+                          "bbox":  [
+                                       1287,
+                                       509,
+                                       444,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "piece of ass back. No word from my business-buddies...\"",
+                          "bbox":  [
+                                       1287,
+                                       531,
+                                       424,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "He takes a sip from his beer.",
+                          "bbox":  [
+                                       1287,
+                                       554,
+                                       212,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "SUGGESTION [Easy: Success] — This guy\u0027s your buddy-buddy.",
+                          "bbox":  [
+                                       1260,
+                                       592,
+                                       473,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "You feel it immediately: you belong to an organization. A",
+                          "bbox":  [
+                                       1287,
+                                       616,
+                                       431,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "fraternity. Of *drunks*.",
+                          "bbox":  [
+                                       1287,
+                                       639,
+                                       174,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "1. - n What do you guys do around here?\"",
+                          "bbox":  [
+                                       1273,
+                                       680,
+                                       308,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "2. - \"VVhat is a... Tequila Sunset? You keep saying it.\"",
+                          "bbox":  [
+                                       1271,
+                                       701,
+                                       401,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "3. - \"Be seein\u0027 you.\" [Leave.]",
+                          "bbox":  [
+                                       1272,
+                                       722,
+                                       206,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "40.95",
+                          "bbox":  [
+                                       1682,
+                                       988,
+                                       47,
+                                       15
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1233,
+                                       1017,
+                                       44,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "000",
+                          "bbox":  [
+                                       1233,
+                                       1039,
+                                       44,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "16:36",
+                          "bbox":  [
+                                       1742,
+                                       976,
+                                       104,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Day 3",
+                          "bbox":  [
+                                       1861,
+                                       987,
+                                       41,
+                                       18
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "discoelysium_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  55,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "discoelysium_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  192,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  49,
+        "ocrMs":  103,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  32,
+        "ocrMs":  93,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  20,
+        "ocrMs":  87,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  55,
+        "ocrMs":  177,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  92,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  78,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "firewatch_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  127,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "helldivers2_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  47,
+        "lineCount":  1,
+        "charCount":  14,
+        "text":  "Captured on PS5@",
+        "lines":  [
+                      {
+                          "text":  "Captured on PS5@",
+                          "bbox":  [
+                                       74,
+                                       1036,
+                                       177,
+                                       20
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "helldivers2_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  12,
+        "ocrMs":  81,
+        "lineCount":  1,
+        "charCount":  3,
+        "text":  "101",
+        "lines":  [
+                      {
+                          "text":  "101",
+                          "bbox":  [
+                                       713,
+                                       485,
+                                       30,
+                                       17
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "helldivers2_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  21,
+        "ocrMs":  65,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "helldivers2_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  19,
+        "ocrMs":  123,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "helldivers2_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  121,
+        "lineCount":  1,
+        "charCount":  11,
+        "text":  "qptured On PC",
+        "lines":  [
+                      {
+                          "text":  "qptured On PC",
+                          "bbox":  [
+                                       8,
+                                       972,
+                                       138,
+                                       21
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "helldivers2_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  115,
+        "lineCount":  1,
+        "charCount":  2,
+        "text":  "PC",
+        "lines":  [
+                      {
+                          "text":  "PC",
+                          "bbox":  [
+                                       86,
+                                       880,
+                                       23,
+                                       16
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "helldivers2_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  26,
+        "ocrMs":  141,
+        "lineCount":  1,
+        "charCount":  12,
+        "text":  ":aptured On PC",
+        "lines":  [
+                      {
+                          "text":  ":aptured On PC",
+                          "bbox":  [
+                                       0,
+                                       911,
+                                       131,
+                                       30
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "helldivers2_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  118,
+        "lineCount":  1,
+        "charCount":  12,
+        "text":  "Captured on PC",
+        "lines":  [
+                      {
+                          "text":  "Captured on PC",
+                          "bbox":  [
+                                       46,
+                                       1045,
+                                       138,
+                                       20
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  30,
+        "ocrMs":  119,
+        "lineCount":  42,
+        "charCount":  378,
+        "text":  "9/10 -Sixth Axis 9/10 -Action Trip 9/10 -GamersTM ancGAMa.net RECOMMENDED 9/10 -Gamestyle -BlogCritics GAME FORCHANGE WINNER -The Examiner 8.5/10 -Gameinformer GOLDEN JOYSTICK PERFORMANCE OF THE YEAR WINNER BRITISH ACADEMY GAMES AWARDS WINNER-BEST STORY NEW GAMES IP WINNER game AUDIENCE AWARD USE OF NARRATIVE WINNER 8/10 -Gamespot 8.5/10 -Destructoid FS Fun\u0026Serious BESTSOUNDTRACK WINNER -Dark Zero 4/5 -Hardcore Gamer 8.5/10 -Polygon",
+        "lines":  [
+                      {
+                          "text":  "9/10",
+                          "bbox":  [
+                                       166,
+                                       129,
+                                       113,
+                                       65
+                                   ]
+                      },
+                      {
+                          "text":  "-Sixth Axis",
+                          "bbox":  [
+                                       166,
+                                       200,
+                                       110,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "9/10",
+                          "bbox":  [
+                                       277,
+                                       262,
+                                       113,
+                                       65
+                                   ]
+                      },
+                      {
+                          "text":  "-Action Trip",
+                          "bbox":  [
+                                       272,
+                                       334,
+                                       120,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "9/10",
+                          "bbox":  [
+                                       120,
+                                       420,
+                                       113,
+                                       65
+                                   ]
+                      },
+                      {
+                          "text":  "-GamersTM",
+                          "bbox":  [
+                                       124,
+                                       491,
+                                       102,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "ancGAMa.net",
+                          "bbox":  [
+                                       307,
+                                       615,
+                                       81,
+                                       8
+                                   ]
+                      },
+                      {
+                          "text":  "RECOMMENDED",
+                          "bbox":  [
+                                       271,
+                                       642,
+                                       146,
+                                       13
+                                   ]
+                      },
+                      {
+                          "text":  "9/10",
+                          "bbox":  [
+                                       152,
+                                       800,
+                                       113,
+                                       66
+                                   ]
+                      },
+                      {
+                          "text":  "-Gamestyle",
+                          "bbox":  [
+                                       149,
+                                       872,
+                                       117,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "-BlogCritics",
+                          "bbox":  [
+                                       528,
+                                       183,
+                                       124,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "GAME FORCHANGE",
+                          "bbox":  [
+                                       522,
+                                       460,
+                                       266,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER",
+                          "bbox":  [
+                                       577,
+                                       502,
+                                       156,
+                                       41
+                                   ]
+                      },
+                      {
+                          "text":  "-The Examiner",
+                          "bbox":  [
+                                       883,
+                                       231,
+                                       154,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "8.5/10",
+                          "bbox":  [
+                                       1222,
+                                       134,
+                                       149,
+                                       65
+                                   ]
+                      },
+                      {
+                          "text":  "-Gameinformer",
+                          "bbox":  [
+                                       1217,
+                                       205,
+                                       157,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "GOLDEN JOYSTICK",
+                          "bbox":  [
+                                       1096,
+                                       353,
+                                       297,
+                                       43
+                                   ]
+                      },
+                      {
+                          "text":  "PERFORMANCE OF THE YEAR",
+                          "bbox":  [
+                                       1068,
+                                       412,
+                                       353,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER",
+                          "bbox":  [
+                                       1145,
+                                       463,
+                                       199,
+                                       60
+                                   ]
+                      },
+                      {
+                          "text":  "BRITISH ACADEMY",
+                          "bbox":  [
+                                       844,
+                                       598,
+                                       298,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "GAMES AWARDS",
+                          "bbox":  [
+                                       843,
+                                       633,
+                                       255,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER-BEST STORY",
+                          "bbox":  [
+                                       843,
+                                       669,
+                                       298,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "NEW GAMES IP",
+                          "bbox":  [
+                                       572,
+                                       777,
+                                       196,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER",
+                          "bbox":  [
+                                       607,
+                                       821,
+                                       122,
+                                       36
+                                   ]
+                      },
+                      {
+                          "text":  "game",
+                          "bbox":  [
+                                       908,
+                                       874,
+                                       44,
+                                       22
+                                   ]
+                      },
+                      {
+                          "text":  "AUDIENCE",
+                          "bbox":  [
+                                       926,
+                                       943,
+                                       101,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "AWARD",
+                          "bbox":  [
+                                       942,
+                                       975,
+                                       73,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "USE OF NARRATIVE",
+                          "bbox":  [
+                                       1185,
+                                       784,
+                                       204,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER",
+                          "bbox":  [
+                                       1225,
+                                       826,
+                                       121,
+                                       36
+                                   ]
+                      },
+                      {
+                          "text":  "8/10",
+                          "bbox":  [
+                                       1587,
+                                       107,
+                                       111,
+                                       66
+                                   ]
+                      },
+                      {
+                          "text":  "-Gamespot",
+                          "bbox":  [
+                                       1585,
+                                       178,
+                                       112,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "8.5/10",
+                          "bbox":  [
+                                       1625,
+                                       302,
+                                       149,
+                                       65
+                                   ]
+                      },
+                      {
+                          "text":  "-Destructoid",
+                          "bbox":  [
+                                       1632,
+                                       374,
+                                       131,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "FS",
+                          "bbox":  [
+                                       1582,
+                                       579,
+                                       97,
+                                       51
+                                   ]
+                      },
+                      {
+                          "text":  "Fun\u0026Serious",
+                          "bbox":  [
+                                       1582,
+                                       634,
+                                       98,
+                                       14
+                                   ]
+                      },
+                      {
+                          "text":  "BESTSOUNDTRACK",
+                          "bbox":  [
+                                       1546,
+                                       665,
+                                       170,
+                                       20
+                                   ]
+                      },
+                      {
+                          "text":  "WINNER",
+                          "bbox":  [
+                                       1580,
+                                       692,
+                                       101,
+                                       27
+                                   ]
+                      },
+                      {
+                          "text":  "-Dark Zero",
+                          "bbox":  [
+                                       1663,
+                                       874,
+                                       111,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "4/5",
+                          "bbox":  [
+                                       422,
+                                       923,
+                                       91,
+                                       66
+                                   ]
+                      },
+                      {
+                          "text":  "-Hardcore Gamer",
+                          "bbox":  [
+                                       377,
+                                       995,
+                                       179,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "8.5/10",
+                          "bbox":  [
+                                       1402,
+                                       921,
+                                       149,
+                                       66
+                                   ]
+                      },
+                      {
+                          "text":  "-Polygon",
+                          "bbox":  [
+                                       1431,
+                                       993,
+                                       89,
+                                       31
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_1.jpg",
+        "width":  1920,
+        "height":  1067,
+        "decodeMs":  34,
+        "ocrMs":  81,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_2.jpg",
+        "width":  1920,
+        "height":  1067,
+        "decodeMs":  41,
+        "ocrMs":  115,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_3.jpg",
+        "width":  1920,
+        "height":  1054,
+        "decodeMs":  61,
+        "ocrMs":  96,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  32,
+        "ocrMs":  32,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  33,
+        "ocrMs":  39,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  38,
+        "ocrMs":  87,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "lifeisstrange_7.jpg",
+        "width":  1920,
+        "height":  1067,
+        "decodeMs":  49,
+        "ocrMs":  52,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  103,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  48,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  12,
+        "ocrMs":  106,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  22,
+        "ocrMs":  131,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  73,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  83,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  68,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "masseffect_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  22,
+        "ocrMs":  57,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "pentiment_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  99,
+        "lineCount":  15,
+        "charCount":  236,
+        "text":  "Hedonist Craftsman Andreas lives to work and dedicates all ofhis time to his art. Bookworm Rapscallion Businessman fBackground Pick a background that will affectyour character\u0027s choices going forward. Press and hold to confirm your choice. IJI/D////// fr///lj//////ljljk/n",
+        "lines":  [
+                      {
+                          "text":  "Hedonist",
+                          "bbox":  [
+                                       291,
+                                       142,
+                                       122,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "Craftsman",
+                          "bbox":  [
+                                       325,
+                                       271,
+                                       140,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "Andreas lives to work and dedicates all ofhis",
+                          "bbox":  [
+                                       324,
+                                       335,
+                                       466,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "time to his art.",
+                          "bbox":  [
+                                       324,
+                                       364,
+                                       153,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "Bookworm",
+                          "bbox":  [
+                                       291,
+                                       492,
+                                       146,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "Rapscallion",
+                          "bbox":  [
+                                       291,
+                                       621,
+                                       155,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Businessman",
+                          "bbox":  [
+                                       291,
+                                       752,
+                                       172,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "fBackground",
+                          "bbox":  [
+                                       1018,
+                                       90,
+                                       134,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "Pick a background that will",
+                          "bbox":  [
+                                       911,
+                                       138,
+                                       348,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "affectyour character\u0027s",
+                          "bbox":  [
+                                       910,
+                                       174,
+                                       288,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "choices going forward.",
+                          "bbox":  [
+                                       911,
+                                       209,
+                                       284,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Press and hold to confirm",
+                          "bbox":  [
+                                       911,
+                                       278,
+                                       326,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "your choice.",
+                          "bbox":  [
+                                       907,
+                                       313,
+                                       156,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "IJI/D//////",
+                          "bbox":  [
+                                       1507,
+                                       51,
+                                       143,
+                                       43
+                                   ]
+                      },
+                      {
+                          "text":  "fr///lj//////ljljk/n",
+                          "bbox":  [
+                                       1473,
+                                       140,
+                                       226,
+                                       98
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  99,
+        "lineCount":  16,
+        "charCount":  352,
+        "text":  "Latinist Logician Andreas excelled at logic, geometry, and arithmetic in university. He instinctively thinks through the implications of information as he receives it, is adept at spatial analysis, and can easil perform complicated calculations in his Orator Occultist Heavens and Earth Background Pick a background that will affectyour character\u0027s choices going forward. Press and hold to confirm your choice.",
+        "lines":  [
+                      {
+                          "text":  "Latinist",
+                          "bbox":  [
+                                       252,
+                                       120,
+                                       102,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "Logician",
+                          "bbox":  [
+                                       286,
+                                       249,
+                                       109,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "Andreas excelled at logic, geometry, and",
+                          "bbox":  [
+                                       285,
+                                       311,
+                                       419,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "arithmetic in university. He instinctively thinks",
+                          "bbox":  [
+                                       285,
+                                       340,
+                                       502,
+                                       28
+                                   ]
+                      },
+                      {
+                          "text":  "through the implications of information as he",
+                          "bbox":  [
+                                       285,
+                                       369,
+                                       483,
+                                       28
+                                   ]
+                      },
+                      {
+                          "text":  "receives it, is adept at spatial analysis, and can",
+                          "bbox":  [
+                                       285,
+                                       397,
+                                       478,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "easil perform complicated calculations in his",
+                          "bbox":  [
+                                       286,
+                                       426,
+                                       482,
+                                       28
+                                   ]
+                      },
+                      {
+                          "text":  "Orator",
+                          "bbox":  [
+                                       252,
+                                       585,
+                                       92,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "Occultist",
+                          "bbox":  [
+                                       252,
+                                       712,
+                                       123,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "Heavens and Earth",
+                          "bbox":  [
+                                       252,
+                                       841,
+                                       244,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "Background",
+                          "bbox":  [
+                                       1025,
+                                       73,
+                                       128,
+                                       27
+                                   ]
+                      },
+                      {
+                          "text":  "Pick a background that will",
+                          "bbox":  [
+                                       912,
+                                       118,
+                                       348,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "affectyour character\u0027s",
+                          "bbox":  [
+                                       911,
+                                       153,
+                                       288,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "choices going forward.",
+                          "bbox":  [
+                                       912,
+                                       188,
+                                       285,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Press and hold to confirm",
+                          "bbox":  [
+                                       912,
+                                       257,
+                                       326,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "your choice.",
+                          "bbox":  [
+                                       908,
+                                       292,
+                                       156,
+                                       35
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  94,
+        "lineCount":  9,
+        "charCount":  62,
+        "text":  "nicjr ill illuminatå prottctug! Ois Co to ? Dial ncucgmüe Rüdegee Matildå",
+        "lines":  [
+                      {
+                          "text":  "nicjr",
+                          "bbox":  [
+                                       1279,
+                                       18,
+                                       47,
+                                       23
+                                   ]
+                      },
+                      {
+                          "text":  "ill",
+                          "bbox":  [
+                                       791,
+                                       60,
+                                       21,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "illuminatå",
+                          "bbox":  [
+                                       263,
+                                       237,
+                                       159,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "prottctug!",
+                          "bbox":  [
+                                       306,
+                                       296,
+                                       140,
+                                       38
+                                   ]
+                      },
+                      {
+                          "text":  "Ois",
+                          "bbox":  [
+                                       312,
+                                       469,
+                                       37,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "Co to ?",
+                          "bbox":  [
+                                       233,
+                                       527,
+                                       206,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "Dial ncucgmüe",
+                          "bbox":  [
+                                       132,
+                                       631,
+                                       181,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "Rüdegee",
+                          "bbox":  [
+                                       1540,
+                                       340,
+                                       124,
+                                       37
+                                   ]
+                      },
+                      {
+                          "text":  "Matildå",
+                          "bbox":  [
+                                       1473,
+                                       467,
+                                       123,
+                                       28
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  91,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "pentiment_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  31,
+        "ocrMs":  126,
+        "lineCount":  26,
+        "charCount":  387,
+        "text":  "/ ymmrrrrlilll. iuw•røvirri$iD WII m \u0027Uttr//1Æ ravitri$ /1/11//$ utgquc. dfn ttllug nttgtr frugidt gcclcriggur uarius morbi cnim nunc fa uciåug. •atctnng grD tnim li\u0026rm Saint Satia out attumsa nulla. nunc uri rigug tommoDü uiuttra mntttnas attumsm. \u0026lanüit One of Tassing\u0027s patron saints, Satia was a local pagan who converted to Christianity and miraculously aided Saint Moritz\u0027 s soldiers with food in the dead of winter. She was martyred for her actions.",
+        "lines":  [
+                      {
+                          "text":  "/ ymmrrrrlilll.",
+                          "bbox":  [
+                                       32,
+                                       26,
+                                       169,
+                                       43
+                                   ]
+                      },
+                      {
+                          "text":  "iuw•røvirri$iD",
+                          "bbox":  [
+                                       21,
+                                       97,
+                                       163,
+                                       44
+                                   ]
+                      },
+                      {
+                          "text":  "WII m",
+                          "bbox":  [
+                                       0,
+                                       212,
+                                       80,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "\u0027Uttr//1Æ",
+                          "bbox":  [
+                                       45,
+                                       233,
+                                       112,
+                                       37
+                                   ]
+                      },
+                      {
+                          "text":  "ravitri$",
+                          "bbox":  [
+                                       0,
+                                       267,
+                                       107,
+                                       35
+                                   ]
+                      },
+                      {
+                          "text":  "/1/11//$",
+                          "bbox":  [
+                                       0,
+                                       440,
+                                       69,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "utgquc. dfn ttllug",
+                          "bbox":  [
+                                       708,
+                                       0,
+                                       199,
+                                       21
+                                   ]
+                      },
+                      {
+                          "text":  "nttgtr frugidt",
+                          "bbox":  [
+                                       696,
+                                       21,
+                                       171,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "gcclcriggur uarius",
+                          "bbox":  [
+                                       681,
+                                       44,
+                                       220,
+                                       32
+                                   ]
+                      },
+                      {
+                          "text":  "morbi cnim nunc",
+                          "bbox":  [
+                                       678,
+                                       71,
+                                       208,
+                                       28
+                                   ]
+                      },
+                      {
+                          "text":  "fa uciåug. •atctnng",
+                          "bbox":  [
+                                       673,
+                                       97,
+                                       265,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "grD tnim li\u0026rm",
+                          "bbox":  [
+                                       666,
+                                       127,
+                                       201,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "Saint Satia",
+                          "bbox":  [
+                                       806,
+                                       644,
+                                       130,
+                                       19
+                                   ]
+                      },
+                      {
+                          "text":  "out attumsa",
+                          "bbox":  [
+                                       1027,
+                                       0,
+                                       150,
+                                       18
+                                   ]
+                      },
+                      {
+                          "text":  "nulla.",
+                          "bbox":  [
+                                       1027,
+                                       22,
+                                       68,
+                                       22
+                                   ]
+                      },
+                      {
+                          "text":  "nunc uri rigug",
+                          "bbox":  [
+                                       1027,
+                                       47,
+                                       177,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "tommoDü uiuttra",
+                          "bbox":  [
+                                       1028,
+                                       73,
+                                       227,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "mntttnas attumsm.",
+                          "bbox":  [
+                                       1029,
+                                       102,
+                                       269,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "\u0026lanüit",
+                          "bbox":  [
+                                       1029,
+                                       129,
+                                       109,
+                                       33
+                                   ]
+                      },
+                      {
+                          "text":  "One of Tassing\u0027s patron saints,",
+                          "bbox":  [
+                                       801,
+                                       699,
+                                       377,
+                                       29
+                                   ]
+                      },
+                      {
+                          "text":  "Satia was a local pagan who",
+                          "bbox":  [
+                                       798,
+                                       729,
+                                       343,
+                                       30
+                                   ]
+                      },
+                      {
+                          "text":  "converted to Christianity and",
+                          "bbox":  [
+                                       796,
+                                       759,
+                                       377,
+                                       31
+                                   ]
+                      },
+                      {
+                          "text":  "miraculously aided Saint Moritz\u0027 s",
+                          "bbox":  [
+                                       794,
+                                       790,
+                                       443,
+                                       32
+                                   ]
+                      },
+                      {
+                          "text":  "soldiers with food in the dead of",
+                          "bbox":  [
+                                       790,
+                                       822,
+                                       425,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "winter. She was martyred for her",
+                          "bbox":  [
+                                       787,
+                                       855,
+                                       444,
+                                       34
+                                   ]
+                      },
+                      {
+                          "text":  "actions.",
+                          "bbox":  [
+                                       784,
+                                       891,
+                                       103,
+                                       21
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  17,
+        "ocrMs":  91,
+        "lineCount":  2,
+        "charCount":  28,
+        "text":  "Clara it takes vnaÆVto c.0M4-w(t",
+        "lines":  [
+                      {
+                          "text":  "Clara",
+                          "bbox":  [
+                                       699,
+                                       357,
+                                       74,
+                                       28
+                                   ]
+                      },
+                      {
+                          "text":  "it takes vnaÆVto c.0M4-w(t",
+                          "bbox":  [
+                                       595,
+                                       413,
+                                       434,
+                                       35
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  93,
+        "lineCount":  2,
+        "charCount":  9,
+        "text":  "QSz_q Yij\u0027",
+        "lines":  [
+                      {
+                          "text":  "QSz_q",
+                          "bbox":  [
+                                       13,
+                                       171,
+                                       112,
+                                       37
+                                   ]
+                      },
+                      {
+                          "text":  "Yij\u0027",
+                          "bbox":  [
+                                       778,
+                                       596,
+                                       41,
+                                       29
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "pentiment_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  76,
+        "lineCount":  4,
+        "charCount":  92,
+        "text":  "Piero Art is illusion, stotytelling, but in their most sublime form, these images illuminate a path to truth.",
+        "lines":  [
+                      {
+                          "text":  "Piero",
+                          "bbox":  [
+                                       401,
+                                       537,
+                                       74,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "Art is illusion, stotytelling, but in their most",
+                          "bbox":  [
+                                       144,
+                                       592,
+                                       586,
+                                       36
+                                   ]
+                      },
+                      {
+                          "text":  "sublime form, these images illuminate a",
+                          "bbox":  [
+                                       144,
+                                       627,
+                                       526,
+                                       37
+                                   ]
+                      },
+                      {
+                          "text":  "path to truth.",
+                          "bbox":  [
+                                       144,
+                                       664,
+                                       180,
+                                       34
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "rdr2_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  10,
+        "ocrMs":  74,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "rdr2_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  30,
+        "ocrMs":  123,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "rdr2_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  84,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "rdr2_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  76,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "rdr2_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  16,
+        "ocrMs":  158,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "witcher3_0.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  27,
+        "ocrMs":  113,
+        "lineCount":  3,
+        "charCount":  19,
+        "text":  "Wii-b MUNT CAPTURED ON",
+        "lines":  [
+                      {
+                          "text":  "Wii-b",
+                          "bbox":  [
+                                       1593,
+                                       911,
+                                       74,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "MUNT",
+                          "bbox":  [
+                                       1721,
+                                       913,
+                                       77,
+                                       25
+                                   ]
+                      },
+                      {
+                          "text":  "CAPTURED ON",
+                          "bbox":  [
+                                       84,
+                                       992,
+                                       131,
+                                       24
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "witcher3_1.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  21,
+        "ocrMs":  199,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "witcher3_2.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  18,
+        "ocrMs":  80,
+        "lineCount":  2,
+        "charCount":  16,
+        "text":  "WILb CAPTURED ON pc",
+        "lines":  [
+                      {
+                          "text":  "WILb",
+                          "bbox":  [
+                                       1597,
+                                       908,
+                                       74,
+                                       26
+                                   ]
+                      },
+                      {
+                          "text":  "CAPTURED ON pc",
+                          "bbox":  [
+                                       88,
+                                       997,
+                                       162,
+                                       17
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "witcher3_3.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  14,
+        "ocrMs":  114,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "witcher3_4.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  35,
+        "ocrMs":  182,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "witcher3_5.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  156,
+        "lineCount":  0,
+        "charCount":  0,
+        "text":  "",
+        "lines":  [
+
+                  ]
+    },
+    {
+        "file":  "witcher3_6.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  13,
+        "ocrMs":  73,
+        "lineCount":  2,
+        "charCount":  8,
+        "text":  "WILb HUNT",
+        "lines":  [
+                      {
+                          "text":  "WILb",
+                          "bbox":  [
+                                       1646,
+                                       997,
+                                       72,
+                                       24
+                                   ]
+                      },
+                      {
+                          "text":  "HUNT",
+                          "bbox":  [
+                                       1770,
+                                       999,
+                                       75,
+                                       23
+                                   ]
+                      }
+                  ]
+    },
+    {
+        "file":  "witcher3_7.jpg",
+        "width":  1920,
+        "height":  1080,
+        "decodeMs":  15,
+        "ocrMs":  156,
+        "lineCount":  1,
+        "charCount":  4,
+        "text":  "WILb",
+        "lines":  [
+                      {
+                          "text":  "WILb",
+                          "bbox":  [
+                                       1709,
+                                       879,
+                                       72,
+                                       32
+                                   ]
+                      }
+                  ]
+    }
+]

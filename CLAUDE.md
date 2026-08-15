@@ -63,9 +63,17 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 
 ## สถานะปัจจุบัน
 
-ยังไม่มีโค้ด — repo มีแต่เอกสารออกแบบ
+ยังไม่มี product code — repo มีเอกสารออกแบบ กับ throwaway benchmark ของ spike S1 (`spikes/s1-ocr/`)
 
-ขั้นถัดไปคือ **spike S1**: วัดว่า Windows.Media.Ocr อ่าน subtitle เกม (font ตกแต่ง / anti-alias / พื้นหลังโปร่ง) ได้ดีพอไหม เทียบกับ PaddleOCR
-ถ้าไม่ผ่าน ต้องเปลี่ยน OCR engine ก่อนลงมือเขียนของจริง — ดูรายละเอียด S1/S2/S3 ในหัวข้อ 10 ของ design doc
+**Spike S1 ผ่านแล้ว** ([รายงาน](docs/spikes/2026-08-15-s1-ocr-engine.md)) — Windows.Media.Ocr เร็วกว่า PaddleOCR ~6 เท่า
+(p50 99ms เต็มจอ / 30ms บน region เทียบกับ 580ms) และอ่านเนื้อหาเกมแม่นกว่า → สถาปัตยกรรม .NET sidecar ยืนยันแล้ว
+
+ขั้นถัดไป: **spike S2** ยืนยันว่า Windows Graphics Capture เคารพ exclude-from-capture จริง — ดูหัวข้อ 10 ของ design doc
+
+ข้อควรรู้จาก S1 ที่กระทบการเขียนโค้ด:
+- ต้องมี **en-US OCR recognizer** ติดตั้งบนเครื่องผู้ใช้ ไม่งั้นใช้งานไม่ได้เลย → feature `O8` preflight check
+- **region ที่ตัดโดนตัวอักษรทำให้ OCR พังทันที** → feature `R7` padding + edge warning
+- เครื่อง dev ยังไม่มี .NET 10 (มี 2.2/6/8/9) → target `net9.0-windows10.0.19041.0` ไปก่อน
+- ข้อผิดพลาดที่ Windows OCR ทำประจำ: `o`↔`O`, `I`↔`1`, ตกเลขลำดับ, ช่องว่างหายบางจุด — ไม่กระทบความหมาย ไม่ต้องพยายามแก้ที่ post-processing
 
 <!-- เพิ่ม build/test/lint commands ที่นี่เมื่อเริ่มมีโค้ด -->

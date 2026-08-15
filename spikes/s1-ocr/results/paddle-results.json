@@ -1,0 +1,2297 @@
+[
+  {
+    "file": "bg3_0.jpg",
+    "ocrMs": 546,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_1.jpg",
+    "ocrMs": 510,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_2.jpg",
+    "ocrMs": 542,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_3.jpg",
+    "ocrMs": 699,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_4.jpg",
+    "ocrMs": 583,
+    "lineCount": 3,
+    "charCount": 19,
+    "text": "cYanmaGentaYe n a owb L",
+    "lines": [
+      {
+        "text": "cYanmaGentaYe",
+        "conf": 0.734
+      },
+      {
+        "text": "n a",
+        "conf": 0.734
+      },
+      {
+        "text": "owb L",
+        "conf": 0.734
+      }
+    ]
+  },
+  {
+    "file": "bg3_5.jpg",
+    "ocrMs": 508,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_6.jpg",
+    "ocrMs": 580,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "bg3_7.jpg",
+    "ocrMs": 507,
+    "lineCount": 2,
+    "charCount": 7,
+    "text": "L2 10/10",
+    "lines": [
+      {
+        "text": "L2",
+        "conf": 0.72
+      },
+      {
+        "text": "10/10",
+        "conf": 0.999
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_0.jpg",
+    "ocrMs": 505,
+    "lineCount": 2,
+    "charCount": 9,
+    "text": "ELDB PAWNS",
+    "lines": [
+      {
+        "text": "ELDB",
+        "conf": 0.841
+      },
+      {
+        "text": "PAWNS",
+        "conf": 0.902
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_1.jpg",
+    "ocrMs": 507,
+    "lineCount": 2,
+    "charCount": 2,
+    "text": "1 6",
+    "lines": [
+      {
+        "text": "1",
+        "conf": 0.514
+      },
+      {
+        "text": "6",
+        "conf": 0.514
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_2.jpg",
+    "ocrMs": 1774,
+    "lineCount": 27,
+    "charCount": 377,
+    "text": "B OIOR SET V'S APPEARANCE ONLY CCGS ANO DHSF-S CERTIFIED b TECH OFFICERS MAY ACCESS.b PROTOCOL IN NIGHTCITY,LOOKS AREEVERYTHING. OPERATE OR DISABLE THIS DEVICE. 6S2O-A44 CUSTOMIZEYOURLOOK PRESETS HAIRSTYLE 5O HAIR COLOR S W   D GALDQIOM X EYECOLOR A  D EYEBROWSb 11 O D 0 E EYEBROWNCOLOR D EYELASH COLOR <b  D ¤b Rb RANDOMIZE RFARn n9 ESC BACK  CONFIRM Night City The dotb NCRu pry se oentred them 2o u enter ill be Resident Q RotATE E 0 SELeCT sCRoLL CDOtObOSe S",
+    "lines": [
+      {
+        "text": "B OIOR SET V'S APPEARANCE",
+        "conf": 0.92
+      },
+      {
+        "text": "ONLY CCGS ANO DHSF-S CERTIFIED",
+        "conf": 0.92
+      },
+      {
+        "text": "b TECH OFFICERS MAY ACCESS.b",
+        "conf": 0.952
+      },
+      {
+        "text": "PROTOCOL IN NIGHTCITY,LOOKS AREEVERYTHING. OPERATE OR DISABLE THIS DEVICE.",
+        "conf": 0.931
+      },
+      {
+        "text": "6S2O-A44 CUSTOMIZEYOURLOOK",
+        "conf": 0.865
+      },
+      {
+        "text": "PRESETS",
+        "conf": 0.822
+      },
+      {
+        "text": "HAIRSTYLE 5O",
+        "conf": 0.838
+      },
+      {
+        "text": "HAIR COLOR",
+        "conf": 0.822
+      },
+      {
+        "text": "S W   D",
+        "conf": 0.838
+      },
+      {
+        "text": "GALDQIOM",
+        "conf": 0.822
+      },
+      {
+        "text": "X EYECOLOR",
+        "conf": 0.838
+      },
+      {
+        "text": "A  D",
+        "conf": 0.865
+      },
+      {
+        "text": "EYEBROWSb 11",
+        "conf": 0.822
+      },
+      {
+        "text": "O",
+        "conf": 0.822
+      },
+      {
+        "text": "D",
+        "conf": 0.822
+      },
+      {
+        "text": "0",
+        "conf": 0.822
+      },
+      {
+        "text": "E EYEBROWNCOLOR",
+        "conf": 0.865
+      },
+      {
+        "text": "D",
+        "conf": 0.822
+      },
+      {
+        "text": "EYELASH COLOR",
+        "conf": 0.838
+      },
+      {
+        "text": "<b  D",
+        "conf": 0.838
+      },
+      {
+        "text": "¤b Rb RANDOMIZE",
+        "conf": 0.838
+      },
+      {
+        "text": "RFARn n9",
+        "conf": 0.822
+      },
+      {
+        "text": "ESC BACK  CONFIRM",
+        "conf": 0.952
+      },
+      {
+        "text": "Night City The dotb NCRu pry se oentred them 2o u enter",
+        "conf": 0.605
+      },
+      {
+        "text": "ill be",
+        "conf": 0.605
+      },
+      {
+        "text": "Resident Q RotATE E 0 SELeCT sCRoLL",
+        "conf": 0.605
+      },
+      {
+        "text": "CDOtObOSe S",
+        "conf": 0.865
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_3.jpg",
+    "ocrMs": 418,
+    "lineCount": 2,
+    "charCount": 12,
+    "text": "POLICE POLICE",
+    "lines": [
+      {
+        "text": "POLICE",
+        "conf": 0.93
+      },
+      {
+        "text": "POLICE",
+        "conf": 0.957
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_4.jpg",
+    "ocrMs": 490,
+    "lineCount": 2,
+    "charCount": 10,
+    "text": "E DEL-AMAIN",
+    "lines": [
+      {
+        "text": "E",
+        "conf": 0.764
+      },
+      {
+        "text": "DEL-AMAIN",
+        "conf": 0.764
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_5.jpg",
+    "ocrMs": 490,
+    "lineCount": 2,
+    "charCount": 8,
+    "text": "1 1 PURE OV",
+    "lines": [
+      {
+        "text": "1 1",
+        "conf": 0.576
+      },
+      {
+        "text": "PURE OV",
+        "conf": 0.996
+      }
+    ]
+  },
+  {
+    "file": "cyberpunk_6.jpg",
+    "ocrMs": 504,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "cyberpunk_7.jpg",
+    "ocrMs": 525,
+    "lineCount": 2,
+    "charCount": 6,
+    "text": "A bahla",
+    "lines": [
+      {
+        "text": "A",
+        "conf": 0.706
+      },
+      {
+        "text": "bahla",
+        "conf": 0.706
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_0.jpg",
+    "ocrMs": 648,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.98
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_1.jpg",
+    "ocrMs": 645,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.982
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_2.jpg",
+    "ocrMs": 603,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.971
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_3.jpg",
+    "ocrMs": 697,
+    "lineCount": 3,
+    "charCount": 175,
+    "text": "BRIDe 1 Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "BRIDe",
+        "conf": 0.636
+      },
+      {
+        "text": "1",
+        "conf": 0.636
+      },
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.982
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_4.jpg",
+    "ocrMs": 648,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.98
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_5.jpg",
+    "ocrMs": 656,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.982
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_6.jpg",
+    "ocrMs": 583,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainment Inc. DEATH STRANDING is a trademark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.98
+      }
+    ]
+  },
+  {
+    "file": "deathstranding_7.jpg",
+    "ocrMs": 667,
+    "lineCount": 1,
+    "charCount": 169,
+    "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+    "lines": [
+      {
+        "text": "Captured from PC. ©2020 Sony Interactive Entertainm ent Inc. DEATH STRANDING is a tradem ark of Sony Interactive Entertainment LLC. Created and developed by KOJIMA PRODUCTIONS. © 2020 CD PROJEKT S.A.",
+        "conf": 0.984
+      }
+    ]
+  },
+  {
+    "file": "detroit_0.jpg",
+    "ocrMs": 449,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "detroit_1.jpg",
+    "ocrMs": 451,
+    "lineCount": 1,
+    "charCount": 7,
+    "text": "HGCO CAP",
+    "lines": [
+      {
+        "text": "HGCO CAP",
+        "conf": 0.598
+      }
+    ]
+  },
+  {
+    "file": "detroit_2.jpg",
+    "ocrMs": 529,
+    "lineCount": 3,
+    "charCount": 12,
+    "text": "88.0 924 0X800",
+    "lines": [
+      {
+        "text": "88.0",
+        "conf": 0.98
+      },
+      {
+        "text": "924",
+        "conf": 0.998
+      },
+      {
+        "text": "0X800",
+        "conf": 0.516
+      }
+    ]
+  },
+  {
+    "file": "detroit_3.jpg",
+    "ocrMs": 646,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "detroit_4.jpg",
+    "ocrMs": 537,
+    "lineCount": 2,
+    "charCount": 10,
+    "text": "KNC freaden",
+    "lines": [
+      {
+        "text": "KNC",
+        "conf": 0.843
+      },
+      {
+        "text": "freaden",
+        "conf": 0.748
+      }
+    ]
+  },
+  {
+    "file": "detroit_5.jpg",
+    "ocrMs": 406,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "detroit_6.jpg",
+    "ocrMs": 436,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "detroit_7.jpg",
+    "ocrMs": 644,
+    "lineCount": 3,
+    "charCount": 13,
+    "text": "ANDROID i RKBOO",
+    "lines": [
+      {
+        "text": "ANDROID",
+        "conf": 0.908
+      },
+      {
+        "text": "i",
+        "conf": 0.908
+      },
+      {
+        "text": "RKBOO",
+        "conf": 0.908
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_0.jpg",
+    "ocrMs": 587,
+    "lineCount": 4,
+    "charCount": 36,
+    "text": "\"Nice one, Cuno!!\" *5.00 12:00 Day 1 000 000",
+    "lines": [
+      {
+        "text": "\"Nice one, Cuno!!\"",
+        "conf": 0.992
+      },
+      {
+        "text": "*5.00 12:00 Day 1",
+        "conf": 0.955
+      },
+      {
+        "text": "000",
+        "conf": 0.789
+      },
+      {
+        "text": "000",
+        "conf": 0.789
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_1.jpg",
+    "ocrMs": 2977,
+    "lineCount": 35,
+    "charCount": 558,
+    "text": "C H A R A C T E R S H EE T OVERVIEW /INFO V S OOO 3 2 2 y 2 O 2 VISUAL INTELLECT LOGIC 3 ENCYCLOPEDIA RHETORIC DRAMA CONCEPTUALIZATION CALCULUS .5. + B b O b PSYCHE VOLITION INLANDEMPIRE 0 b 6 0 b <C < b 02 O ><Ob ESPRIT EMPATHY AUTHORITY 3 7 DECORPS SUGGESTION 3 A U T H O R I T Y 2 Intimidate the public. Assert yOurSelf.b + b 8  b 9  TOTAL: PHYSICALb 2 b b Psyche:+5 b ELECTRO-b PHYSIQUE ENDURANCE PAIN THRESHOLD 8 8 b INSTRUMENT CHEMISTRYb SHIVERS HALF LIGHT  Learned skill:0 3 Bonusfromitems: -1 Bonusfromthoughts: -1 EXPERIENCE:75/1OO S K ILL P O I N T S : ! LEVEL UP + REVERT C HAND /EYE MOTORICS COORDINATION 2 3 2  3 PERCEPTION REACTION SPEED SAVOIR FAIRE INTERFACING COMPOSURE 2 Accept  ooo CHR 000",
+    "lines": [
+      {
+        "text": "C H A R A C T E R S H EE T",
+        "conf": 0.779
+      },
+      {
+        "text": "OVERVIEW /INFO",
+        "conf": 0.955
+      },
+      {
+        "text": "V S OOO",
+        "conf": 0.779
+      },
+      {
+        "text": "3 2 2 y 2 O 2 VISUAL INTELLECT LOGIC 3 ENCYCLOPEDIA RHETORIC DRAMA CONCEPTUALIZATION CALCULUS",
+        "conf": 0.894
+      },
+      {
+        "text": ".5.",
+        "conf": 0.925
+      },
+      {
+        "text": "+",
+        "conf": 0.955
+      },
+      {
+        "text": "B b O b",
+        "conf": 0.761
+      },
+      {
+        "text": "PSYCHE VOLITION INLANDEMPIRE",
+        "conf": 0.779
+      },
+      {
+        "text": "0 b",
+        "conf": 0.753
+      },
+      {
+        "text": "6 0 b <C < b 02 O ><Ob",
+        "conf": 0.757
+      },
+      {
+        "text": "ESPRIT",
+        "conf": 0.779
+      },
+      {
+        "text": "EMPATHY AUTHORITY",
+        "conf": 0.779
+      },
+      {
+        "text": "3 7 DECORPS SUGGESTION 3",
+        "conf": 0.779
+      },
+      {
+        "text": "A U T H O R I T Y",
+        "conf": 0.779
+      },
+      {
+        "text": "2 Intimidate the public. Assert yOurSelf.b",
+        "conf": 0.91
+      },
+      {
+        "text": "+",
+        "conf": 0.925
+      },
+      {
+        "text": "b",
+        "conf": 0.925
+      },
+      {
+        "text": "8  b",
+        "conf": 0.925
+      },
+      {
+        "text": "9  TOTAL:",
+        "conf": 0.925
+      },
+      {
+        "text": "PHYSICALb 2 b b Psyche:+5 b ELECTRO-b",
+        "conf": 0.925
+      },
+      {
+        "text": "PHYSIQUE ENDURANCE PAIN THRESHOLD",
+        "conf": 0.925
+      },
+      {
+        "text": "8 8 b",
+        "conf": 0.925
+      },
+      {
+        "text": "INSTRUMENT CHEMISTRYb SHIVERS HALF LIGHT  Learned skill:0",
+        "conf": 0.925
+      },
+      {
+        "text": "3 Bonusfromitems: -1 Bonusfromthoughts: -1",
+        "conf": 0.787
+      },
+      {
+        "text": "EXPERIENCE:75/1OO",
+        "conf": 0.955
+      },
+      {
+        "text": "S K ILL P O I N T S : !",
+        "conf": 0.91
+      },
+      {
+        "text": "LEVEL UP",
+        "conf": 0.944
+      },
+      {
+        "text": "+",
+        "conf": 0.944
+      },
+      {
+        "text": "REVERT",
+        "conf": 0.944
+      },
+      {
+        "text": "C",
+        "conf": 0.944
+      },
+      {
+        "text": "HAND /EYE",
+        "conf": 0.944
+      },
+      {
+        "text": "MOTORICS COORDINATION",
+        "conf": 0.944
+      },
+      {
+        "text": "2 3 2  3 PERCEPTION REACTION SPEED SAVOIR FAIRE INTERFACING COMPOSURE 2",
+        "conf": 0.944
+      },
+      {
+        "text": "Accept  ooo CHR",
+        "conf": 0.803
+      },
+      {
+        "text": "000",
+        "conf": 0.955
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_2.jpg",
+    "ocrMs": 2097,
+    "lineCount": 17,
+    "charCount": 205,
+    "text": "INVENTORY 5 2 EOUIPPED INT PSY FYS MOT HEALTH: 88 T AT NORALE: 3 X S JACKET SAM ARAN CONICAL HAT +1 Logic: Super logical for a cop to wear this ′ -1 Suggestion: Insensitive bachelor party vibes E L S E S FFR 2S E M S : shiVers: 41 S i T i e: 1 I 0 (EYS OOO OOO INV OOO",
+    "lines": [
+      {
+        "text": "INVENTORY",
+        "conf": 0.742
+      },
+      {
+        "text": "5 2 EOUIPPED",
+        "conf": 0.802
+      },
+      {
+        "text": "INT PSY FYS MOT",
+        "conf": 0.802
+      },
+      {
+        "text": "HEALTH: 88",
+        "conf": 0.802
+      },
+      {
+        "text": "T AT",
+        "conf": 0.802
+      },
+      {
+        "text": "NORALE: 3 X S",
+        "conf": 0.742
+      },
+      {
+        "text": "JACKET SAM ARAN CONICAL HAT +1 Logic: Super logical for a cop to wear this ′",
+        "conf": 0.986
+      },
+      {
+        "text": "-1 Suggestion: Insensitive bachelor party vibes",
+        "conf": 0.986
+      },
+      {
+        "text": "E L S E S FFR 2S E M S :",
+        "conf": 0.802
+      },
+      {
+        "text": "shiVers: 41",
+        "conf": 0.742
+      },
+      {
+        "text": "S i T i e:",
+        "conf": 0.742
+      },
+      {
+        "text": "1 I",
+        "conf": 0.802
+      },
+      {
+        "text": "0",
+        "conf": 0.742
+      },
+      {
+        "text": "(EYS",
+        "conf": 0.742
+      },
+      {
+        "text": "OOO",
+        "conf": 0.772
+      },
+      {
+        "text": "OOO",
+        "conf": 0.802
+      },
+      {
+        "text": "INV OOO",
+        "conf": 0.802
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_3.jpg",
+    "ocrMs": 12606,
+    "lineCount": 32,
+    "charCount": 831,
+    "text": "FELDDEVICE SORTTHOUGHTSBY: INT PSY FYS MOT MAZOVIANSOCIO-ECONOMICS R 86 % ANTI-OBJECT TASK FORCEb HEALTH: 5/8 52% INDIRECT MODESOFTAXATION KINGDOMOF CONSCIENCE  52% KINGDOM OFCONSCIENCE MORALE: 3/5 RIGOROUS SELF-CRITIQUE V  REMOTE VIEWER HOBOCOP VOLUMETRICSHIT COACHPHYSICALINSTRUMENTI INDIRECT M ODES OF COM PRESSOR b COP OF THE APOCALYPSE ′ B O N U S E S F R O N T H O U G H T S : T A X A TI O N  C O L D O N A N A D A O U A Re veals extra special coM ector's e dition tare bottles on the n a p Logic:-1 2 More money from selling tare 2 < b > 2 INEXPLICABLE FEMiNiST AGENDA Learning cap for Shivers raised to 6 ViSUalCalCuluS: -1b REVACHOLIANb ACES HIGH A uth Ority: - 1 I Z Es P rit d e C OI PS: + 1 Z X Z N A TI O N H OO D 2 A CE S L O W Z Z L O N E S O M E L O N G W A Y H O M E 2 P R O B L E M b S O L U TIO N PhySiCal InStrUM ent: -1 b < > b M AZOVIAN b TOROUE D ORK HOBOCOP FINGER PISTOLS (9MM)b al1 yOUrS, at laSt. GUILLAUME LE MILLION MAGNESIUM-BASED LIFEFORM BRINGING OF THE LAW (LAW-JAW) 9 ADVANCED RACE THEORY EXPERIENCE:50/100 A SKILl PoINTS: O FORGETb OOO THC OO",
+    "lines": [
+      {
+        "text": "FELDDEVICE",
+        "conf": 0.96
+      },
+      {
+        "text": "SORTTHOUGHTSBY:",
+        "conf": 0.96
+      },
+      {
+        "text": "INT PSY FYS MOT MAZOVIANSOCIO-ECONOMICS",
+        "conf": 0.96
+      },
+      {
+        "text": "R",
+        "conf": 0.858
+      },
+      {
+        "text": "86 % ANTI-OBJECT TASK FORCEb",
+        "conf": 0.946
+      },
+      {
+        "text": "HEALTH: 5/8 52% INDIRECT MODESOFTAXATION",
+        "conf": 0.858
+      },
+      {
+        "text": "KINGDOMOF",
+        "conf": 0.858
+      },
+      {
+        "text": "CONSCIENCE  52% KINGDOM OFCONSCIENCE",
+        "conf": 0.858
+      },
+      {
+        "text": "MORALE: 3/5",
+        "conf": 0.858
+      },
+      {
+        "text": "RIGOROUS SELF-CRITIQUE V  REMOTE VIEWER HOBOCOP",
+        "conf": 0.858
+      },
+      {
+        "text": "VOLUMETRICSHIT COACHPHYSICALINSTRUMENTI",
+        "conf": 0.96
+      },
+      {
+        "text": "INDIRECT M ODES OF COM PRESSOR b COP OF THE APOCALYPSE ′",
+        "conf": 0.946
+      },
+      {
+        "text": "B O N U S E S F R O N T H O U G H T S : T A X A TI O N  C O L D O N A N A D A O U A Re veals extra special coM ector's e dition tare bottles on the n a p",
+        "conf": 0.897
+      },
+      {
+        "text": "Logic:-1 2 More money from selling tare 2",
+        "conf": 0.897
+      },
+      {
+        "text": "< b > 2 INEXPLICABLE FEMiNiST AGENDA Learning cap for Shivers raised to 6",
+        "conf": 0.897
+      },
+      {
+        "text": "ViSUalCalCuluS: -1b",
+        "conf": 0.96
+      },
+      {
+        "text": "REVACHOLIANb ACES HIGH",
+        "conf": 0.96
+      },
+      {
+        "text": "A uth Ority: - 1 I Z",
+        "conf": 0.858
+      },
+      {
+        "text": "Es P rit d e C OI PS: + 1 Z",
+        "conf": 0.858
+      },
+      {
+        "text": "X Z N A TI O N H OO D 2 A CE S L O W Z",
+        "conf": 0.858
+      },
+      {
+        "text": "Z L O N E S O M E L O N G W A Y H O M E 2 P R O B L E M b S O L U TIO N",
+        "conf": 0.858
+      },
+      {
+        "text": "PhySiCal InStrUM ent: -1 b < > b M AZOVIAN b TOROUE D ORK",
+        "conf": 0.946
+      },
+      {
+        "text": "HOBOCOP FINGER PISTOLS (9MM)b al1 yOUrS, at laSt.",
+        "conf": 0.946
+      },
+      {
+        "text": "GUILLAUME LE",
+        "conf": 0.96
+      },
+      {
+        "text": "MILLION MAGNESIUM-BASED LIFEFORM",
+        "conf": 0.946
+      },
+      {
+        "text": "BRINGING OF THE LAW (LAW-JAW) 9",
+        "conf": 0.93
+      },
+      {
+        "text": "ADVANCED RACE THEORY EXPERIENCE:50/100",
+        "conf": 0.897
+      },
+      {
+        "text": "A",
+        "conf": 0.897
+      },
+      {
+        "text": "SKILl PoINTS: O",
+        "conf": 0.897
+      },
+      {
+        "text": "FORGETb",
+        "conf": 0.96
+      },
+      {
+        "text": "OOO THC",
+        "conf": 0.96
+      },
+      {
+        "text": "OO",
+        "conf": 0.96
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_4.jpg",
+    "ocrMs": 1399,
+    "lineCount": 20,
+    "charCount": 575,
+    "text": "A C G EL E R ATI O N 0=W -W 2 AT2 PERCEPTION (SIGHT) - A crumpled billboard reading ′ \"SAMARAN BUTTER\" soaks in the canal. Two ugly lines mar the bright countenance of the blonde boy depicted. P OIN T O F IM P A C T INTERFACING [Medium: Success] - The sign billboard has′ fallen on the water lock, keeping it open - and thus out of order.′ VISUAL CALCULUS [Medium: Success] - Judging by the size of the impact and the parallel lines of burnt rubber, the cause was probably a motor vehicle. 1. - Look at the crater. . Look at the roof of the shack. 3. Look at the sloping metal roof panel.  4. Look at the broken posts. . Look at the sign 6. - Look at the opposite bank. 7. - Blink. [Leave.] CHECK SUCCESS 0 1 A 1 2 ′ 01 A 14 ′ 67",
+    "lines": [
+      {
+        "text": "A C G EL E R ATI O N",
+        "conf": 0.982
+      },
+      {
+        "text": "0=W -W 2 AT2",
+        "conf": 0.936
+      },
+      {
+        "text": "PERCEPTION (SIGHT) - A crumpled billboard reading ′",
+        "conf": 0.931
+      },
+      {
+        "text": "\"SAMARAN BUTTER\" soaks in the canal. Two ugly lines",
+        "conf": 0.936
+      },
+      {
+        "text": "mar the bright countenance of the blonde boy depicted.",
+        "conf": 0.982
+      },
+      {
+        "text": "P OIN T O F IM P A C T",
+        "conf": 0.982
+      },
+      {
+        "text": "INTERFACING [Medium: Success] - The sign billboard has′",
+        "conf": 0.978
+      },
+      {
+        "text": "fallen on the water lock, keeping it open - and thus out of",
+        "conf": 0.985
+      },
+      {
+        "text": "order.′",
+        "conf": 0.978
+      },
+      {
+        "text": "VISUAL CALCULUS [Medium: Success] - Judging by the size",
+        "conf": 0.976
+      },
+      {
+        "text": "of the impact and the parallel lines of burnt rubber, the",
+        "conf": 0.973
+      },
+      {
+        "text": "cause was probably a motor vehicle.",
+        "conf": 0.985
+      },
+      {
+        "text": "1. - Look at the crater. . Look at the roof of the shack. 3. Look at the sloping metal roof panel.  4. Look at the broken posts.",
+        "conf": 0.916
+      },
+      {
+        "text": ". Look at the sign",
+        "conf": 0.905
+      },
+      {
+        "text": "6. - Look at the opposite bank.",
+        "conf": 0.976
+      },
+      {
+        "text": "7. - Blink. [Leave.]",
+        "conf": 0.936
+      },
+      {
+        "text": "CHECK SUCCESS",
+        "conf": 0.978
+      },
+      {
+        "text": "0 1 A 1 2 ′",
+        "conf": 0.931
+      },
+      {
+        "text": "01 A 14 ′",
+        "conf": 0.931
+      },
+      {
+        "text": "67",
+        "conf": 0.931
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_5.jpg",
+    "ocrMs": 2280,
+    "lineCount": 30,
+    "charCount": 868,
+    "text": "sip, i uw aie u e, ui , m gu-cuncept, icauty-vascub adventures proceeding?\"′ INLAND EM PIRE [Easy: Success] - Good, these people know ′ your *true* name. Looks like it has proceeded you, Mr Sunset. More on that later. db HORRIFIC NECKTIE - I like this guy. You should, too. Heb *respects* you by calling you your *true nam e*. YOU - \"Not too hot. I'm on a 50-year losing streak.\" IDIOT DOOM SPIRAL - \"That's harsh. I'm like three or maybe four years into mine. Wait no, make it five.\" He looks at his shit-stained Lickra(TM) with a grim expression. \"Things aren't going super well for Idiot Doom Spiral,′ either. Haven't found those keys yet; haven't won that great′ piece of ass back. No word from my business-buddies..' He takes a sip from his beer. SUGGEsTION [Easy: Success] This guy's your buddy-buddy. You feel it immediately: you belong to an organization. A ′ fraternity. Of *drunks*. 1. - \"What do you guys do around here?\" 2. - \"What is a.. Tequila Sunset? You keep saying it.\" 3. - \"Be seein' you.\" [Leave.] 4 ● Ill b 01A 09 * 40.95 16: 36 Day 3 000 000",
+    "lines": [
+      {
+        "text": "sip, i uw aie u e, ui , m gu-cuncept, icauty-vascub",
+        "conf": 0.846
+      },
+      {
+        "text": "adventures proceeding?\"′",
+        "conf": 0.973
+      },
+      {
+        "text": "INLAND EM PIRE [Easy: Success] - Good, these people know ′",
+        "conf": 0.927
+      },
+      {
+        "text": "your *true* name. Looks like it has proceeded you, Mr",
+        "conf": 0.967
+      },
+      {
+        "text": "Sunset. More on that later.",
+        "conf": 0.967
+      },
+      {
+        "text": "db",
+        "conf": 0.846
+      },
+      {
+        "text": "HORRIFIC NECKTIE - I like this guy. You should, too. Heb",
+        "conf": 0.93
+      },
+      {
+        "text": "*respects* you by calling you your *true nam e*.",
+        "conf": 0.979
+      },
+      {
+        "text": "YOU - \"Not too hot. I'm on a 50-year losing streak.\"",
+        "conf": 0.974
+      },
+      {
+        "text": "IDIOT DOOM SPIRAL - \"That's harsh. I'm like three or maybe",
+        "conf": 0.953
+      },
+      {
+        "text": "four years into mine. Wait no, make it five.\" He looks at his",
+        "conf": 0.973
+      },
+      {
+        "text": "shit-stained Lickra(TM) with a grim expression.",
+        "conf": 0.994
+      },
+      {
+        "text": "\"Things aren't going super well for Idiot Doom Spiral,′",
+        "conf": 0.981
+      },
+      {
+        "text": "either. Haven't found those keys yet; haven't won that great′",
+        "conf": 0.982
+      },
+      {
+        "text": "piece of ass back. No word from my business-buddies..'",
+        "conf": 0.971
+      },
+      {
+        "text": "He takes a sip from his beer.",
+        "conf": 0.846
+      },
+      {
+        "text": "SUGGEsTION [Easy: Success] This guy's your buddy-buddy.",
+        "conf": 0.973
+      },
+      {
+        "text": "You feel it immediately: you belong to an organization. A",
+        "conf": 0.945
+      },
+      {
+        "text": "′",
+        "conf": 0.927
+      },
+      {
+        "text": "fraternity. Of *drunks*.",
+        "conf": 0.973
+      },
+      {
+        "text": "1. - \"What do you guys do around here?\"",
+        "conf": 0.981
+      },
+      {
+        "text": "2. - \"What is a.. Tequila Sunset? You keep saying it.\"",
+        "conf": 0.961
+      },
+      {
+        "text": "3. - \"Be seein' you.\" [Leave.]",
+        "conf": 0.982
+      },
+      {
+        "text": "4",
+        "conf": 0.927
+      },
+      {
+        "text": "●",
+        "conf": 0.953
+      },
+      {
+        "text": "Ill",
+        "conf": 0.945
+      },
+      {
+        "text": "b",
+        "conf": 0.945
+      },
+      {
+        "text": "01A 09 * 40.95 16: 36 Day 3",
+        "conf": 0.93
+      },
+      {
+        "text": "000",
+        "conf": 0.953
+      },
+      {
+        "text": "000",
+        "conf": 0.927
+      }
+    ]
+  },
+  {
+    "file": "discoelysium_6.jpg",
+    "ocrMs": 491,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "discoelysium_7.jpg",
+    "ocrMs": 542,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "firewatch_0.jpg",
+    "ocrMs": 447,
+    "lineCount": 1,
+    "charCount": 2,
+    "text": "WK",
+    "lines": [
+      {
+        "text": "WK",
+        "conf": 0.559
+      }
+    ]
+  },
+  {
+    "file": "firewatch_1.jpg",
+    "ocrMs": 638,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "firewatch_2.jpg",
+    "ocrMs": 538,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "firewatch_3.jpg",
+    "ocrMs": 538,
+    "lineCount": 1,
+    "charCount": 1,
+    "text": "N",
+    "lines": [
+      {
+        "text": "N",
+        "conf": 0.715
+      }
+    ]
+  },
+  {
+    "file": "firewatch_4.jpg",
+    "ocrMs": 652,
+    "lineCount": 4,
+    "charCount": 26,
+    "text": "TWO FORKS TO TH LLHEL WEMULSCRE",
+    "lines": [
+      {
+        "text": "TWO FORKS",
+        "conf": 0.803
+      },
+      {
+        "text": "TO TH",
+        "conf": 0.765
+      },
+      {
+        "text": "LLHEL",
+        "conf": 0.765
+      },
+      {
+        "text": "WEMULSCRE",
+        "conf": 0.803
+      }
+    ]
+  },
+  {
+    "file": "firewatch_5.jpg",
+    "ocrMs": 518,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "firewatch_6.jpg",
+    "ocrMs": 461,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "helldivers2_0.jpg",
+    "ocrMs": 443,
+    "lineCount": 1,
+    "charCount": 14,
+    "text": "Captured on PS5®",
+    "lines": [
+      {
+        "text": "Captured on PS5®",
+        "conf": 0.989
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_1.jpg",
+    "ocrMs": 479,
+    "lineCount": 3,
+    "charCount": 18,
+    "text": "lmm 1 Captured on PS5®",
+    "lines": [
+      {
+        "text": "lmm",
+        "conf": 0.517
+      },
+      {
+        "text": "1",
+        "conf": 0.517
+      },
+      {
+        "text": "Captured on PS5®",
+        "conf": 0.969
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_2.jpg",
+    "ocrMs": 566,
+    "lineCount": 2,
+    "charCount": 18,
+    "text": "SEAF Captured on PS5®",
+    "lines": [
+      {
+        "text": "SEAF",
+        "conf": 0.582
+      },
+      {
+        "text": "Captured on PS5®",
+        "conf": 0.972
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_3.jpg",
+    "ocrMs": 510,
+    "lineCount": 1,
+    "charCount": 12,
+    "text": "Captured on PC",
+    "lines": [
+      {
+        "text": "Captured on PC",
+        "conf": 0.964
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_4.jpg",
+    "ocrMs": 583,
+    "lineCount": 1,
+    "charCount": 12,
+    "text": "Captured on PC",
+    "lines": [
+      {
+        "text": "Captured on PC",
+        "conf": 0.99
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_5.jpg",
+    "ocrMs": 497,
+    "lineCount": 1,
+    "charCount": 10,
+    "text": "ptured on PC",
+    "lines": [
+      {
+        "text": "ptured on PC",
+        "conf": 0.987
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_6.jpg",
+    "ocrMs": 588,
+    "lineCount": 1,
+    "charCount": 12,
+    "text": "Captured on PC",
+    "lines": [
+      {
+        "text": "Captured on PC",
+        "conf": 0.996
+      }
+    ]
+  },
+  {
+    "file": "helldivers2_7.jpg",
+    "ocrMs": 472,
+    "lineCount": 1,
+    "charCount": 12,
+    "text": "Captured on PC",
+    "lines": [
+      {
+        "text": "Captured on PC",
+        "conf": 0.971
+      }
+    ]
+  },
+  {
+    "file": "lifeisstrange_0.jpg",
+    "ocrMs": 1964,
+    "lineCount": 27,
+    "charCount": 420,
+    "text": "9/10 5/5 8.5/10 8/10 — B o g c r t i c s G a n e s p o — s i x t h A x i s — G a m e i n f o r m e r b 9/10 TheExaminer 8.5/10 -Action Trip A Rbs GaME GolDeN JoysTiCK -Destructoid 9/10 PER FO R M A N CE OF THE YEA R GAME FOR CHANGE WINNER GamerSTM WINNER BRITISH A CAD EM Y F JRCGAMER. RECOMMENDED GAMES AWARDS Fun&SeriOuS rb K b W INNER BEST STORYb BEST SOUNDTRACK S I NN E R c ee s ee s f g/10  NEW GAMES IP USE OF NARRATIVE WINNER 1o/10 -Gamestyle WINNER game DeVeLOPerS -Dark Zero 4/5 CHOICe aWaRDS AUDIENCE 8.5/10 AWARD -Hardcore Gamer -Polygon",
+    "lines": [
+      {
+        "text": "9/10 5/5 8.5/10 8/10",
+        "conf": 0.907
+      },
+      {
+        "text": "— B o g c r t i c s G a n e s p o",
+        "conf": 0.823
+      },
+      {
+        "text": "— s i x t h A x i s — G a m e i n f o r m e r b",
+        "conf": 0.733
+      },
+      {
+        "text": "9/10 TheExaminer",
+        "conf": 0.912
+      },
+      {
+        "text": "8.5/10 -Action Trip A Rbs",
+        "conf": 0.733
+      },
+      {
+        "text": "GaME GolDeN JoysTiCK -Destructoid",
+        "conf": 0.733
+      },
+      {
+        "text": "9/10 PER FO R M A N CE OF THE YEA R",
+        "conf": 0.924
+      },
+      {
+        "text": "GAME FOR CHANGE WINNER",
+        "conf": 0.917
+      },
+      {
+        "text": "GamerSTM WINNER",
+        "conf": 0.907
+      },
+      {
+        "text": "BRITISH A CAD EM Y",
+        "conf": 0.912
+      },
+      {
+        "text": "F",
+        "conf": 0.912
+      },
+      {
+        "text": "JRCGAMER.",
+        "conf": 0.912
+      },
+      {
+        "text": "RECOMMENDED",
+        "conf": 0.912
+      },
+      {
+        "text": "GAMES AWARDS Fun&SeriOuS",
+        "conf": 0.912
+      },
+      {
+        "text": "rb K b W INNER BEST STORYb BEST SOUNDTRACK",
+        "conf": 0.917
+      },
+      {
+        "text": "S I NN E R",
+        "conf": 0.907
+      },
+      {
+        "text": "c ee s ee s f",
+        "conf": 0.733
+      },
+      {
+        "text": "g/10  NEW GAMES IP USE OF NARRATIVE",
+        "conf": 0.823
+      },
+      {
+        "text": "WINNER",
+        "conf": 0.823
+      },
+      {
+        "text": "1o/10",
+        "conf": 0.823
+      },
+      {
+        "text": "-Gamestyle",
+        "conf": 0.823
+      },
+      {
+        "text": "WINNER game DeVeLOPerS -Dark Zero",
+        "conf": 0.823
+      },
+      {
+        "text": "4/5 CHOICe aWaRDS",
+        "conf": 0.924
+      },
+      {
+        "text": "AUDIENCE",
+        "conf": 0.924
+      },
+      {
+        "text": "8.5/10",
+        "conf": 0.924
+      },
+      {
+        "text": "AWARD",
+        "conf": 0.924
+      },
+      {
+        "text": "-Hardcore Gamer -Polygon",
+        "conf": 0.924
+      }
+    ]
+  },
+  {
+    "file": "lifeisstrange_1.jpg",
+    "ocrMs": 558,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "lifeisstrange_2.jpg",
+    "ocrMs": 750,
+    "lineCount": 2,
+    "charCount": 21,
+    "text": "HY EXPOSURE KIGHLiGHT N 1",
+    "lines": [
+      {
+        "text": "HY EXPOSURE KIGHLiGHT N",
+        "conf": 0.666
+      },
+      {
+        "text": "1",
+        "conf": 0.666
+      }
+    ]
+  },
+  {
+    "file": "lifeisstrange_3.jpg",
+    "ocrMs": 574,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "lifeisstrange_4.jpg",
+    "ocrMs": 485,
+    "lineCount": 1,
+    "charCount": 1,
+    "text": "x",
+    "lines": [
+      {
+        "text": "x",
+        "conf": 0.542
+      }
+    ]
+  },
+  {
+    "file": "lifeisstrange_5.jpg",
+    "ocrMs": 590,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "lifeisstrange_6.jpg",
+    "ocrMs": 845,
+    "lineCount": 3,
+    "charCount": 25,
+    "text": "cYanmaG eYel e L e l elowb elowb",
+    "lines": [
+      {
+        "text": "cYanmaG eYel",
+        "conf": 0.632
+      },
+      {
+        "text": "e L e",
+        "conf": 0.632
+      },
+      {
+        "text": "l elowb elowb",
+        "conf": 0.632
+      }
+    ]
+  },
+  {
+    "file": "lifeisstrange_7.jpg",
+    "ocrMs": 520,
+    "lineCount": 1,
+    "charCount": 7,
+    "text": "2 ESOHNA",
+    "lines": [
+      {
+        "text": "2 ESOHNA",
+        "conf": 0.567
+      }
+    ]
+  },
+  {
+    "file": "masseffect_0.jpg",
+    "ocrMs": 647,
+    "lineCount": 1,
+    "charCount": 5,
+    "text": "cfmiw",
+    "lines": [
+      {
+        "text": "cfmiw",
+        "conf": 0.501
+      }
+    ]
+  },
+  {
+    "file": "masseffect_1.jpg",
+    "ocrMs": 450,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "masseffect_2.jpg",
+    "ocrMs": 664,
+    "lineCount": 3,
+    "charCount": 5,
+    "text": "C TEE 1",
+    "lines": [
+      {
+        "text": "C",
+        "conf": 0.746
+      },
+      {
+        "text": "TEE",
+        "conf": 0.592
+      },
+      {
+        "text": "1",
+        "conf": 0.78
+      }
+    ]
+  },
+  {
+    "file": "masseffect_3.jpg",
+    "ocrMs": 690,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "masseffect_4.jpg",
+    "ocrMs": 398,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "masseffect_5.jpg",
+    "ocrMs": 493,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "masseffect_6.jpg",
+    "ocrMs": 684,
+    "lineCount": 1,
+    "charCount": 2,
+    "text": "1S",
+    "lines": [
+      {
+        "text": "1S",
+        "conf": 0.526
+      }
+    ]
+  },
+  {
+    "file": "masseffect_7.jpg",
+    "ocrMs": 456,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "pentiment_0.jpg",
+    "ocrMs": 935,
+    "lineCount": 14,
+    "charCount": 225,
+    "text": "Wi M W i / Background N/l iny Hedonist Pick a background that will affectyoar character's i w choices going forward.b Craftsman Press and hold to confirm your choice. Andreas lives to work and dedicates all of his tim e to his art. l b b Bookworm Rapscallion Businessm an 2 V 7",
+    "lines": [
+      {
+        "text": "Wi M W",
+        "conf": 0.84
+      },
+      {
+        "text": "i /",
+        "conf": 0.9
+      },
+      {
+        "text": "Background N/l iny",
+        "conf": 0.754
+      },
+      {
+        "text": "Hedonist Pick a background that will",
+        "conf": 0.983
+      },
+      {
+        "text": "affectyoar character's i w",
+        "conf": 0.84
+      },
+      {
+        "text": "choices going forward.b",
+        "conf": 0.976
+      },
+      {
+        "text": "Craftsman Press and hold to confirm",
+        "conf": 0.998
+      },
+      {
+        "text": "your choice.",
+        "conf": 0.841
+      },
+      {
+        "text": "Andreas lives to work and dedicates all of his",
+        "conf": 0.972
+      },
+      {
+        "text": "tim e to his art.",
+        "conf": 0.976
+      },
+      {
+        "text": "l b b Bookworm",
+        "conf": 0.754
+      },
+      {
+        "text": "Rapscallion",
+        "conf": 0.9
+      },
+      {
+        "text": "Businessm an",
+        "conf": 0.9
+      },
+      {
+        "text": "2 V 7",
+        "conf": 0.841
+      }
+    ]
+  },
+  {
+    "file": "pentiment_1.jpg",
+    "ocrMs": 1230,
+    "lineCount": 14,
+    "charCount": 362,
+    "text": "X Background X Latinist Pick a background that will affect your character's choices going forward. Logician Press and hold to confirm your choice. Andreas excelled at logic, geometry, and arithm etic in university. He instinctively thinks   through the im plications of inform ation as he re ceives it, is a d e pt at sp a tial an alysis, a n d ca n easily pertort cot plicate d calcalation s in his head. Orator Occultist Heavens and Earth Ne",
+    "lines": [
+      {
+        "text": "X Background X",
+        "conf": 0.875
+      },
+      {
+        "text": "Latinist Pick a background that will",
+        "conf": 0.981
+      },
+      {
+        "text": "affect your character's",
+        "conf": 0.981
+      },
+      {
+        "text": "choices going forward.",
+        "conf": 0.981
+      },
+      {
+        "text": "Logician Press and hold to confirm",
+        "conf": 0.958
+      },
+      {
+        "text": "your choice. Andreas excelled at logic, geometry, and",
+        "conf": 0.98
+      },
+      {
+        "text": "arithm etic in university. He instinctively thinks   through the im plications of inform ation as he",
+        "conf": 0.963
+      },
+      {
+        "text": "re ceives it, is a d e pt at sp a tial an alysis, a n d ca n",
+        "conf": 0.98
+      },
+      {
+        "text": "easily pertort cot plicate d calcalation s in his",
+        "conf": 0.958
+      },
+      {
+        "text": "head.",
+        "conf": 0.958
+      },
+      {
+        "text": "Orator",
+        "conf": 0.98
+      },
+      {
+        "text": "Occultist",
+        "conf": 0.958
+      },
+      {
+        "text": "Heavens and Earth",
+        "conf": 0.981
+      },
+      {
+        "text": "Ne",
+        "conf": 0.875
+      }
+    ]
+  },
+  {
+    "file": "pentiment_2.jpg",
+    "ocrMs": 819,
+    "lineCount": 9,
+    "charCount": 115,
+    "text": "Illuminata God protect us! / R ä de ger 2 L Do proele!b No! No! J 2 D2 Wojslav  M atilda Co to sakra..? AveMaria,gratia plena.… D ieu nous garde.",
+    "lines": [
+      {
+        "text": "Illuminata",
+        "conf": 0.756
+      },
+      {
+        "text": "God protect us! /",
+        "conf": 0.853
+      },
+      {
+        "text": "R ä de ger 2 L",
+        "conf": 0.853
+      },
+      {
+        "text": "Do proele!b No! No!",
+        "conf": 0.853
+      },
+      {
+        "text": "J 2",
+        "conf": 0.756
+      },
+      {
+        "text": "D2",
+        "conf": 0.756
+      },
+      {
+        "text": "Wojslav  M atilda",
+        "conf": 0.954
+      },
+      {
+        "text": "Co to sakra..? AveMaria,gratia plena.…",
+        "conf": 0.954
+      },
+      {
+        "text": "D ieu nous garde.",
+        "conf": 0.853
+      }
+    ]
+  },
+  {
+    "file": "pentiment_3.jpg",
+    "ocrMs": 1001,
+    "lineCount": 1,
+    "charCount": 2,
+    "text": "H I",
+    "lines": [
+      {
+        "text": "H I",
+        "conf": 0.616
+      }
+    ]
+  },
+  {
+    "file": "pentiment_4.jpg",
+    "ocrMs": 2311,
+    "lineCount": 27,
+    "charCount": 573,
+    "text": "bamrt dictumit.amet uoli pi ii alut Qum viverti sto donec enimci integer feugiat yu sgue. dn tellus duiaccum san swt am rt nulla. alesuada scelerisque varius munc vel risus Viuet gits ut morbi enim nunc commodo viverra scretu purs t faucibus. aecenas maecenas accumsan. sed enim ut sem cibus pulyinar Slandit aliguam ntum.urpis tuim at din. lt tellus nsagittis Blesy you. Pndreas. Maybe Jl see you u - ii - Gy the shrine of Saint Satia one of unc vel these days.s do nas uel amusb 7. u 2 Saint Satia One ofTassing's patron saints, Satia was alocalpagan who converted to Christianity and t i r a c l o a s l y a i d e d S a i tt n o r i t z s s o l d i e r s i t h t oo d i tt b e d e a d o t w i n t e r . S h e w a s t a r t y r e d t o r h e r actio ns.",
+    "lines": [
+      {
+        "text": "bamrt dictumit.amet uoli pi",
+        "conf": 0.743
+      },
+      {
+        "text": "ii alut Qum viverti sto donec enimci integer feugiat yu sgue. dn tellus duiaccum san swt am rt nulla. alesuada",
+        "conf": 0.744
+      },
+      {
+        "text": "scelerisque varius munc vel risus",
+        "conf": 0.747
+      },
+      {
+        "text": "Viuet gits ut morbi enim nunc commodo viverra",
+        "conf": 0.747
+      },
+      {
+        "text": "scretu purs t faucibus. aecenas maecenas accumsan.",
+        "conf": 0.747
+      },
+      {
+        "text": "sed enim ut sem",
+        "conf": 0.747
+      },
+      {
+        "text": "cibus pulyinar Slandit aliguam",
+        "conf": 0.747
+      },
+      {
+        "text": "ntum.urpis",
+        "conf": 0.921
+      },
+      {
+        "text": "tuim at din. lt tellus",
+        "conf": 0.879
+      },
+      {
+        "text": "nsagittis Blesy you. Pndreas. Maybe Jl see you u - ii -",
+        "conf": 0.893
+      },
+      {
+        "text": "Gy the shrine of Saint Satia one of",
+        "conf": 0.879
+      },
+      {
+        "text": "unc vel these days.s",
+        "conf": 0.879
+      },
+      {
+        "text": "do",
+        "conf": 0.669
+      },
+      {
+        "text": "nas",
+        "conf": 0.669
+      },
+      {
+        "text": "uel",
+        "conf": 0.921
+      },
+      {
+        "text": "amusb",
+        "conf": 0.921
+      },
+      {
+        "text": "7.",
+        "conf": 0.879
+      },
+      {
+        "text": "u",
+        "conf": 0.921
+      },
+      {
+        "text": "2",
+        "conf": 0.669
+      },
+      {
+        "text": "Saint Satia",
+        "conf": 0.921
+      },
+      {
+        "text": "One ofTassing's patron saints,",
+        "conf": 0.921
+      },
+      {
+        "text": "Satia was alocalpagan who",
+        "conf": 0.921
+      },
+      {
+        "text": "converted to Christianity and",
+        "conf": 0.921
+      },
+      {
+        "text": "t i r a c l o a s l y a i d e d S a i tt n o r i t z s",
+        "conf": 0.879
+      },
+      {
+        "text": "s o l d i e r s i t h t oo d i tt b e d e a d o t",
+        "conf": 0.743
+      },
+      {
+        "text": "w i n t e r . S h e w a s t a r t y r e d t o r h e r",
+        "conf": 0.879
+      },
+      {
+        "text": "actio ns.",
+        "conf": 0.921
+      }
+    ]
+  },
+  {
+    "file": "pentiment_5.jpg",
+    "ocrMs": 568,
+    "lineCount": 5,
+    "charCount": 47,
+    "text": "Clara You think it takes a brave man to commit amurder? I A",
+    "lines": [
+      {
+        "text": "Clara",
+        "conf": 0.928
+      },
+      {
+        "text": "You think it takes a brave man to commit",
+        "conf": 0.988
+      },
+      {
+        "text": "amurder?",
+        "conf": 0.928
+      },
+      {
+        "text": "I",
+        "conf": 0.928
+      },
+      {
+        "text": "A",
+        "conf": 0.983
+      }
+    ]
+  },
+  {
+    "file": "pentiment_6.jpg",
+    "ocrMs": 743,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "pentiment_7.jpg",
+    "ocrMs": 850,
+    "lineCount": 4,
+    "charCount": 93,
+    "text": "Piero Art is illusion, storytelling, but in their most sublime form , these images illuminate ab path to trath.",
+    "lines": [
+      {
+        "text": "Piero",
+        "conf": 0.953
+      },
+      {
+        "text": "Art is illusion, storytelling, but in their most",
+        "conf": 0.975
+      },
+      {
+        "text": "sublime form , these images illuminate ab",
+        "conf": 0.958
+      },
+      {
+        "text": "path to trath.",
+        "conf": 0.953
+      }
+    ]
+  },
+  {
+    "file": "rdr2_0.jpg",
+    "ocrMs": 476,
+    "lineCount": 2,
+    "charCount": 3,
+    "text": "H ME",
+    "lines": [
+      {
+        "text": "H",
+        "conf": 0.572
+      },
+      {
+        "text": "ME",
+        "conf": 0.572
+      }
+    ]
+  },
+  {
+    "file": "rdr2_1.jpg",
+    "ocrMs": 603,
+    "lineCount": 1,
+    "charCount": 2,
+    "text": "YT",
+    "lines": [
+      {
+        "text": "YT",
+        "conf": 0.629
+      }
+    ]
+  },
+  {
+    "file": "rdr2_2.jpg",
+    "ocrMs": 583,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "rdr2_3.jpg",
+    "ocrMs": 391,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "rdr2_4.jpg",
+    "ocrMs": 451,
+    "lineCount": 0,
+    "charCount": 0,
+    "text": "",
+    "lines": []
+  },
+  {
+    "file": "witcher3_0.jpg",
+    "ocrMs": 643,
+    "lineCount": 8,
+    "charCount": 51,
+    "text": "i O N THE WITCHER WILD HUNT FREE NEXT-GEN CAPTURED ON PC UP DATE",
+    "lines": [
+      {
+        "text": "i",
+        "conf": 0.794
+      },
+      {
+        "text": "O",
+        "conf": 0.938
+      },
+      {
+        "text": "N",
+        "conf": 0.794
+      },
+      {
+        "text": "THE",
+        "conf": 0.794
+      },
+      {
+        "text": "WITCHER",
+        "conf": 0.794
+      },
+      {
+        "text": "WILD HUNT",
+        "conf": 0.938
+      },
+      {
+        "text": "FREE NEXT-GEN",
+        "conf": 0.938
+      },
+      {
+        "text": "CAPTURED ON PC UP DATE",
+        "conf": 0.97
+      }
+    ]
+  },
+  {
+    "file": "witcher3_1.jpg",
+    "ocrMs": 573,
+    "lineCount": 6,
+    "charCount": 47,
+    "text": "V THE WITCHER D HUNT FREE NEXT-GEN CAPTURED ON PC UPDATEL",
+    "lines": [
+      {
+        "text": "V",
+        "conf": 0.959
+      },
+      {
+        "text": "THE",
+        "conf": 0.959
+      },
+      {
+        "text": "WITCHER",
+        "conf": 0.959
+      },
+      {
+        "text": "D HUNT",
+        "conf": 0.962
+      },
+      {
+        "text": "FREE NEXT-GEN",
+        "conf": 0.962
+      },
+      {
+        "text": "CAPTURED ON PC UPDATEL",
+        "conf": 0.937
+      }
+    ]
+  },
+  {
+    "file": "witcher3_2.jpg",
+    "ocrMs": 588,
+    "lineCount": 7,
+    "charCount": 51,
+    "text": "E & THE WITTHER WILD IHUNT FREE NEXT-GEN CAPTURED ON PC UP DATE",
+    "lines": [
+      {
+        "text": "E",
+        "conf": 0.91
+      },
+      {
+        "text": "&",
+        "conf": 0.978
+      },
+      {
+        "text": "THE",
+        "conf": 0.91
+      },
+      {
+        "text": "WITTHER",
+        "conf": 0.928
+      },
+      {
+        "text": "WILD IHUNT",
+        "conf": 0.91
+      },
+      {
+        "text": "FREE NEXT-GEN",
+        "conf": 0.978
+      },
+      {
+        "text": "CAPTURED ON PC UP DATE",
+        "conf": 0.982
+      }
+    ]
+  },
+  {
+    "file": "witcher3_3.jpg",
+    "ocrMs": 545,
+    "lineCount": 5,
+    "charCount": 51,
+    "text": "THE WITCHER WILD HUNT FREE NEXT-GEN CAPTURED ON PC UP DATELES",
+    "lines": [
+      {
+        "text": "THE",
+        "conf": 0.976
+      },
+      {
+        "text": "WITCHER",
+        "conf": 0.965
+      },
+      {
+        "text": "WILD HUNT",
+        "conf": 0.976
+      },
+      {
+        "text": "FREE NEXT-GEN",
+        "conf": 0.965
+      },
+      {
+        "text": "CAPTURED ON PC UP DATELES",
+        "conf": 0.911
+      }
+    ]
+  },
+  {
+    "file": "witcher3_4.jpg",
+    "ocrMs": 537,
+    "lineCount": 4,
+    "charCount": 21,
+    "text": "i U WITCHER THE WILDGHUNT",
+    "lines": [
+      {
+        "text": "i",
+        "conf": 0.952
+      },
+      {
+        "text": "U",
+        "conf": 0.873
+      },
+      {
+        "text": "WITCHER THE",
+        "conf": 0.913
+      },
+      {
+        "text": "WILDGHUNT",
+        "conf": 0.923
+      }
+    ]
+  },
+  {
+    "file": "witcher3_5.jpg",
+    "ocrMs": 641,
+    "lineCount": 4,
+    "charCount": 15,
+    "text": "EES 1 THE WITCHER A",
+    "lines": [
+      {
+        "text": "EES",
+        "conf": 0.567
+      },
+      {
+        "text": "1",
+        "conf": 0.567
+      },
+      {
+        "text": "THE",
+        "conf": 0.923
+      },
+      {
+        "text": "WITCHER A",
+        "conf": 0.923
+      }
+    ]
+  },
+  {
+    "file": "witcher3_6.jpg",
+    "ocrMs": 610,
+    "lineCount": 3,
+    "charCount": 18,
+    "text": "THE WITCHER WILD HUNT",
+    "lines": [
+      {
+        "text": "THE",
+        "conf": 0.999
+      },
+      {
+        "text": "WITCHER",
+        "conf": 0.999
+      },
+      {
+        "text": "WILD HUNT",
+        "conf": 0.999
+      }
+    ]
+  },
+  {
+    "file": "witcher3_7.jpg",
+    "ocrMs": 609,
+    "lineCount": 3,
+    "charCount": 18,
+    "text": "THE WITCHER WILD HUNT",
+    "lines": [
+      {
+        "text": "THE",
+        "conf": 0.999
+      },
+      {
+        "text": "WITCHER",
+        "conf": 1
+      },
+      {
+        "text": "WILD HUNT",
+        "conf": 0.999
+      }
+    ]
+  }
+]

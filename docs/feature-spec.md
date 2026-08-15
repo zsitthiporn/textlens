@@ -49,6 +49,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | R4 | Region resize / move | P1 | 🔴 | ลากขอบปรับได้โดยไม่ต้องเลือกใหม่ |
 | R5 | Full-screen mode | P1 | 🔵 | ไม่เลือกกรอบ = ทั้งจอ |
 | R6 | **Monitor picker** | P0 | 🔴 | เลือกจอ + overlay ไปโผล่จอนั้น รองรับ DPI ต่างกันต่อจอ |
+| R7 | **Region padding + edge warning** | P0 | 🟢 | เผื่อ margin รอบกรอบ และเตือนเมื่อข้อความชิดขอบ — [spike S1](spikes/2026-08-15-s1-ocr-engine.md) วัดได้ว่า crop ที่กินขอบตัวอักษรทำให้ OCR พังทันที (`Logician`→`ogician`) |
 | C1 | Region capture | P0 | 🔵 | จับเฉพาะ region bounds |
 | C2 | Adaptive interval | P0 | 🔵 | active / idle / deep-idle ปรับตามความถี่ที่ภาพเปลี่ยน |
 | C3 | Change detection | P0 | 🔵🟢 | dimension → byte-equal → sampled pixel diff. 🟢 diff เฉพาะ region |
@@ -75,6 +76,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | O5 | **Text grouping** | P0 | 🔵 | paragraph gap + column detection + sentence boundary (อยู่ฝั่ง Node) |
 | O6 | **Coordinate space handling** | P0 | 🟢 | physical px → logical px ผ่าน converter ตัวเดียวที่มี test |
 | O7 | Source language config | P1 | 🔵 | เลือกภาษาต้นทาง |
+| O8 | **OCR preflight check** | P0 | 🟢 | ตรวจตอนเปิดแอปว่ามี en-US recognizer ไหม ถ้าไม่มีบอกวิธีติดตั้ง language pack — **ถ้าไม่มี แอปใช้งานไม่ได้เลย** (พบใน [spike S1](spikes/2026-08-15-s1-ocr-engine.md)) |
 
 > OCR อ่าน **ภาษาต้นทาง** ไม่ใช่ปลายทาง → en→th ไม่ต้องมี Thai OCR model
 
@@ -220,7 +222,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
   → engine ล่ม → เห็นข้อความบอก ไม่ใช่เงียบ
 ```
 
-**P0**: R1 R2 R6 C1 C2 C3 · G1 G3 G4 G5 G6 · O1 O4 O5 O6 · T1 T2 T6 T7 T9 T10 · K1 K2 · A1 A3 A4 A5 A6 A7 A8 A9 · F1 F2 F3 · U1 U2 U3 U4 U5 U6 U7 · H1 H2 H3 H5 · ST1 ST2 ST3 ST4 · L1 L3 L5 · PR1
+**P0**: R1 R2 R6 R7 C1 C2 C3 · G1 G3 G4 G5 G6 · O1 O4 O5 O6 O8 · T1 T2 T6 T7 T9 T10 · K1 K2 · A1 A3 A4 A5 A6 A7 A8 A9 · F1 F2 F3 · U1 U2 U3 U4 U5 U6 U7 · H1 H2 H3 H5 · ST1 ST2 ST3 ST4 · L1 L3 L5 · PR1
 
 > **หมายเหตุเรื่อง ID**: `S1`–`S3` สงวนไว้สำหรับ **spike ในหัวข้อ 5** เท่านั้น — feature ของ settings ใช้ `ST*` และ privacy ใช้ `PR*` เพื่อไม่ให้ชนกับ spike ID และ priority label (P0/P1/P2)
 
@@ -256,7 +258,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 |---|---|
 | Tech stack | Electron + TypeScript |
 | Platform | Windows เท่านั้น |
-| Capture + OCR | .NET 10 sidecar (self-contained AOT), Windows Graphics Capture + Windows.Media.Ocr |
+| Capture + OCR | .NET sidecar (self-contained AOT), Windows Graphics Capture + Windows.Media.Ocr — target `net9.0-windows10.0.19041.0` จนกว่าจะติดตั้ง .NET 10 SDK (เครื่อง dev มี 2.2/6/8/9) |
 | IPC | JSON lines over stdio — **pixel ไม่ข้าม wire** |
 | Text grouping | ฝั่ง Node |
 | Primary use case | subtitle / เกม |
@@ -265,10 +267,8 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 ## 5. ความเสี่ยงที่ต้อง spike
 
-| # | ความเสี่ยง | ผลถ้าเป็นจริง |
-|---|-----------|---------------|
-| **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี (font ตกแต่ง / anti-alias / พื้นหลังโปร่ง) | เหตุผลหลักของ .NET sidecar หายไปครึ่งหนึ่ง → กลับไป PaddleOCR ONNX |
-| **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | F1 ใช้ไม่ได้ ต้องพึ่ง F2/F3 อย่างเดียว |
-| **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | ต้องเร่ง T3 (API key) ขึ้นมาเป็น P0 |
-
-**ลำดับ spike: S1 → S2 → S3** — S1 กระทบการตัดสินใจมากที่สุด
+| # | ความเสี่ยง | สถานะ | ผล |
+|---|-----------|-------|-----|
+| **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี | ✅ **ผ่าน** — [รายงาน](spikes/2026-08-15-s1-ocr-engine.md) | เร็วกว่า PaddleOCR 6 เท่า (p50 99ms vs 580ms เต็มจอ / 30ms บน region) และแม่นกว่าในเนื้อหาเกม → คงสถาปัตยกรรม .NET sidecar. **เหลือช่องว่าง**: ยังไม่ได้ทดสอบ subtitle ตัวอักษรขาวลอยบนวิดีโอที่ไม่มีกล่องพื้นหลัง |
+| **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | ⬜ ถัดไป | F1 ใช้ไม่ได้ ต้องพึ่ง F2/F3 อย่างเดียว |
+| **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | ⬜ | ต้องเร่ง T3 (API key) ขึ้นมาเป็น P0 |

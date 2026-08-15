@@ -58,8 +58,8 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 | วิเคราะห์ reference project | ✅ เสร็จ |
 | Feature spec | ✅ เสร็จ |
 | Architecture design | ✅ เสร็จ |
-| **Spike S1** — วัดว่า Windows.Media.Ocr อ่าน subtitle เกมได้ดีพอไหม | ⬜ ถัดไป |
-| Spike S2 — ยืนยัน exclude-from-capture ทำงานจริง | ⬜ |
+| [Spike S1](docs/spikes/2026-08-15-s1-ocr-engine.md) — Windows.Media.Ocr อ่านข้อความในเกมได้ดีพอไหม | ✅ **ผ่าน** — เร็วกว่า PaddleOCR 6 เท่า แม่นกว่าด้วย |
+| Spike S2 — ยืนยัน exclude-from-capture ทำงานจริง | ⬜ ถัดไป |
 | Spike S3 — Google endpoint ทนโหลด subtitle ไหม | ⬜ |
 | Implementation plan | ⬜ |
 | MVP | ⬜ |
