@@ -55,7 +55,7 @@ public readonly record struct CapturedRegion(
 /// <c>scale</c> is carried through to the wire as a number and never applied
 /// (CLAUDE.md invariant 3, design doc section 3).</para>
 /// </summary>
-public sealed class CaptureService : IDisposable
+public sealed class CaptureService : IRegionSource, IDisposable
 {
     private const int FramePoolBufferCount = 2;
 

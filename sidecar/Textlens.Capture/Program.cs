@@ -92,13 +92,35 @@ internal static class Program
             stdout.WriteLine(ProtocolCodec.Encode(preflight));
         }
 
-        // Hold the process open on stdin. M2-06 replaces this with the command
-        // dispatcher; for now every line is consumed and ignored. A null read means
-        // the parent closed the pipe, which is our shutdown signal.
-        using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
-        while (stdin.ReadLine() is not null)
+        // The command loop (M2-06). One line in, at least one event out, until the parent
+        // closes the pipe — a null read is the shutdown signal.
+        //
+        // Every event in the process funnels through this one lambda and its lock. That is
+        // not ceremony: capture ticks run on threadpool threads while acks are written from
+        // this one, and two interleaved WriteLine calls would splice two JSON objects into
+        // a line that neither side can parse. One writer, one lock, no exceptions.
+        var writeGate = new object();
+        void Emit(ISidecarEvent evt)
         {
-            // Intentionally empty — see M2-06.
+            lock (writeGate)
+            {
+                stdout.WriteLine(ProtocolCodec.Encode(evt));
+            }
+        }
+
+        using var dispatcher = new Dispatcher(new WindowsCaptureHost(), Emit);
+        using var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+
+        while (stdin.ReadLine() is { } line)
+        {
+            // A blank line is what a human typing into the process produces by pressing
+            // enter, and it is not worth an error event.
+            if (line.Trim().Length == 0)
+            {
+                continue;
+            }
+
+            dispatcher.Execute(line);
         }
 
         return 0;

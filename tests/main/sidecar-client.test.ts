@@ -92,7 +92,7 @@ const write = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const frame = (extra = {}) => ({
   ev: 'frame',
   seq: 1,
-  timings: { capture: 11, diff: 2, ocr: 47 },
+  timings: { captureUs: 11_000, diffUs: 2_000, ocrUs: 47_000 },
   monitor: { id: '\\\\\\\\.\\\\DISPLAY1', scale: 1, bounds: [0, 0, 3440, 1440] },
   region: [400, 1200, 1200, 150],
   lines: [{ text: ${JSON.stringify(FRAME_TEXT)}, bbox: [10, 20, 500, 30], conf: 0.94 }],
@@ -334,7 +334,7 @@ describe('SidecarClient against a live child process', () => {
     const received = await frame;
     expect(received.seq).toBe(1);
     expect(received.lines[0]?.text).toBe(FRAME_TEXT);
-    expect(received.timings).toEqual({ capture: 11, diff: 2, ocr: 47 });
+    expect(received.timings).toEqual({ captureUs: 11000, diffUs: 2000, ocrUs: 47000 });
   });
 
   it('logs a warning for an undecodable line and keeps reading the stream', async () => {

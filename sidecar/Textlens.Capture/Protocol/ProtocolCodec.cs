@@ -70,6 +70,7 @@ public static class ProtocolCodec
         ReadyEvent e => JsonSerializer.Serialize(e, ProtocolJsonContext.Default.ReadyEvent),
         FrameEvent e => JsonSerializer.Serialize(e, ProtocolJsonContext.Default.FrameEvent),
         NoChangeEvent e => JsonSerializer.Serialize(e, ProtocolJsonContext.Default.NoChangeEvent),
+        AckEvent e => JsonSerializer.Serialize(e, ProtocolJsonContext.Default.AckEvent),
         ErrorEvent e => JsonSerializer.Serialize(e, ProtocolJsonContext.Default.ErrorEvent),
         _ => throw new ArgumentOutOfRangeException(nameof(evt), evt.GetType().FullName, "no encoder for this event type"),
     };
@@ -103,6 +104,7 @@ public static class ProtocolCodec
                     EventKind.Ready => Ok<ISidecarEvent>(root.Deserialize(ProtocolJsonContext.Default.ReadyEvent)),
                     EventKind.Frame => Ok<ISidecarEvent>(root.Deserialize(ProtocolJsonContext.Default.FrameEvent)),
                     EventKind.NoChange => Ok<ISidecarEvent>(root.Deserialize(ProtocolJsonContext.Default.NoChangeEvent)),
+                    EventKind.Ack => Ok<ISidecarEvent>(root.Deserialize(ProtocolJsonContext.Default.AckEvent)),
                     EventKind.Error => Ok<ISidecarEvent>(root.Deserialize(ProtocolJsonContext.Default.ErrorEvent)),
                     _ => DecodeResult<ISidecarEvent>.Failed(DecodeFailure.UnknownKind, $"unknown event \"{kind}\""),
                 };

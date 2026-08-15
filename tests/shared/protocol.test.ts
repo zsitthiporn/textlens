@@ -41,6 +41,8 @@ const EVENT_FIXTURES = [
   'event-frame.json',
   'event-frame-debug.json',
   'event-nochange.json',
+  'event-ack.json',
+  'event-ack-monitors.json',
   'event-error.json',
 ] as const;
 
@@ -73,6 +75,7 @@ describe('the kind tables cover their unions', () => {
       ready: true,
       frame: true,
       nochange: true,
+      ack: true,
       error: true,
     };
     expect([...EVENT_KINDS].sort()).toEqual(Object.keys(exhaustive).sort());
@@ -113,10 +116,14 @@ describe('golden fixtures — the same files the xunit suite reads', () => {
     expect(decoded.value).toEqual({
       ev: 'frame',
       seq: 42,
-      timings: { capture: 12, diff: 3, ocr: 58 },
+      // Microseconds. `captureUs: 574` is the real measured p50 and is precisely why the
+      // unit changed - as an integer millisecond this field read 0 on every frame.
+      timings: { captureUs: 574, diffUs: 159, ocrUs: 24_680 },
       monitor: { id: '\\\\.\\DISPLAY1', scale: 1.5, bounds: [0, 0, 3840, 2160] },
       region: [400, 1800, 1200, 150],
-      lines: [{ text: 'You must find the key', bbox: [120, 80, 540, 32], conf: 0.93 }],
+      // No `conf`: Windows.Media.Ocr reports none, so this is the shape the sidecar
+      // actually emits.
+      lines: [{ text: 'You must find the key', bbox: [120, 80, 540, 32] }],
     } satisfies FrameEvent);
   });
 
@@ -126,6 +133,9 @@ describe('golden fixtures — the same files the xunit suite reads', () => {
     expect(decoded.ok).toBe(true);
     if (!decoded.ok || decoded.value.ev !== 'frame') throw new Error('expected a frame');
     expect(decoded.value.imagePng).toBe('iVBORw0KGgo=');
+    // This fixture is the "every optional field populated" half of the pair, so the
+    // conf-present branch is exercised even though the current engine never fills it.
+    expect(decoded.value.lines[0]?.conf).toBe(0.93);
     // The secondary monitor sits left of primary, so its origin is negative — the
     // case the design doc calls out as the one the reference project got wrong.
     expect(decoded.value.monitor.bounds).toEqual([-1920, 0, 1920, 1080]);
@@ -145,7 +155,28 @@ describe('golden fixtures — the same files the xunit suite reads', () => {
       intervalIdle: 2000,
       diffThreshold: 0.02,
       ocrLanguage: 'en-US',
+      debugFrameEnabled: false,
     });
+  });
+
+  it('decodes the plain ack, and the listMonitors ack that carries displays', () => {
+    const plain = decodeEvent(readFixture('event-ack.json'));
+    expect(plain.ok).toBe(true);
+    if (!plain.ok || plain.value.ev !== 'ack') throw new Error('expected an ack');
+    expect(plain.value).toEqual({ ev: 'ack', cmd: 'start', state: 'running' });
+    // Absent, not null: an ack to a command with nothing to list stays three fields wide.
+    expect(encodeEvent(plain.value)).not.toContain('monitors');
+
+    const listing = decodeEvent(readFixture('event-ack-monitors.json'));
+    expect(listing.ok).toBe(true);
+    if (!listing.ok || listing.value.ev !== 'ack') throw new Error('expected an ack');
+    expect(listing.value.cmd).toBe('listMonitors');
+    expect(listing.value.state).toBe('idle');
+    expect(listing.value.monitors).toEqual([
+      { id: '\\\\.\\DISPLAY1', scale: 1.5, bounds: [0, 0, 3840, 2160] },
+      // The display left of primary, whose origin is negative.
+      { id: '\\\\.\\DISPLAY2', scale: 1.25, bounds: [-1920, 0, 1920, 1080] },
+    ]);
   });
 
   it('omits imagePng from an ordinary frame instead of writing null', () => {
@@ -231,10 +262,21 @@ describe('nothing on the wire can crash the reader', () => {
     ['{"ev":"nochange"}', 'invalid-shape'],
     ['{"ev":"ready","version":"1.0.0","ocrLanguages":"en-US"}', 'invalid-shape'],
     [
-      '{"ev":"frame","seq":1,"timings":{"capture":1,"diff":1,"ocr":1},'
+      '{"ev":"frame","seq":1,"timings":{"captureUs":1,"diffUs":1,"ocrUs":1},'
         + '"monitor":{"id":"a","scale":1,"bounds":[0,0,10]},"region":[0,0,1,1],"lines":[]}',
       'invalid-shape',
     ],
+    // A frame still carrying the old millisecond field names is rejected rather than
+    // silently decoding to undefined timings. This is the half of a unit change that is
+    // easy to forget: an old sidecar talking to a new Node must fail loudly.
+    [
+      '{"ev":"frame","seq":1,"timings":{"capture":12,"diff":3,"ocr":58},'
+        + '"monitor":{"id":"a","scale":1,"bounds":[0,0,10,10]},"region":[0,0,1,1],"lines":[]}',
+      'invalid-shape',
+    ],
+    ['{"ev":"ack","cmd":"start"}', 'invalid-shape'],
+    ['{"ev":"ack","state":"running"}', 'invalid-shape'],
+    ['{"ev":"ack","cmd":"listMonitors","state":"idle","monitors":[{"id":"a","scale":1}]}', 'invalid-shape'],
   ])('turns %j into a value, never an exception', (line, expected) => {
     expect(() => decodeEvent(line)).not.toThrow();
     const decoded = decodeEvent(line);
@@ -272,16 +314,37 @@ describe('encode then decode returns the same value', () => {
     const original: FrameEvent = {
       ev: 'frame',
       seq: 4294967400,
-      timings: { capture: 12, diff: 3, ocr: 58 },
+      timings: { captureUs: 574, diffUs: 159, ocrUs: 24_680 },
       monitor: { id: '\\\\.\\DISPLAY2', scale: 1.25, bounds: [-1920, 0, 1920, 1080] },
       region: [400, 1800, 1200, 150],
       lines: [
+        // One line each way across the optional `conf`: present, and absent - which is
+        // what the current recognizer actually produces.
         { text: 'You must find the key', bbox: [120, 80, 540, 32], conf: 0.93 },
-        { text: 'before the gate closes', bbox: [118, 124, 561, 33], conf: 0.87 },
+        { text: 'before the gate closes', bbox: [118, 124, 561, 33] },
       ],
     };
 
     expect(decodeOrThrow(encodeEvent(original))).toEqual(original);
+    // Absent, never `null`: a third state on the wire is a third case every consumer has
+    // to handle, and `conf` is already the field two features branch on.
+    expect(encodeEvent(original)).not.toContain('null');
+  });
+
+  it('round-trips both shapes of ack', () => {
+    const acks: SidecarEvent[] = [
+      { ev: 'ack', cmd: 'configure', state: 'configured' },
+      {
+        ev: 'ack',
+        cmd: 'listMonitors',
+        state: 'running',
+        monitors: [{ id: '\\\\.\\DISPLAY3', scale: 1.25, bounds: [3440, 451, 1920, 1080] }],
+      },
+    ];
+
+    for (const ack of acks) {
+      expect(decodeOrThrow(encodeEvent(ack))).toEqual(ack);
+    }
   });
 
   it('round-trips every command', () => {
@@ -299,6 +362,7 @@ describe('encode then decode returns the same value', () => {
         intervalIdle: 2000,
         diffThreshold: 0.02,
         ocrLanguage: 'en-US',
+        debugFrameEnabled: true,
       },
     ] as const;
 

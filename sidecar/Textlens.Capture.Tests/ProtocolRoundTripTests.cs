@@ -14,7 +14,7 @@ public class ProtocolRoundTripTests
     private static FrameEvent SampleFrame() => new()
     {
         Seq = 42,
-        Timings = new FrameTimings { Capture = 12, Diff = 3, Ocr = 58 },
+        Timings = new FrameTimings { CaptureUs = 574, DiffUs = 159, OcrUs = 24680 },
         Monitor = new MonitorInfo
         {
             Id = @"\\.\DISPLAY1",
@@ -24,8 +24,10 @@ public class ProtocolRoundTripTests
         Region = new Rect(400, 1800, 1200, 150),
         Lines =
         [
+            // One line each way across the optional `conf`: present, and absent — which is
+            // what the current recognizer actually produces.
             new OcrLine { Text = "You must find the key", Bbox = new Rect(120, 80, 540, 32), Conf = 0.93 },
-            new OcrLine { Text = "before the gate closes", Bbox = new Rect(118, 124, 561, 33), Conf = 0.87 },
+            new OcrLine { Text = "before the gate closes", Bbox = new Rect(118, 124, 561, 33) },
         ],
     };
 
@@ -156,9 +158,55 @@ public class ProtocolRoundTripTests
             IntervalIdle = 2000,
             DiffThreshold = 0.02,
             OcrLanguage = "en-US",
+            DebugFrameEnabled = true,
         };
 
         Assert.Equal(original, RoundTripCommand(original));
+    }
+
+    [Fact]
+    public void AckEvent_SurvivesTheRoundTrip_WithAndWithoutMonitors()
+    {
+        var plain = new AckEvent { Cmd = CommandKind.Stop, State = SidecarState.Stopped };
+
+        Assert.Equal(plain, RoundTrip(plain));
+        // Absent, not null — the same treatment `imagePng` gets, so an ack to a command
+        // that has nothing to list stays three fields wide.
+        Assert.DoesNotContain("monitors", ProtocolCodec.Encode(plain), StringComparison.Ordinal);
+
+        var listing = new AckEvent
+        {
+            Cmd = CommandKind.ListMonitors,
+            State = SidecarState.Configured,
+            Monitors =
+            [
+                new MonitorInfo { Id = @"\\.\DISPLAY1", Scale = 1.5, Bounds = new Rect(0, 0, 3840, 2160) },
+                new MonitorInfo { Id = @"\\.\DISPLAY2", Scale = 1.25, Bounds = new Rect(-1920, 0, 1920, 1080) },
+            ],
+        };
+
+        var result = RoundTrip(listing);
+
+        // Arrays compare by reference under record equality, so compare the encoded form.
+        Assert.Equal(ProtocolCodec.Encode(listing), ProtocolCodec.Encode(result));
+        Assert.NotNull(result.Monitors);
+        Assert.Equal(new Rect(-1920, 0, 1920, 1080), result.Monitors[1].Bounds);
+    }
+
+    [Fact]
+    public void OcrLine_WithoutConfidence_OmitsTheFieldRatherThanWritingNull()
+    {
+        // What this sidecar actually emits: Windows.Media.Ocr reports no confidence, and a
+        // `"conf":null` on the wire would be a third state for every consumer to handle.
+        var frame = SampleFrame() with
+        {
+            Lines = [new OcrLine { Text = "You must find the key", Bbox = new Rect(120, 80, 540, 32) }],
+        };
+
+        var encoded = ProtocolCodec.Encode(frame);
+
+        Assert.DoesNotContain("conf", encoded, StringComparison.Ordinal);
+        Assert.Null(Assert.Single(RoundTrip(frame).Lines).Conf);
     }
 
     [Theory]

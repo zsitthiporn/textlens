@@ -101,6 +101,17 @@ export interface ConfigureCommand {
   readonly diffThreshold: number;
   /** BCP-47 tag of the OCR recognizer to use, e.g. `en-US`. */
   readonly ocrLanguage: string;
+  /**
+   * Whether `debugFrame` is permitted to return pixels.
+   *
+   * Off is the safe value and there is no default. Pixels crossing IPC is the single
+   * documented exception to architecture invariant 1, and the design doc says
+   * `debugFrame` is off unless explicitly enabled - but `configure` had no field to
+   * enable it with, so "off by default" was unimplementable. Required rather than
+   * optional for the same reason every other field here is: an omitted flag that
+   * defaults to `false` reads exactly like a flag the sender thought it had set.
+   */
+  readonly debugFrameEnabled: boolean;
 }
 
 /** Begin the capture loop. */
@@ -135,13 +146,28 @@ export type SidecarCommand =
 // Events (sidecar -> Node)
 // ---------------------------------------------------------------------------
 
-export const EVENT_KINDS = ['ready', 'frame', 'nochange', 'error'] as const;
+export const EVENT_KINDS = ['ready', 'frame', 'nochange', 'ack', 'error'] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];
 
 export function isEventKind(value: unknown): value is EventKind {
   return typeof value === 'string' && (EVENT_KINDS as readonly string[]).includes(value);
 }
+
+/**
+ * The sidecar's command state machine.
+ *
+ * `idle` is before any `configure`; `configured` means a region and monitor are known
+ * but nothing is capturing; `running` means the capture loop is ticking; `stopped` means
+ * it was running and was halted - kept distinct from `configured` so a `stop` before any
+ * `start` is visibly different from one after it.
+ *
+ * Not a closed union on the wire: `AckEvent.state` is typed as a plain string for the
+ * same forward-compatibility reason `ErrorEvent.code` is.
+ */
+export const SIDECAR_STATES = ['idle', 'configured', 'running', 'stopped'] as const;
+
+export type SidecarState = (typeof SIDECAR_STATES)[number];
 
 /**
  * First line the sidecar writes. `ocrLanguages` is the recognizer list actually
@@ -154,11 +180,32 @@ export interface ReadyEvent {
   readonly ocrLanguages: readonly string[];
 }
 
-/** Per-stage cost of one capture round, in ms (feature L3). */
+/**
+ * Per-stage cost of one capture round, in **microseconds** (feature L3).
+ *
+ * These were milliseconds, which made the capture metric permanently useless: measured
+ * capture is p50 `0.574ms`, and as an integer number of milliseconds that is `0` on every
+ * frame forever. Design doc section 4 asks for these numbers so that "we are over budget"
+ * can be answered with "here is which stage", and a field that cannot express its own
+ * typical value answers nothing.
+ *
+ * Integers, not floats: all the protocol fixtures are re-encoded and compared byte for
+ * byte by both suites, and C# and JavaScript do not format decimals identically
+ * (`0.5` vs `0.50`). Microseconds keep the resolution *and* keep the values integral.
+ * The unit is in the field names because a bare `capture` that quietly changed unit is
+ * how a consumer ends up dividing by the wrong constant for a year.
+ *
+ * The budget table in design doc section 4 stays in milliseconds - it is the thing humans
+ * read - so consumers convert at the point of use. `metrics.ts` divides by 1000 exactly
+ * once, where it folds these into its ms-based budgets.
+ */
 export interface FrameTimings {
-  readonly capture: number;
-  readonly diff: number;
-  readonly ocr: number;
+  /** Frame-in-hand to buffer-ready, in µs. Excludes waiting for the compositor. */
+  readonly captureUs: number;
+  /** Change detection, in µs. */
+  readonly diffUs: number;
+  /** Recognition, in µs. Zero when the frame was unchanged and OCR was skipped. */
+  readonly ocrUs: number;
 }
 
 /**
@@ -178,8 +225,22 @@ export interface MonitorInfo {
 export interface OcrLine {
   readonly text: string;
   readonly bbox: Rect;
-  /** Recognizer confidence, 0..1. */
-  readonly conf: number;
+  /**
+   * Recognizer confidence, 0..1 - **present only when the engine actually reports one**,
+   * and therefore absent from the wire rather than sent as `null`.
+   *
+   * `Windows.Media.Ocr` reports none. Verified against the projection the sidecar builds
+   * on: `OcrResult` exposes `Lines`/`Text`/`TextAngle`, `OcrLine` exposes `Text`/`Words`,
+   * `OcrWord` exposes `Text`/`BoundingRect`. There is no confidence anywhere in that
+   * namespace, which is why spike S1's harness recorded text and boxes only.
+   *
+   * Optional rather than a constant, because a constant would be *misinformation*: every
+   * consumer would read `1.0` as "the recognizer is certain" when the truth is that it
+   * never said. That is the same silent-default failure `scale` is required to prevent -
+   * a field that is present, plausible and meaningless. Consumers that rank or filter on
+   * confidence (features O4 and U4) must handle its absence rather than defaulting it.
+   */
+  readonly conf?: number;
 }
 
 export interface FrameEvent {
@@ -201,6 +262,29 @@ export interface NochangeEvent {
 }
 
 /**
+ * The reply to a command that does not produce a `frame`.
+ *
+ * The design doc promises a reply to `listMonitors` and an ack to `configure`, `start`
+ * and `stop`, and until now nothing on the wire could carry any of them. Four bespoke
+ * reply events would be four decoder arms and four fixtures; one `ack` that names the
+ * command it answers is the same information in one shape. `snapshot` and `debugFrame`
+ * are unaffected - they already reply with a `frame`.
+ *
+ * **There is no correlation id.** Replies correlate by `cmd`, which is unambiguous only
+ * while at most one command of a kind is outstanding. That holds for this state machine,
+ * but anyone adding pipelined or concurrent commands has to add an id first.
+ */
+export interface AckEvent {
+  readonly ev: 'ack';
+  /** The `cmd` being acknowledged. An open string, like `ErrorEvent.code`. */
+  readonly cmd: string;
+  /** State *after* the command was applied. One of `SIDECAR_STATES`, but not pinned to it. */
+  readonly state: string;
+  /** Attached displays. Present only on the reply to `listMonitors`. */
+  readonly monitors?: readonly MonitorInfo[];
+}
+
+/**
  * Something failed inside the sidecar. `code` is intentionally an open string:
  * pinning it to a closed union would make a sidecar that learns a new failure mode
  * unparseable by an older Node build, which is the opposite of what this field is for.
@@ -211,7 +295,7 @@ export interface ErrorEvent {
   readonly message: string;
 }
 
-export type SidecarEvent = ReadyEvent | FrameEvent | NochangeEvent | ErrorEvent;
+export type SidecarEvent = ReadyEvent | FrameEvent | NochangeEvent | AckEvent | ErrorEvent;
 
 // ---------------------------------------------------------------------------
 // Decoding
@@ -310,6 +394,8 @@ export function decodeEvent(line: string): DecodeResult<SidecarEvent> {
       return decodeFrame(body);
     case 'nochange':
       return decodeNochange(body);
+    case 'ack':
+      return decodeAck(body);
     case 'error':
       return decodeError(body);
     default:
@@ -359,8 +445,12 @@ function decodeFrame(body: Record<string, unknown>): DecodeResult<FrameEvent> {
   if (!isFiniteNumber(seq)) return fail('invalid-shape', 'frame.seq must be a number');
 
   if (!isRecord(timings)) return fail('invalid-shape', 'frame.timings must be an object');
-  if (!isFiniteNumber(timings['capture']) || !isFiniteNumber(timings['diff']) || !isFiniteNumber(timings['ocr'])) {
-    return fail('invalid-shape', 'frame.timings needs numeric capture, diff and ocr');
+  if (
+    !isFiniteNumber(timings['captureUs'])
+    || !isFiniteNumber(timings['diffUs'])
+    || !isFiniteNumber(timings['ocrUs'])
+  ) {
+    return fail('invalid-shape', 'frame.timings needs numeric captureUs, diffUs and ocrUs');
   }
 
   if (!isRecord(monitor)) return fail('invalid-shape', 'frame.monitor must be an object');
@@ -378,8 +468,14 @@ function decodeFrame(body: Record<string, unknown>): DecodeResult<FrameEvent> {
     if (!isRecord(raw)) return fail('invalid-shape', `frame.lines[${i}] must be an object`);
     if (typeof raw['text'] !== 'string') return fail('invalid-shape', `frame.lines[${i}].text must be a string`);
     if (!isRect(raw['bbox'])) return fail('invalid-shape', `frame.lines[${i}].bbox must be [x, y, width, height]`);
-    if (!isFiniteNumber(raw['conf'])) return fail('invalid-shape', `frame.lines[${i}].conf must be a number`);
-    decodedLines.push({ text: raw['text'], bbox: toRect(raw['bbox']), conf: raw['conf'] });
+    // Absent is the normal case - Windows.Media.Ocr reports no confidence at all. Present
+    // but not a number is still a bug in the sender and is still rejected.
+    const conf: unknown = raw['conf'];
+    if (conf !== undefined && !isFiniteNumber(conf)) {
+      return fail('invalid-shape', `frame.lines[${i}].conf must be a number when present`);
+    }
+    const decodedLine: OcrLine = { text: raw['text'], bbox: toRect(raw['bbox']) };
+    decodedLines.push(conf === undefined ? decodedLine : { ...decodedLine, conf });
   }
 
   if (imagePng !== undefined && typeof imagePng !== 'string') {
@@ -389,7 +485,7 @@ function decodeFrame(body: Record<string, unknown>): DecodeResult<FrameEvent> {
   const frame: FrameEvent = {
     ev: 'frame',
     seq,
-    timings: { capture: timings['capture'], diff: timings['diff'], ocr: timings['ocr'] },
+    timings: { captureUs: timings['captureUs'], diffUs: timings['diffUs'], ocrUs: timings['ocrUs'] },
     monitor: { id: monitor['id'], scale: monitor['scale'], bounds: toRect(monitor['bounds']) },
     region: toRect(region),
     lines: decodedLines,
@@ -403,6 +499,29 @@ function decodeNochange(body: Record<string, unknown>): DecodeResult<NochangeEve
   return ok({ ev: 'nochange', seq });
 }
 
+function decodeAck(body: Record<string, unknown>): DecodeResult<AckEvent> {
+  const { cmd, state, monitors } = body;
+  if (typeof cmd !== 'string') return fail('invalid-shape', 'ack.cmd must be a string');
+  if (typeof state !== 'string') return fail('invalid-shape', 'ack.state must be a string');
+
+  if (monitors === undefined) return ok({ ev: 'ack', cmd, state });
+
+  if (!Array.isArray(monitors)) return fail('invalid-shape', 'ack.monitors must be an array when present');
+  const decoded: MonitorInfo[] = [];
+  for (let i = 0; i < monitors.length; i += 1) {
+    const raw: unknown = monitors[i];
+    if (!isRecord(raw)) return fail('invalid-shape', `ack.monitors[${i}] must be an object`);
+    if (typeof raw['id'] !== 'string') return fail('invalid-shape', `ack.monitors[${i}].id must be a string`);
+    // Same coordinate contract as `frame.monitor`, and enforced the same way: the whole
+    // point of listMonitors is to hand M6-01 something it can pick a display from.
+    if (!isFiniteNumber(raw['scale'])) return fail('invalid-shape', `ack.monitors[${i}].scale is required`);
+    if (!isRect(raw['bounds'])) return fail('invalid-shape', `ack.monitors[${i}].bounds is required`);
+    decoded.push({ id: raw['id'], scale: raw['scale'], bounds: toRect(raw['bounds']) });
+  }
+
+  return ok({ ev: 'ack', cmd, state, monitors: decoded });
+}
+
 function decodeError(body: Record<string, unknown>): DecodeResult<ErrorEvent> {
   const { code, message } = body;
   if (typeof code !== 'string') return fail('invalid-shape', 'error.code must be a string');
@@ -411,13 +530,18 @@ function decodeError(body: Record<string, unknown>): DecodeResult<ErrorEvent> {
 }
 
 function decodeConfigure(body: Record<string, unknown>): DecodeResult<ConfigureCommand> {
-  const { region, monitorId, intervalActive, intervalIdle, diffThreshold, ocrLanguage } = body;
+  const { region, monitorId, intervalActive, intervalIdle, diffThreshold, ocrLanguage, debugFrameEnabled } = body;
   if (!isRect(region)) return fail('invalid-shape', 'configure.region must be [x, y, width, height]');
   if (typeof monitorId !== 'string') return fail('invalid-shape', 'configure.monitorId must be a string');
   if (!isFiniteNumber(intervalActive)) return fail('invalid-shape', 'configure.intervalActive must be a number');
   if (!isFiniteNumber(intervalIdle)) return fail('invalid-shape', 'configure.intervalIdle must be a number');
   if (!isFiniteNumber(diffThreshold)) return fail('invalid-shape', 'configure.diffThreshold must be a number');
   if (typeof ocrLanguage !== 'string') return fail('invalid-shape', 'configure.ocrLanguage must be a string');
+  // Required, not defaulted to false: an omitted flag is indistinguishable from one the
+  // sender believed it was setting, and this one gates pixels crossing IPC.
+  if (typeof debugFrameEnabled !== 'boolean') {
+    return fail('invalid-shape', 'configure.debugFrameEnabled must be a boolean');
+  }
   return ok({
     cmd: 'configure',
     region: toRect(region),
@@ -426,6 +550,7 @@ function decodeConfigure(body: Record<string, unknown>): DecodeResult<ConfigureC
     intervalIdle,
     diffThreshold,
     ocrLanguage,
+    debugFrameEnabled,
   });
 }
 
@@ -454,16 +579,37 @@ export function encodeEvent(event: SidecarEvent): string {
       const body: Record<string, unknown> = {
         ev: 'frame',
         seq: event.seq,
-        timings: { capture: event.timings.capture, diff: event.timings.diff, ocr: event.timings.ocr },
+        timings: {
+          captureUs: event.timings.captureUs,
+          diffUs: event.timings.diffUs,
+          ocrUs: event.timings.ocrUs,
+        },
         monitor: { id: event.monitor.id, scale: event.monitor.scale, bounds: toRect(event.monitor.bounds) },
         region: toRect(event.region),
-        lines: event.lines.map((line) => ({ text: line.text, bbox: toRect(line.bbox), conf: line.conf })),
+        lines: event.lines.map((line) => {
+          const encoded: Record<string, unknown> = { text: line.text, bbox: toRect(line.bbox) };
+          // Omitted, never `null` - matching `imagePng` and the C# side's
+          // JsonIgnoreCondition.WhenWritingNull.
+          if (line.conf !== undefined) encoded['conf'] = line.conf;
+          return encoded;
+        }),
       };
       if (event.imagePng !== undefined) body['imagePng'] = event.imagePng;
       return JSON.stringify(body);
     }
     case 'nochange':
       return JSON.stringify({ ev: 'nochange', seq: event.seq });
+    case 'ack': {
+      const body: Record<string, unknown> = { ev: 'ack', cmd: event.cmd, state: event.state };
+      if (event.monitors !== undefined) {
+        body['monitors'] = event.monitors.map((monitor) => ({
+          id: monitor.id,
+          scale: monitor.scale,
+          bounds: toRect(monitor.bounds),
+        }));
+      }
+      return JSON.stringify(body);
+    }
     case 'error':
       return JSON.stringify({ ev: 'error', code: event.code, message: event.message });
   }
@@ -481,6 +627,7 @@ export function encodeCommand(command: SidecarCommand): string {
         intervalIdle: command.intervalIdle,
         diffThreshold: command.diffThreshold,
         ocrLanguage: command.ocrLanguage,
+        debugFrameEnabled: command.debugFrameEnabled,
       });
     case 'listMonitors':
     case 'start':

@@ -1,5 +1,5 @@
 {"ev":"ready","version":"1.0.0","ocrLanguages":["en-US"]}
 {"ev":"heartbeat","seq":99,"uptimeMs":123456}
-{"ev":"frame","seq":44,"timings":{"capture":12,"diff":3,"ocr":58},"monitor":{"id":"\\\\.\\DISPLAY1","bounds":[0,0,3840,2160]},"region":[400,1800,1200,150],"lines":[]}
+{"ev":"frame","seq":44,"timings":{"captureUs":574,"diffUs":159,"ocrUs":24680},"monitor":{"id":"\\\\.\\DISPLAY1","bounds":[0,0,3840,2160]},"region":[400,1800,1200,150],"lines":[]}
 {"ev":"nochange","seq":45,
 {"ev":"nochange","seq":46}

@@ -1,0 +1,1 @@
+{"ev":"ack","cmd":"listMonitors","state":"idle","monitors":[{"id":"\\\\.\\DISPLAY1","scale":1.5,"bounds":[0,0,3840,2160]},{"id":"\\\\.\\DISPLAY2","scale":1.25,"bounds":[-1920,0,1920,1080]}]}

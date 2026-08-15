@@ -134,11 +134,18 @@ export class MetricsRecorder {
     ring.add(ms);
   }
 
-  /** Fold in the three stages the sidecar measured for us (`FrameEvent.timings`). */
+  /**
+   * Fold in the three stages the sidecar measured for us (`FrameEvent.timings`).
+   *
+   * The wire carries microseconds and this module works in milliseconds, so the
+   * conversion happens here and only here. The wire is µs because capture is p50 ~0.574ms
+   * and an integer millisecond would report it as 0 forever; the budgets stay ms because
+   * design doc section 4 is written in ms and that table is the thing people read.
+   */
   recordFrameTimings(timings: FrameTimings): void {
-    this.record('capture', timings.capture);
-    this.record('diff', timings.diff);
-    this.record('ocr', timings.ocr);
+    this.record('capture', timings.captureUs / 1000);
+    this.record('diff', timings.diffUs / 1000);
+    this.record('ocr', timings.ocrUs / 1000);
   }
 
   /**

@@ -36,12 +36,16 @@ internal static unsafe class NativeMethods
     /// <summary>IDirect3DDxgiInterfaceAccess::GetInterface — the only method past IUnknown.</summary>
     private const int VtblGetInterface = 3;
 
+    /// <summary>IMemoryBufferByteAccess::GetBuffer — likewise the only method past IUnknown.</summary>
+    private const int VtblGetBuffer = 3;
+
     // ---- GUIDs ----
 
     internal static readonly Guid IidDxgiDevice = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
     internal static readonly Guid IidD3D11Texture2D = new("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
     internal static readonly Guid IidGraphicsCaptureItemInterop = new("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356");
     internal static readonly Guid IidDirect3DDxgiInterfaceAccess = new("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1");
+    internal static readonly Guid IidMemoryBufferByteAccess = new("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D");
 
     /// <summary>IID of the projected Windows.Graphics.Capture.IGraphicsCaptureItem.</summary>
     internal static readonly Guid IidGraphicsCaptureItem = new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
@@ -203,6 +207,28 @@ internal static unsafe class NativeMethods
 
         var vtbl = *(void***)unknown;
         return ((delegate* unmanaged[Stdcall]<IntPtr, uint>)vtbl[2])(unknown);
+    }
+
+    /// <summary>
+    /// IMemoryBufferByteAccess::GetBuffer — the documented escape hatch from an
+    /// <c>IMemoryBufferReference</c> to the raw bytes behind a <c>SoftwareBitmap</c>.
+    ///
+    /// <para>Called through the vtable rather than declared as a <c>[ComImport]</c>
+    /// interface for the same reason everything else in this file is: built-in COM
+    /// interop is unavailable under NativeAOT, and a <c>[ComImport]</c> declaration
+    /// would compile cleanly and then fail at runtime in the published sidecar only.</para>
+    /// </summary>
+    internal static int GetBuffer(IntPtr byteAccess, out byte* buffer, out uint capacity)
+    {
+        var vtbl = *(void***)byteAccess;
+        fixed (byte** pBuffer = &buffer)
+        fixed (uint* pCapacity = &capacity)
+        {
+            buffer = null;
+            capacity = 0;
+            return ((delegate* unmanaged[Stdcall]<IntPtr, byte**, uint*, int>)vtbl[VtblGetBuffer])(
+                byteAccess, pBuffer, pCapacity);
+        }
     }
 
     internal static int CreateTexture2D(IntPtr device, ref Texture2DDesc desc, out IntPtr texture)

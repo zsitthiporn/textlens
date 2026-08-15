@@ -59,6 +59,19 @@ public sealed record ConfigureCommand : ISidecarCommand
 
     /// <summary>BCP-47 tag of the OCR recognizer to use, e.g. <c>en-US</c>.</summary>
     public required string OcrLanguage { get; init; }
+
+    /// <summary>
+    /// Whether the <c>debugFrame</c> command is permitted to return pixels.
+    ///
+    /// <para><b>Off is the safe value and there is no default.</b> Pixels crossing IPC is
+    /// the single documented exception to architecture invariant 1, and design doc
+    /// section 3 says <c>debugFrame</c> is off unless explicitly enabled — but the
+    /// <c>configure</c> payload had no field to enable it with, so "off by default" was
+    /// unimplementable. Required rather than optional, matching every other field here:
+    /// an omitted flag that defaults to <c>false</c> reads identically to a flag the
+    /// sender believed it was setting.</para>
+    /// </summary>
+    public required bool DebugFrameEnabled { get; init; }
 }
 
 /// <summary>Begin the capture loop.</summary>

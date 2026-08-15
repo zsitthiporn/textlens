@@ -18,6 +18,8 @@ public class ProtocolGoldenFixtureTests
     [InlineData("event-frame.json")]
     [InlineData("event-frame-debug.json")]
     [InlineData("event-nochange.json")]
+    [InlineData("event-ack.json")]
+    [InlineData("event-ack-monitors.json")]
     [InlineData("event-error.json")]
     public void EveryGoldenEvent_ParsesAndReEncodesByteForByte(string fileName)
     {
@@ -56,7 +58,9 @@ public class ProtocolGoldenFixtureTests
         Assert.NotNull(decoded.Value);
         var frame = Assert.IsType<FrameEvent>(decoded.Value);
         Assert.Equal(42, frame.Seq);
-        Assert.Equal(new FrameTimings { Capture = 12, Diff = 3, Ocr = 58 }, frame.Timings);
+        // Microseconds. `captureUs = 574` is the real measured p50 and is exactly why the
+        // unit changed: as an int of milliseconds this field read 0 on every frame.
+        Assert.Equal(new FrameTimings { CaptureUs = 574, DiffUs = 159, OcrUs = 24680 }, frame.Timings);
         Assert.Equal(@"\\.\DISPLAY1", frame.Monitor.Id);
         Assert.Equal(1.5, frame.Monitor.Scale);
         Assert.Equal(new Rect(0, 0, 3840, 2160), frame.Monitor.Bounds);
@@ -64,7 +68,53 @@ public class ProtocolGoldenFixtureTests
         var line = Assert.Single(frame.Lines);
         Assert.Equal("You must find the key", line.Text);
         Assert.Equal(new Rect(120, 80, 540, 32), line.Bbox);
-        Assert.Equal(0.93, line.Conf);
+        // Absent, because Windows.Media.Ocr reports no confidence — the case this
+        // sidecar actually produces.
+        Assert.Null(line.Conf);
+    }
+
+    [Fact]
+    public void GoldenAck_CarriesTheStateAndOmitsMonitorsWhenItIsNotAMonitorReply()
+    {
+        var decoded = ProtocolCodec.DecodeEvent(ProtocolFixtures.Read("event-ack.json"));
+
+        Assert.NotNull(decoded.Value);
+        var ack = Assert.IsType<AckEvent>(decoded.Value);
+        Assert.Equal(CommandKind.Start, ack.Cmd);
+        Assert.Equal(SidecarState.Running, ack.State);
+        Assert.Null(ack.Monitors);
+        Assert.DoesNotContain("monitors", ProtocolCodec.Encode(ack), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GoldenAck_CarriesEveryDisplayWithTheCoordinateContractIntact()
+    {
+        var decoded = ProtocolCodec.DecodeEvent(ProtocolFixtures.Read("event-ack-monitors.json"));
+
+        Assert.NotNull(decoded.Value);
+        var ack = Assert.IsType<AckEvent>(decoded.Value);
+        Assert.Equal(CommandKind.ListMonitors, ack.Cmd);
+        Assert.Equal(SidecarState.Idle, ack.State);
+        Assert.NotNull(ack.Monitors);
+        Assert.Equal(2, ack.Monitors.Length);
+        Assert.Equal(1.5, ack.Monitors[0].Scale);
+        // The display left of primary, whose origin is negative — the case the design doc
+        // names as the one the reference project got wrong.
+        Assert.Equal(new Rect(-1920, 0, 1920, 1080), ack.Monitors[1].Bounds);
+    }
+
+    [Fact]
+    public void GoldenDebugFrame_CarriesTheOptionalFieldsThatTheOrdinaryFrameOmits()
+    {
+        var decoded = ProtocolCodec.DecodeEvent(ProtocolFixtures.Read("event-frame-debug.json"));
+
+        Assert.NotNull(decoded.Value);
+        var frame = Assert.IsType<FrameEvent>(decoded.Value);
+        Assert.Equal("iVBORw0KGgo=", frame.ImagePng);
+        // Present here on purpose: this fixture is the "every optional field populated"
+        // half of the pair, so the conf-present branch is covered byte for byte even
+        // though the current engine never fills it in.
+        Assert.Equal(0.93, Assert.Single(frame.Lines).Conf);
     }
 
     [Fact]
@@ -80,6 +130,8 @@ public class ProtocolGoldenFixtureTests
         Assert.Equal(2000, configure.IntervalIdle);
         Assert.Equal(0.02, configure.DiffThreshold);
         Assert.Equal("en-US", configure.OcrLanguage);
+        // Pixels crossing IPC is opt-in, and the sample the docs show has it off.
+        Assert.False(configure.DebugFrameEnabled);
     }
 
     /// <summary>

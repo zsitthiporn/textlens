@@ -88,11 +88,11 @@ Textlens จับภาพพื้นที่บนหน้าจอ อ่�
 
 | cmd | payload | ตอบกลับ |
 |---|---|---|
-| `listMonitors` | — | รายการจอ + bounds + scale |
-| `configure` | region, monitorId, intervalActive, intervalIdle, diffThreshold, ocrLanguage | ack |
-| `start` / `stop` | — | ack |
+| `listMonitors` | — | `ack` + `monitors` (bounds + scale) |
+| `configure` | region, monitorId, intervalActive, intervalIdle, diffThreshold, ocrLanguage, debugFrameEnabled | `ack` |
+| `start` / `stop` | — | `ack` |
 | `snapshot` | — | `frame` หนึ่งครั้งโดยไม่สนใจ change detection |
-| `debugFrame` | — | `frame` + `imagePng` (base64) |
+| `debugFrame` | — | `frame` + `imagePng` (base64) — ต้องเปิดผ่าน `configure.debugFrameEnabled` ก่อน |
 
 ### Events (sidecar → Node)
 
@@ -100,15 +100,42 @@ Textlens จับภาพพื้นที่บนหน้าจอ อ่�
 {"ev":"ready","version":"1.0.0","ocrLanguages":["en-US","th-TH"]}
 
 {"ev":"frame","seq":42,
- "timings":{"capture":12,"diff":3,"ocr":58},
+ "timings":{"captureUs":574,"diffUs":159,"ocrUs":24680},
  "monitor":{"id":"\\\\.\\DISPLAY1","scale":1.5,"bounds":[0,0,3840,2160]},
  "region":[400,1800,1200,150],
- "lines":[{"text":"You must find the key","bbox":[120,80,540,32],"conf":0.93}]}
+ "lines":[{"text":"You must find the key","bbox":[120,80,540,32]}]}
 
 {"ev":"nochange","seq":43}
 
+{"ev":"ack","cmd":"start","state":"running"}
+{"ev":"ack","cmd":"listMonitors","state":"idle",
+ "monitors":[{"id":"\\\\.\\DISPLAY1","scale":1.5,"bounds":[0,0,3840,2160]}]}
+
 {"ev":"error","code":"CAPTURE_FAILED","message":"..."}
 ```
+
+**`ack` เป็น event เดียวตอบ 4 คำสั่ง** (`listMonitors` / `configure` / `start` / `stop`) —
+`cmd` บอกว่าตอบคำสั่งไหน `state` คือสถานะ**หลัง**ทำคำสั่งนั้น (`idle` → `configured` →
+`running` → `stopped`) ส่วน `monitors` มีเฉพาะตอนตอบ `listMonitors` เท่านั้น
+การมี `state` ทุกครั้งทำให้อ่าน state machine ออกจาก transcript ได้ตรง ๆ ซึ่งคือเหตุผลที่เลือก stdio ตั้งแต่แรก
+
+> **ไม่มี correlation id** — จับคู่ reply ด้วย `cmd` ซึ่งไม่กำกวมตราบใดที่คำสั่งชนิดเดียวกันมีค้างอยู่ทีละหนึ่ง
+> (จริงสำหรับ state machine นี้) ถ้าจะทำ pipelined/concurrent command ต้องเพิ่ม id ก่อน
+
+**`timings` เป็นไมโครวินาที ไม่ใช่มิลลิวินาที** และหน่วยอยู่ในชื่อ field เพราะมันเคยเปลี่ยนมาแล้ว
+เดิมเป็น int ms ซึ่งทำให้ `capture` อ่านได้ `0` ตลอดกาล — ค่าที่วัดจริงคือ p50 **0.574ms**
+metric ที่บอกค่าปกติของตัวเองไม่ได้ก็ไม่ได้วัดอะไรเลย ใช้ int ไม่ใช่ float เพราะ fixture ทุกตัวถูก
+re-encode เทียบ **byte-for-byte** ทั้งฝั่ง C# และ TypeScript และสองภาษา format ทศนิยมไม่เหมือนกัน
+(`0.5` กับ `0.50`)
+
+**`lines[].conf` เป็น optional และ sidecar ตัวนี้ไม่เคยส่ง** — `Windows.Media.Ocr` ไม่มี confidence
+ให้เลย (`OcrResult` มี `Lines`/`Text`/`TextAngle` · `OcrLine` มี `Text`/`Words` · `OcrWord` มี
+`Text`/`BoundingRect` เท่านั้น) จึง**ละ field ทิ้งแทนที่จะใส่ค่าคงที่** เพราะค่าคงที่แย่กว่าการไม่มี:
+ทุก consumer จะอ่าน `1.0` ว่า "engine มั่นใจ" ทั้งที่ความจริงคือมันไม่เคยบอก
+→ **feature O4 (noise filter) กับ U4 (area budget) ต้องรับมือกับการไม่มีค่านี้ ไม่ใช่ default มันเป็นเลข**
+engine ตัวอื่นที่รายงาน confidence (PaddleOCR รายงาน) จะเติม field นี้ได้โดยไม่ต้องแก้ contract
+
+รายละเอียดครบพร้อมตัวอย่างที่ copy ไปวางใน stdin ได้เลย: [`docs/sidecar-protocol.md`](../../sidecar-protocol.md)
 
 ### Coordinate contract
 
@@ -177,6 +204,18 @@ logicalX = (regionX + bboxX) / scale + display.bounds.x   // display = Electron 
 | **รวม** | **~400-600ms** |
 
 `L3 timing metrics` เก็บตัวเลขจริงทุกขั้นเพื่อเทียบกับ budget นี้ — ถ้าเกินต้องรู้ว่าเกินตรงไหน
+
+ตารางนี้เป็น **ms** เพราะเป็นตารางที่คนอ่าน แต่ `frame.timings` บน wire เป็น **µs**
+(`captureUs` / `diffUs` / `ocrUs`) — ดูเหตุผลในข้อ 3 `metrics.ts` หาร 1000 ที่จุดเดียวตอน fold เข้า budget
+
+ตัวเลขที่วัดได้จริง (2026-08-16, region 1200×200):
+
+| ขั้น | เป้า | วัดได้ |
+|---|---|---|
+| capture | — | p50 **0.574ms** |
+| diff | — | **0.159ms** (worst case: อ่านครบทุก sample) |
+| capture + diff | ~15ms | **~0.73ms** |
+| OCR | 40-80ms | p50 **4.2ms** / p90 5.4ms (ข้อความสังเคราะห์ contrast สูง) · S1 วัดจอจริงได้ 22-36ms |
 
 ---
 

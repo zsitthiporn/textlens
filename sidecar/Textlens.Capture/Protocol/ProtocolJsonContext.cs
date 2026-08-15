@@ -15,6 +15,7 @@ namespace Textlens.Capture.Protocol;
 [JsonSerializable(typeof(ReadyEvent))]
 [JsonSerializable(typeof(FrameEvent))]
 [JsonSerializable(typeof(NoChangeEvent))]
+[JsonSerializable(typeof(AckEvent))]
 [JsonSerializable(typeof(ErrorEvent))]
 [JsonSerializable(typeof(ListMonitorsCommand))]
 [JsonSerializable(typeof(ConfigureCommand))]

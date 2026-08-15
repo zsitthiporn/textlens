@@ -60,12 +60,30 @@ describe('MetricsRecorder', () => {
   it('folds the sidecar timings into the three stages it measured', () => {
     const recorder = new MetricsRecorder();
 
-    recorder.recordFrameTimings({ capture: 12, diff: 3, ocr: 58 });
-    recorder.recordFrameTimings({ capture: 14, diff: 4, ocr: 62 });
+    // The wire is microseconds; the budgets are milliseconds. These are 12ms / 3ms / 58ms.
+    recorder.recordFrameTimings({ captureUs: 12_000, diffUs: 3_000, ocrUs: 58_000 });
+    recorder.recordFrameTimings({ captureUs: 14_000, diffUs: 4_000, ocrUs: 62_000 });
 
     const byStage = new Map(recorder.snapshot().map((s) => [s.stage, s]));
     expect([...byStage.keys()]).toEqual(['capture', 'diff', 'ocr']);
     expect(byStage.get('ocr')).toMatchObject({ count: 2, p50: 58, p90: 62, max: 62 });
+  });
+
+  it('keeps sub-millisecond stages visible instead of rounding them to zero', () => {
+    // The defect the unit change exists to fix. Measured capture is p50 574µs; as an
+    // integer number of milliseconds on the wire that was 0 on every frame forever, so
+    // the capture row of the design doc section 4 budget could never be checked.
+    const recorder = new MetricsRecorder();
+
+    recorder.recordFrameTimings({ captureUs: 574, diffUs: 159, ocrUs: 24_680 });
+
+    const byStage = new Map(recorder.snapshot().map((s) => [s.stage, s]));
+    // `snapshot` reports to one decimal, so 0.574ms surfaces as 0.6 - the point is that it
+    // is no longer 0, which is what an integer-millisecond wire made it.
+    expect(byStage.get('capture')?.p50).toBeGreaterThan(0);
+    expect(byStage.get('capture')?.p50).toBeCloseTo(0.6, 5);
+    expect(byStage.get('diff')?.p50).toBeCloseTo(0.2, 5);
+    expect(byStage.get('ocr')?.p50).toBeCloseTo(24.7, 5);
   });
 
   it('omits stages nothing has measured yet', () => {
@@ -150,7 +168,8 @@ describe('MetricsRecorder', () => {
 
   it('formats a summary that can be read against the budget table', () => {
     const recorder = new MetricsRecorder();
-    for (let i = 0; i < 10; i += 1) recorder.recordFrameTimings({ capture: 12, diff: 3, ocr: 58 + i * 6 });
+    for (let i = 0; i < 10; i += 1)
+      recorder.recordFrameTimings({ captureUs: 12_000, diffUs: 3_000, ocrUs: (58 + i * 6) * 1000 });
 
     const text = recorder.format();
 
@@ -187,7 +206,7 @@ describe('startMetricsSummary', () => {
       vi.advanceTimersByTime(1_000);
       expect(lines).toHaveLength(0);
 
-      recorder.recordFrameTimings({ capture: 12, diff: 3, ocr: 58 });
+      recorder.recordFrameTimings({ captureUs: 12_000, diffUs: 3_000, ocrUs: 58_000 });
       vi.advanceTimersByTime(1_000);
       expect(lines).toHaveLength(1);
       expect(lines[0]?.message).toContain('capture');
