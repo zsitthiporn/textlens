@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    />
+    <title>Textlens</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        background: #101014;
+        color: #e8e8ef;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      main {
+        text-align: center;
+        line-height: 1.6;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.4rem;
+        font-weight: 600;
+      }
+      dl {
+        margin: 1.5rem 0 0;
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 0.25rem 1rem;
+        font-size: 0.85rem;
+        color: #9a9aa8;
+      }
+      dt {
+        text-align: right;
+      }
+      dd {
+        margin: 0;
+        text-align: left;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root">
+      <h1>Textlens</h1>
+      <p>renderer did not boot</p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

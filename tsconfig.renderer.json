@@ -1,0 +1,25 @@
+{
+  // Renderer + shared. Type-checking only: Vite/esbuild does the transform, so noEmit is correct.
+  // No "node" types on purpose - the renderer must not reach for Node APIs (nodeIntegration is off).
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": [],
+
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/renderer/**/*.ts", "src/shared/**/*.ts"]
+}

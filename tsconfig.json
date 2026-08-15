@@ -1,0 +1,29 @@
+{
+  // Main + preload + shared. Compiled by tsc (the renderer is Vite's job -> tsconfig.renderer.json).
+  // Emits dist/main/*.js as ESM and dist/preload/index.cjs as CommonJS, because a sandboxed
+  // Electron preload cannot be an ES module. The .cts source extension is what drives that.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.cts", "src/shared/**/*.ts"]
+}

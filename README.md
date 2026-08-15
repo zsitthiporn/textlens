@@ -2,7 +2,7 @@
 
 **แปลข้อความบนหน้าจอเป็นภาษาไทยแบบเรียลไทม์** — เลือกพื้นที่บนจอ แล้วคำแปลจะลอยขึ้นมาใต้ข้อความต้นฉบับ
 
-> 🚧 **สถานะ: ออกแบบเสร็จ ยังไม่เริ่มเขียนโค้ด** — ดู [Roadmap](#roadmap)
+> 🚧 **สถานะ: กำลังวางราง** — scaffold ของ Electron และ .NET sidecar ขึ้นแล้ว ยังไม่มี pipeline ที่ใช้งานได้ ดู [Roadmap](#roadmap)
 
 ---
 
@@ -88,11 +88,40 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 
 ## Development
 
-> คำสั่งจะเพิ่มเมื่อเริ่มเขียนโค้ด — ตอนนี้ repo มีแต่เอกสารออกแบบ
-
 ```bash
 cp .env.example .env
+npm install
+npm run dev
 ```
+
+> Electron 43 ไม่มี postinstall แล้ว — `npm install` **ไม่** โหลด binary
+> ครั้งแรกที่รัน `npm run dev` / `npm start` จะโหลด Electron (~226MB) ให้เอง รอบแรกจึงช้า
+> ถ้าอยากโหลดล่วงหน้า (เช่นใน CI) ใช้ `npx install-electron`
+
+| คำสั่ง | ทำอะไร |
+|---|---|
+| `npm run build` | compile ทั้งหมด — `tsc` ทำ `src/main` + `src/preload` → `dist/`, Vite ทำ `src/renderer` → `dist/renderer/` |
+| `npm run dev` | build แล้วเปิดแอป (ยังไม่มี HMR — renderer dev server จะมาทีหลัง) |
+| `npm start` | เปิดแอปจาก `dist/` ที่ build ไว้แล้ว |
+| `npm test` | unit test ด้วย vitest (`npm run test:watch` สำหรับ watch mode) |
+| `npm run typecheck` | ตรวจ type ทั้งสาม config โดยไม่ emit |
+
+### โครงสร้างโค้ด
+
+```
+src/main/       Electron main process — compile ด้วย tsc เป็น ESM
+src/preload/    preload script — เป็น .cts เพราะ sandboxed preload ต้องเป็น CommonJS
+src/renderer/   หน้าจอ — build ด้วย Vite
+src/shared/     type + helper ที่ main กับ renderer ใช้ร่วมกัน
+tests/          vitest
+```
+
+Build มีสอง compiler โดยตั้งใจ: `tsc` คุม process ฝั่ง Node (`tsconfig.json`) และ Vite คุม renderer
+(`tsconfig.renderer.json` ใช้ type-check อย่างเดียว) — `tsconfig.test.json` มีไว้ type-check `tests/`
+ที่ไม่ควรหลุดเข้า `dist/`
+
+**ทุก BrowserWindow ต้องใช้ `BASE_WEB_PREFERENCES` ใน `src/main/index.ts`** — `contextIsolation: true`,
+`nodeIntegration: false`, `sandbox: true` อย่าประกาศ `webPreferences` เองแยกต่างหาก
 
 ---
 
