@@ -63,7 +63,8 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 
 ## สถานะปัจจุบัน
 
-ยังไม่มี product code — repo มีเอกสารออกแบบ กับ throwaway benchmark ของ spike S1 (`spikes/s1-ocr/`)
+**กำลังวางราง** — M1-01 (Electron + TS pipeline) และ M1-02 (.NET sidecar scaffold) เสร็จแล้ว
+ยังไม่มี capture / OCR / แปล ของจริง · ลำดับงานที่ใช้อยู่คือหัวข้อ **Execution order** ใน [backlog](docs/backlog/mvp-issues.md)
 
 **Spike S1 ผ่านแล้ว** ([รายงาน](docs/spikes/2026-08-15-s1-ocr-engine.md)) — Windows.Media.Ocr เร็วกว่า PaddleOCR ~6 เท่า
 (p50 99ms เต็มจอ / 30ms บน region เทียบกับ 580ms) และอ่านเนื้อหาเกมแม่นกว่า → สถาปัตยกรรม .NET sidecar ยืนยันแล้ว
@@ -73,7 +74,31 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 ข้อควรรู้จาก S1 ที่กระทบการเขียนโค้ด:
 - ต้องมี **en-US OCR recognizer** ติดตั้งบนเครื่องผู้ใช้ ไม่งั้นใช้งานไม่ได้เลย → feature `O8` preflight check
 - **region ที่ตัดโดนตัวอักษรทำให้ OCR พังทันที** → feature `R7` padding + edge warning
-- เครื่อง dev ยังไม่มี .NET 10 (มี 2.2/6/8/9) → target `net9.0-windows10.0.19041.0` ไปก่อน
+- ~~เครื่อง dev ยังไม่มี .NET 10~~ → **เครื่องนี้มี .NET 10 SDK แล้ว (10.0.111/303/400) sidecar target `net10.0-windows10.0.19041.0`** ตามที่ design doc §2 ตั้งใจไว้แต่แรก · NativeAOT + WinRT publish ผ่านแล้วจริง ได้ exe เดี่ยว 1.64MB
 - ข้อผิดพลาดที่ Windows OCR ทำประจำ: `o`↔`O`, `I`↔`1`, ตกเลขลำดับ, ช่องว่างหายบางจุด — ไม่กระทบความหมาย ไม่ต้องพยายามแก้ที่ post-processing
 
-<!-- เพิ่ม build/test/lint commands ที่นี่เมื่อเริ่มมีโค้ด -->
+---
+
+## Toolchain — กับดักที่เสียเวลาไปแล้ว อย่าไปเสียซ้ำ
+
+| เรื่อง | ต้องรู้ |
+|---|---|
+| **NativeAOT publish ล้มใน agent shell** | `NoDefaultCurrentDirectoryInExePath=1` ถูก set ที่ process scope (ไม่ใช่ User/Machine ไม่ใช่ profile — มาจาก process chain ของ terminal) มันทำให้ `VsDevCmd.bat` หา `vswhere.exe` ไม่เจอ แล้ว error text ถูก MSBuild splice เข้าไปใน `$(CppLinker)` โผล่เป็น `MSB3073 ... exited with code 123` ซึ่งไม่บอกอะไรเลย **แก้: เคลียร์ตัวแปรก่อน publish** หรือใส่ `C:\Program Files (x86)\Microsoft Visual Studio\Installer` ลง PATH — ไม่ใช่บั๊กของ csproj |
+| **Node/npm ใน Git Bash** | `node -v` ล้มด้วย `stdin is not a tty` → รัน node/npm ผ่าน PowerShell |
+| **WinRT interop จาก PowerShell** | ต้อง Windows PowerShell 5.1 เท่านั้น ไม่ใช่ pwsh 7 |
+| **Electron binary** | Electron 43 ไม่มี postinstall — `npm install` **ไม่** โหลด binary มาให้ มันโหลดตอนเรียกครั้งแรก (~226MB) CI ควร warm ด้วย `npx install-electron` |
+| **TypeScript** | pin ไว้ที่ 5.9.3 · `latest` บน npm ตอนนี้คือ 7.0.2 (native port) — `npm i -D typescript` เปล่าๆ จะดึง TS 7 มาทั้งโปรเจกต์ |
+
+## Commands
+
+```bash
+npm run build      # tsc (main+preload) + vite (renderer)
+npm run typecheck  # ทั้งสาม tsconfig
+npm test           # vitest
+npm run dev        # build แล้วเปิด Electron
+```
+
+```bash
+dotnet build sidecar/Textlens.sln
+dotnet test sidecar/Textlens.sln
+```

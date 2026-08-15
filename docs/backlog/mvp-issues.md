@@ -15,7 +15,7 @@
 |---|---|
 | Platform | Windows 10/11 เท่านั้น — ห้ามเขียนโค้ด cross-platform "เผื่อไว้" |
 | Node | >= 20 (เครื่อง dev: 20.20.2, npm 10.8.2) |
-| .NET | target `net9.0-windows10.0.19041.0` (เครื่อง dev ยังไม่มี .NET 10) |
+| .NET | target `net10.0-windows10.0.19041.0` · NativeAOT + WinRT พิสูจน์แล้วว่า publish ผ่าน ได้ exe เดี่ยว 1.64MB |
 | Electron | 43.x |
 | Source → Target | English → Thai |
 | **pixel ไม่ข้าม IPC** | sidecar ส่งได้เฉพาะ text + bbox ยกเว้น `debugFrame` ที่ปิดเป็น default |
@@ -93,7 +93,7 @@ Sidecar เป็นเจ้าของ pixel pipeline ทั้งหมด (
 ## Scope
 
 - .NET console project `sidecar/Textlens.Capture/`
-- TFM `net9.0-windows10.0.19041.0` (ดู Global Constraints — เครื่อง dev ยังไม่มี .NET 10)
+- TFM `net10.0-windows10.0.19041.0` (ดู Global Constraints)
 - เปิด WinRT API access
 - publish profile: self-contained, AOT, single file
 - xunit test project

@@ -258,7 +258,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 |---|---|
 | Tech stack | Electron + TypeScript |
 | Platform | Windows เท่านั้น |
-| Capture + OCR | .NET sidecar (self-contained AOT), Windows Graphics Capture + Windows.Media.Ocr — target `net9.0-windows10.0.19041.0` จนกว่าจะติดตั้ง .NET 10 SDK (เครื่อง dev มี 2.2/6/8/9) |
+| Capture + OCR | .NET sidecar (self-contained NativeAOT), Windows Graphics Capture + Windows.Media.Ocr — target `net10.0-windows10.0.19041.0` (ยืนยันแล้ว 2026-08-16: SDK 10 ติดตั้งอยู่ AOT+WinRT publish ผ่าน) |
 | IPC | JSON lines over stdio — **pixel ไม่ข้าม wire** |
 | Text grouping | ฝั่ง Node |
 | Primary use case | subtitle / เกม |
