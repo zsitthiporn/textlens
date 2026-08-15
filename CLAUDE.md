@@ -84,6 +84,7 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 | เรื่อง | ต้องรู้ |
 |---|---|
 | **NativeAOT publish ล้มใน agent shell** | `NoDefaultCurrentDirectoryInExePath=1` ถูก set ที่ process scope (ไม่ใช่ User/Machine ไม่ใช่ profile — มาจาก process chain ของ terminal) มันทำให้ `VsDevCmd.bat` หา `vswhere.exe` ไม่เจอ แล้ว error text ถูก MSBuild splice เข้าไปใน `$(CppLinker)` โผล่เป็น `MSB3073 ... exited with code 123` ซึ่งไม่บอกอะไรเลย **แก้: เคลียร์ตัวแปรก่อน publish** หรือใส่ `C:\Program Files (x86)\Microsoft Visual Studio\Installer` ลง PATH — ไม่ใช่บั๊กของ csproj |
+| **Node เวอร์ชัน** | ต้อง **≥ 22.12.0** — Electron 43 บังคับผ่าน `engines` เครื่องนี้ใช้ **22.22.3 ผ่าน nvm** (`nvm use 22.22.3`) ถ้าหล่นไป Node 20 จะได้ `EBADENGINE` และ `npm ci` จะพังทันทีบน CI ที่ตั้ง `engine-strict=true` |
 | **Node/npm ใน Git Bash** | `node -v` ล้มด้วย `stdin is not a tty` → รัน node/npm ผ่าน PowerShell |
 | **WinRT interop จาก PowerShell** | ต้อง Windows PowerShell 5.1 เท่านั้น ไม่ใช่ pwsh 7 |
 | **Electron binary** | Electron 43 ไม่มี postinstall — `npm install` **ไม่** โหลด binary มาให้ มันโหลดตอนเรียกครั้งแรก (~226MB) CI ควร warm ด้วย `npx install-electron` |

@@ -1,0 +1,21 @@
+# Let git normalise line endings in text files it detects.
+* text=auto
+
+# Protocol fixtures are read by BOTH the vitest and the xunit suite, and both
+# re-encode them and compare byte for byte. CRLF creeping in on checkout would
+# make that comparison depend on which platform checked the repo out, so these
+# stay LF everywhere. The readers tolerate CRLF today; this keeps them from
+# having to.
+tests/fixtures/** text eol=lf
+
+# Shell scripts must stay LF or they will not run.
+*.sh text eol=lf
+
+# PowerShell 5.1 reads .ps1 as ANSI unless there is a UTF-8 BOM, so these are
+# kept CRLF to match every other Windows-native tool that touches them.
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary

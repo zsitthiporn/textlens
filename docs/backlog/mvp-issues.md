@@ -14,7 +14,7 @@
 | | |
 |---|---|
 | Platform | Windows 10/11 เท่านั้น — ห้ามเขียนโค้ด cross-platform "เผื่อไว้" |
-| Node | >= 20 (เครื่อง dev: 20.20.2, npm 10.8.2) |
+| Node | **>= 22.12.0** — บังคับโดย `engines` ของ Electron 43 ไม่ใช่ตัวเลือก (เครื่อง dev: 22.22.3, npm 10.9.8 ผ่าน nvm) |
 | .NET | target `net10.0-windows10.0.19041.0` · NativeAOT + WinRT พิสูจน์แล้วว่า publish ผ่าน ได้ exe เดี่ยว 1.64MB |
 | Electron | 43.x |
 | Source → Target | English → Thai |
