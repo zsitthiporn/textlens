@@ -3,8 +3,9 @@
     Create every GitHub issue defined in docs/backlog/mvp-issues.md
 
 .DESCRIPTION
-    Parses the backlog file, creates any missing milestones and labels, then
-    opens one issue per entry. Issue bodies are Thai; this script's own output
+    Parses the backlog file, creates any missing labels, then opens one issue
+    per entry. Milestones are deliberately not used - see the "no GitHub
+    Milestones" section of the backlog. Issue bodies are Thai; this script's own output
     is English on purpose - Windows PowerShell 5.1 reads .ps1 files as ANSI
     unless they carry a UTF-8 BOM, and non-ASCII source text breaks the parser.
 
@@ -17,12 +18,17 @@ param(
     [string]$BacklogPath = '',
     [string]$Repo = '',
     [switch]$DryRun,
-    # Update the body, milestone and labels of issues that already exist,
-    # matched by exact title. Creates nothing.
+    # Update the body of issues that already exist, matched by exact title.
+    # Creates nothing.
     [switch]$Sync
 )
 
 $ErrorActionPreference = 'Stop'
+
+# PS 5.1 decodes native-command stdout with the console codepage, which mangles
+# the em-dash in most issue titles. Without this, -Sync matches titles by an
+# ANSI-corrupted string and silently skips every issue that contains one.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # $PSScriptRoot is not reliably populated while param defaults bind under PS 5.1,
 # so resolve the default path here instead.
@@ -99,11 +105,12 @@ foreach ($b in $blocks) {
         $labels = $meta['labels'] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
     }
 
+    # 'milestone:' is still consumed by the metadata regex above so a stale line
+    # cannot corrupt the body, but the value is intentionally discarded.
     $issues += [pscustomobject]@{
-        Title     = $meta['title']
-        Milestone = $meta['milestone']
-        Labels    = $labels
-        Body      = $body
+        Title  = $meta['title']
+        Labels = $labels
+        Body   = $body
     }
 }
 
@@ -114,14 +121,10 @@ if ($issues.Count -eq 0) { throw "No issues parsed - check the file format." }
 
 if ($DryRun) {
     Write-Host "`n=== DRY RUN - nothing will be created ===`n" -ForegroundColor Yellow
-    $issues | Group-Object Milestone | ForEach-Object {
-        Write-Host "[$($_.Name)]  $($_.Count) issues" -ForegroundColor Green
-        $_.Group | ForEach-Object {
-            Write-Host ("   - {0}  ({1})" -f $_.Title, ($_.Labels -join ', '))
-        }
+    $issues | ForEach-Object {
+        Write-Host ("   - {0}  ({1})" -f $_.Title, ($_.Labels -join ', '))
     }
-    Write-Host "`nLabels needed:     $((($issues.Labels | Sort-Object -Unique) -join ', '))"
-    Write-Host "Milestones needed: $((($issues.Milestone | Sort-Object -Unique) -join ' | '))"
+    Write-Host "`nLabels needed: $((($issues.Labels | Sort-Object -Unique) -join ', '))"
     $short = $issues | Where-Object { $_.Body.Length -lt 200 }
     if ($short) {
         Write-Host "`nWARNING - suspiciously short bodies:" -ForegroundColor Yellow
@@ -154,7 +157,6 @@ if ($Sync) {
         [System.IO.File]::WriteAllText($bodyFile, $iss.Body, (New-Object System.Text.UTF8Encoding $false))
 
         $ghArgs = @('issue', 'edit', "$num", '--body-file', $bodyFile) + $repoArgs
-        if ($iss.Milestone) { $ghArgs += @('--milestone', $iss.Milestone) }
         try {
             & gh @ghArgs *> $null
             if ($?) { Write-Host "SYNCED #$num  $($iss.Title)" -ForegroundColor Green; $updated++ }
@@ -166,31 +168,6 @@ if ($Sync) {
     Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "`nSynced $updated, not found $missing." -ForegroundColor Cyan
     exit 0
-}
-
-# --- milestones --------------------------------------------------------------
-
-$existingMilestones = @()
-try {
-    $json = gh api 'repos/{owner}/{repo}/milestones?state=all&per_page=100' @repoArgs
-    $existingMilestones = ($json | ConvertFrom-Json) | ForEach-Object { $_.title }
-}
-catch {
-    Write-Host "Could not read existing milestones; will try to create all." -ForegroundColor Yellow
-}
-
-foreach ($m in ($issues.Milestone | Sort-Object -Unique)) {
-    if ($existingMilestones -contains $m) {
-        Write-Host "milestone exists: $m"
-        continue
-    }
-    try {
-        gh api 'repos/{owner}/{repo}/milestones' @repoArgs -f title="$m" *> $null
-        Write-Host "created milestone: $m" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "could not create milestone '$m': $($_.Exception.Message)" -ForegroundColor Yellow
-    }
 }
 
 # --- labels ------------------------------------------------------------------
@@ -218,7 +195,6 @@ foreach ($iss in $issues) {
     [System.IO.File]::WriteAllText($bodyFile, $iss.Body, (New-Object System.Text.UTF8Encoding $false))
 
     $ghArgs = @('issue', 'create', '--title', $iss.Title, '--body-file', $bodyFile) + $repoArgs
-    if ($iss.Milestone) { $ghArgs += @('--milestone', $iss.Milestone) }
     foreach ($l in $iss.Labels) { $ghArgs += @('--label', $l) }
 
     try {

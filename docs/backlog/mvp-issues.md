@@ -2,9 +2,10 @@
 
 แตกจาก [feature-spec.md](https://github.com/zsitthiporn/textlens/blob/main/docs/feature-spec.md) และ [architecture design](https://github.com/zsitthiporn/textlens/blob/main/docs/superpowers/specs/2026-08-15-textlens-design.md)
 
-- 43 issues / 10 milestones — ครอบคลุม P0 ครบทั้ง 44 features
+- 45 issues — ครอบคลุม P0 ครบทั้ง 44 features + spike S3 (#44) + packaging (#45)
 - สร้างขึ้น GitHub ด้วย `scripts/create-issues.ps1`
 - รูปแบบ: แต่ละ issue คั่นด้วย `<!-- ISSUE -->` และมี metadata block นำหน้า
+- **ไม่ใช้ GitHub Milestones** — ดูหัวข้อถัดไป
 
 ## Global Constraints
 
@@ -24,26 +25,22 @@
 | Latency budget | capture+diff ~15ms · OCR ~40-80ms · translate ~300-500ms · render ~16ms · รวม ~1s |
 | License | Apache-2.0 — ห้ามคัดโค้ดจาก reference ที่เป็น AGPL-3.0 |
 
-## Milestones
+## ไม่ใช้ GitHub Milestones
 
-| M | ชื่อ | ได้อะไรเมื่อจบ |
-|---|---|---|
-| M1 | Walking skeleton | แอปเปิดได้ sidecar spawn ได้ คุยกันได้ overlay โปร่งใสขึ้นจอ |
-| M2 | Pixel side (sidecar) | รัน sidecar เดี่ยวๆ แล้วได้ JSON ข้อความ + bbox จากหน้าจอจริง |
-| M3 | Text side (Node) | รับ frame → แปลงพิกัด → จัดกลุ่ม → กรอง → dedup ทดสอบได้ด้วย fixture |
-| M4 | Translation | แปลเป็นไทยได้ มี cache, fallback, backoff |
-| M5 | Overlay rendering | **เห็นคำแปลบนจอจริง — E2E ครบเส้น** |
-| M6 | Region & monitor | เลือกจอและลากกรอบเองได้ จำได้ข้ามการเปิดปิด |
-| M7 | Control surface | hotkey + tray + โหมด auto/snapshot/pause |
-| M8 | Anti-flicker | subtitle เปลี่ยนแล้วไม่กระพริบ |
-| M9 | Config & settings | เปลี่ยนค่าใน UI มีผลทันที |
-| M10 | Robustness | sidecar ตายแล้วฟื้น error ถึงผู้ใช้ log ใช้ debug ได้ |
+**ตัดสินใจแล้ว (2026-08-16): ไม่ใช้ระบบ milestone — ลบทิ้งทั้ง 10 อันจาก GitHub แล้ว**
+
+M1–M10 เดิมเป็นการจัดกลุ่ม**ตามหัวข้อ** ไม่ใช่**ลำดับการทำงาน** ลำดับจริงถูกกำหนดโดย `depends:` ของแต่ละ issue ซึ่งข้ามกลุ่มไปมาตลอด (M10-04 รันได้ตั้งแต่หลัง M2-02 · M6-04 ต้องรอ M9-01 · M8-02 ต้องรอ M7-03) การมี milestone อีกชั้นจึงให้ภาพที่ผิดและต้องคอยแก้ให้ตรงกันเปล่าๆ
+
+ผลที่ตามมา:
+
+- **ไม่ต้องใส่ `milestone:` ใน metadata block** และ `scripts/create-issues.ps1` ไม่สร้าง/ไม่ผูก milestone อีกแล้ว
+- **prefix `M1-01`, `M2-03`, … ในชื่อ issue ยังอยู่** — ห้ามเปลี่ยน เพราะทุก `depends:` อ้างอิงด้วยชื่อนี้ และการจัดกลุ่มตามหัวข้อยังอ่านได้จากตรงนั้น
+- ลำดับที่ใช้ทำงานจริงอยู่ที่หัวข้อ **Execution order** ท้ายเอกสาร ไม่ใช่ที่ GitHub
 
 ---
 
 <!-- ISSUE -->
 title: M1-01 Scaffold Electron + TypeScript build pipeline
-milestone: M1 Walking skeleton
 labels: setup, electron
 depends:
 
@@ -86,7 +83,6 @@ smoke test ว่า build output มีไฟล์ครบ + typecheck ผ่
 
 <!-- ISSUE -->
 title: M1-02 Scaffold .NET sidecar project (Textlens.Capture)
-milestone: M1 Walking skeleton
 labels: setup, sidecar, dotnet
 depends:
 
@@ -128,7 +124,6 @@ xunit: resolve WinRT type ได้ · publish output รันได้จร�
 
 <!-- ISSUE -->
 title: M1-03 Define IPC protocol schema (shared TS + C#)
-milestone: M1 Walking skeleton
 labels: protocol, sidecar, electron
 depends: M1-01, M1-02
 
@@ -169,7 +164,6 @@ vitest: parse golden JSON เข้า TS type ได้ · xunit: round-trip + 
 
 <!-- ISSUE -->
 title: M1-04 SidecarClient — spawn, JSON-lines codec, shutdown
-milestone: M1 Walking skeleton
 labels: electron, sidecar, ipc
 depends: M1-03
 
@@ -211,7 +205,6 @@ vitest ด้วย fake child process: chunk แตกกลางบรรท�
 
 <!-- ISSUE -->
 title: M1-05 Transparent click-through overlay window
-milestone: M1 Walking skeleton
 labels: electron, overlay
 depends: M1-01
 
@@ -250,7 +243,6 @@ manual: ทดสอบทับเกม borderless จริง + ทดสอ
 
 <!-- ISSUE -->
 title: M2-01 OCR preflight check — detect en-US recognizer
-milestone: M2 Pixel side
 labels: sidecar, ocr, P0-blocker
 depends: M1-02
 
@@ -284,7 +276,6 @@ xunit: mock ผลลัพธ์ภาษาว่าง → ได้ error co
 
 <!-- ISSUE -->
 title: M2-02 CaptureService — Windows Graphics Capture of a region
-milestone: M2 Pixel side
 labels: sidecar, capture
 depends: M1-02
 
@@ -321,7 +312,6 @@ xunit สำหรับ crop math · manual สำหรับ capture จร�
 
 <!-- ISSUE -->
 title: M2-03 ChangeDetector — 3-layer pixel diff
-milestone: M2 Pixel side
 labels: sidecar, performance
 depends: M2-02
 
@@ -358,7 +348,6 @@ xunit ด้วย buffer สังเคราะห์: เหมือนเ�
 
 <!-- ISSUE -->
 title: M2-04 OcrService — Windows.Media.Ocr to lines + bbox
-milestone: M2 Pixel side
 labels: sidecar, ocr
 depends: M2-02, M2-01
 
@@ -400,7 +389,6 @@ golden image: เก็บภาพ briefing/dialogue ไว้ในเคร�
 
 <!-- ISSUE -->
 title: M2-05 AdaptiveTimer + capture loop
-milestone: M2 Pixel side
 labels: sidecar, performance
 depends: M2-03, M2-04
 
@@ -439,7 +427,6 @@ xunit ด้วย fake clock: ลำดับ change/no-change → interval ท
 
 <!-- ISSUE -->
 title: M2-06 Sidecar protocol wiring + timing metrics
-milestone: M2 Pixel side
 labels: sidecar, protocol, observability
 depends: M2-05, M1-03
 
@@ -478,7 +465,6 @@ xunit สำหรับ dispatcher · manual: รัน exe แล้วพิ�
 
 <!-- ISSUE -->
 title: M3-01 Coordinate converter — physical to logical screen-global
-milestone: M3 Text side
 labels: electron, coordinates, correctness
 depends: M1-03
 
@@ -519,7 +505,6 @@ vitest ครอบทุกเคสข้างบน — นี่คือ�
 
 <!-- ISSUE -->
 title: M3-02 Text grouping — paragraph, column, sentence detection
-milestone: M3 Text side
 labels: electron, pipeline
 depends: M3-01
 
@@ -569,7 +554,6 @@ vitest ด้วย fixture จาก spike (12 บรรทัดของ Hell
 
 <!-- ISSUE -->
 title: M3-03 Noise filter — confidence, length, size, patterns
-milestone: M3 Text side
 labels: electron, pipeline
 depends: M3-02
 
@@ -608,7 +592,6 @@ vitest: ตารางเคส pass/reject จากข้อความจ�
 
 <!-- ISSUE -->
 title: M3-04 Feedback loop filters — Thai script + recent outputs
-milestone: M3 Text side
 labels: electron, pipeline, correctness
 depends: M3-03
 
@@ -647,7 +630,6 @@ vitest: ข้อความไทยล้วน / อังกฤษล้ว
 
 <!-- ISSUE -->
 title: M3-05 Dedup — fuzzy position match + time window
-milestone: M3 Text side
 labels: electron, pipeline
 depends: M3-04
 
@@ -684,7 +666,6 @@ vitest ด้วย fake clock สำหรับ time window
 
 <!-- ISSUE -->
 title: M3-06 Fake sidecar — record and replay protocol fixtures
-milestone: M3 Text side
 labels: testing, infra
 depends: M1-04, M2-06
 
@@ -721,7 +702,6 @@ integration test ที่ใช้ fake sidecar ขับ pipeline ตั้ง
 
 <!-- ISSUE -->
 title: M4-01 TranslationEngine interface + registry + fallback chain
-milestone: M4 Translation
 labels: electron, translation, architecture
 depends: M1-01
 
@@ -765,7 +745,6 @@ vitest ด้วย fake engine ที่สั่งให้สำเร็จ
 
 <!-- ISSUE -->
 title: M4-02 Google Translate adapter with batch support
-milestone: M4 Translation
 labels: electron, translation
 depends: M4-01
 
@@ -802,7 +781,6 @@ vitest ด้วย mock fetch: สำเร็จ / 429 / 500 / body พัง 
 
 <!-- ISSUE -->
 title: M4-03 Rate limiting + exponential backoff per engine
-milestone: M4 Translation
 labels: electron, translation, resilience
 depends: M4-02
 
@@ -841,7 +819,6 @@ vitest ด้วย fake clock
 
 <!-- ISSUE -->
 title: M4-04 SQLite translation cache with normalized keys
-milestone: M4 Translation
 labels: electron, cache, performance
 depends: M4-01
 
@@ -883,7 +860,6 @@ vitest ด้วย in-memory SQLite
 
 <!-- ISSUE -->
 title: M4-05 Skip same-language + pipeline integration
-milestone: M4 Translation
 labels: electron, translation, pipeline
 depends: M4-03, M4-04, M3-05
 
@@ -917,8 +893,58 @@ integration test ด้วย fake sidecar (M3-06) + fake engine ตั้งแ
 ---
 
 <!-- ISSUE -->
+title: M4-06 Spike S3 — Google free endpoint rate limit at subtitle cadence
+labels: translation, resilience
+depends: M4-02
+
+## Context
+
+ความเสี่ยง **S3** จาก [feature-spec หัวข้อ 5](https://github.com/zsitthiporn/textlens/blob/main/docs/feature-spec.md) — endpoint ฟรีของ Google Translate อาจโดน rate limit ที่ cadence ของ subtitle (เปลี่ยนทุก 2-3 วินาที)
+
+T2 เป็น **primary engine ถาวร** ตามการตัดสินใจที่สรุปแล้ว ถ้า endpoint ฟรีรับ cadence นี้ไม่ไหว ทั้ง use case หลักพัง
+
+เดิม backlog เขียนว่าจะรู้ผล "ตอนทดสอบ M8-03" ซึ่งอยู่ปลายทางเกินไป — กว่าจะรู้ก็สร้าง M5-M8 ทับบนสมมติฐานไปหมดแล้ว งานนี้ดึงคำตอบขึ้นมาไว้ตอนที่ adapter เพิ่งเสร็จ
+
+## Scope
+
+- เขียน throwaway harness (ไม่ใช่ product code — วางไว้ `spikes/s3-ratelimit/`) ที่เรียก Google adapter จาก M4-02 ซ้ำๆ
+- จำลอง cadence จริง: batch 1-3 ข้อความต่อ request, ยิง 1 request ทุก 2 วินาที, ต่อเนื่อง **≥ 30 นาที**
+- วัด: latency p50/p95, อัตราสำเร็จ, จุดที่เริ่มเจอ 429/บล็อก, พฤติกรรมหลังโดนบล็อก (ฟื้นเองไหม นานแค่ไหน)
+- ทดสอบเทียบกับ cache hit rate จริง — subtitle ซ้ำเยอะแค่ไหนในวิดีโอจริง (ส่งผลโดยตรงต่อจำนวน request ที่ยิงจริง)
+- เขียนรายงานสรุปพร้อมตัวเลข
+
+## Out of scope
+
+- implement Google Cloud API key adapter (T3) — เป็นงานที่จะเปิดตามผลของ spike นี้
+- backoff logic เอง (→ M4-03 ใช้ตัวเลขจาก spike นี้)
+
+## Acceptance criteria
+
+- [ ] รัน harness ต่อเนื่อง ≥ 30 นาทีที่ cadence 1 req / 2 วินาที แล้วบันทึกผลจริง
+- [ ] รายงานระบุ **latency p50/p95** ของ endpoint ฟรี เทียบกับ budget 300-500ms
+- [ ] รายงานระบุว่าเจอ rate limit ที่ request ที่เท่าไหร่ / นาทีที่เท่าไหร่ หรือระบุชัดว่า "ไม่เจอตลอด 30 นาที"
+- [ ] ถ้าโดนบล็อก → วัดว่าฟื้นเองใน N วินาที/นาที และเอาตัวเลขนั้นไปเป็น backoff parameter ของ M4-03
+- [ ] วัด cache hit rate จาก subtitle จริงอย่างน้อย 1 คลิป (10 นาที) — บอกได้ว่า request จริงต่อนาทีเหลือเท่าไหร่หลังผ่าน cache
+- [ ] **ผลออกเป็นการตัดสินใจข้อใดข้อหนึ่ง**:
+  - ✅ ผ่าน → T2 อยู่เป็น primary ต่อ, อัปเดต feature-spec หัวข้อ 5 ว่า S3 ผ่าน
+  - ❌ ไม่ผ่าน → **เปิด issue ใหม่สำหรับ T3 (Google Cloud API key) และดันเป็น P0** พร้อมอัปเดต feature-spec
+- [ ] รายงานเขียนเป็น `docs/spikes/` ตามรูปแบบเดียวกับ spike S1
+- [ ] harness เป็น throwaway — ห้ามให้ product code import จากมัน
+
+## Files
+
+- Create: `spikes/s3-ratelimit/`
+- Create: `docs/spikes/2026-XX-XX-s3-translate-ratelimit.md`
+- Modify: `docs/feature-spec.md` (อัปเดตสถานะ S3 ในหัวข้อ 5)
+
+## Testing
+
+manual — นี่คือ spike ไม่ใช่ feature ผลลัพธ์คือรายงาน + การตัดสินใจ ไม่ใช่โค้ดที่ ship
+
+---
+
+<!-- ISSUE -->
 title: M5-01 Block-level box rendering with node pool
-milestone: M5 Overlay rendering
 labels: renderer, overlay
 depends: M1-05, M4-05
 
@@ -958,7 +984,6 @@ vitest + jsdom สำหรับ pool logic · manual สำหรับผล�
 
 <!-- ISSUE -->
 title: M5-02 Thai typography — font, line-height, line breaking
-milestone: M5 Overlay rendering
 labels: renderer, thai, P0-blocker
 depends: M5-01
 
@@ -999,7 +1024,6 @@ vitest + jsdom ตรวจ attribute/CSS ที่ตั้ง · manual ตร
 
 <!-- ISSUE -->
 title: M5-03 Two-pass layout — measure then place
-milestone: M5 Overlay rendering
 labels: renderer, overlay
 depends: M5-02
 
@@ -1034,7 +1058,6 @@ vitest + jsdom ด้วย mock `getBoundingClientRect` · manual ตรวจ�
 
 <!-- ISSUE -->
 title: M5-04 Anti-overlap placement with spatial hash
-milestone: M5 Overlay rendering
 labels: renderer, overlay
 depends: M5-03
 
@@ -1071,7 +1094,6 @@ vitest: ชุด bbox ที่ทับกัน / ชิดขอบจอ / 
 
 <!-- ISSUE -->
 title: M5-05 Screen area budget + priority ordering
-milestone: M5 Overlay rendering
 labels: renderer, overlay
 depends: M5-04
 
@@ -1108,7 +1130,6 @@ vitest: จำนวนเกิน/ไม่เกินโควตา · ต�
 
 <!-- ISSUE -->
 title: M6-01 Monitor enumeration + picker UI
-milestone: M6 Region and monitor
 labels: electron, region
 depends: M2-06, M3-01
 
@@ -1146,7 +1167,6 @@ vitest ด้วย mock monitor list · manual บนจอจริงหล�
 
 <!-- ISSUE -->
 title: M6-02 Region picker — crosshair drag selection
-milestone: M6 Region and monitor
 labels: electron, renderer, region
 depends: M6-01
 
@@ -1183,7 +1203,6 @@ vitest สำหรับ drag math (รวมลากกลับทิศ) ·
 
 <!-- ISSUE -->
 title: M6-03 Region padding + edge warning
-milestone: M6 Region and monitor
 labels: electron, region, ocr
 depends: M6-02
 
@@ -1219,7 +1238,6 @@ vitest: bbox แตะขอบ/ไม่แตะ, clamp ที่ขอบจ�
 
 <!-- ISSUE -->
 title: M6-04 Region persistence bound to monitor
-milestone: M6 Region and monitor
 labels: electron, region, config
 depends: M6-03, M9-01
 
@@ -1254,7 +1272,6 @@ vitest: จอหาย / resolution เปลี่ยน / ข้อมูล�
 
 <!-- ISSUE -->
 title: M7-01 Global hotkeys
-milestone: M7 Control surface
 labels: electron, hotkey
 depends: M1-01
 
@@ -1291,7 +1308,6 @@ vitest ด้วย mock globalShortcut · manual ทดสอบทับเก
 
 <!-- ISSUE -->
 title: M7-02 System tray + context menu
-milestone: M7 Control surface
 labels: electron, ui
 depends: M7-01
 
@@ -1329,7 +1345,6 @@ vitest ด้วย mock Tray · manual
 
 <!-- ISSUE -->
 title: M7-03 Mode orchestration — auto, snapshot, pause
-milestone: M7 Control surface
 labels: electron, architecture
 depends: M7-02, M4-05
 
@@ -1369,7 +1384,6 @@ vitest ครอบทุก state transition รวมการสลับร�
 
 <!-- ISSUE -->
 title: M8-01 Anchor snapping + sticky placement
-milestone: M8 Anti-flicker
 labels: renderer, anti-flicker
 depends: M5-04
 
@@ -1406,7 +1420,6 @@ vitest: จำลอง bbox jitter ±3px ข้าม 10 เฟรม ตรว
 
 <!-- ISSUE -->
 title: M8-02 Content stability tracking + dynamic suppress
-milestone: M8 Anti-flicker
 labels: electron, anti-flicker
 depends: M3-05, M7-03
 
@@ -1442,7 +1455,6 @@ vitest ด้วยลำดับ frame ที่จำลอง OCR jitter · 
 
 <!-- ISSUE -->
 title: M8-03 Min display time, layout stability, crossfade
-milestone: M8 Anti-flicker
 labels: renderer, anti-flicker
 depends: M8-01
 
@@ -1479,7 +1491,6 @@ vitest ด้วย fake timer · **manual กับวิดีโอ subtitle 
 
 <!-- ISSUE -->
 title: M9-01 ConfigService — two-layer, schema validation, hot reload
-milestone: M9 Config and settings
 labels: electron, config
 depends: M1-01
 
@@ -1520,7 +1531,6 @@ vitest: ไฟล์หาย / merge บางส่วน / ค่าผิด
 
 <!-- ISSUE -->
 title: M9-02 Settings window UI
-milestone: M9 Config and settings
 labels: electron, renderer, ui
 depends: M9-01, M6-01
 
@@ -1561,7 +1571,6 @@ vitest + jsdom สำหรับ form logic · manual สำหรับ hot re
 
 <!-- ISSUE -->
 title: M10-01 Sidecar supervision — watchdog and restart backoff
-milestone: M10 Robustness
 labels: electron, resilience
 depends: M1-04, M7-03
 
@@ -1599,7 +1608,6 @@ vitest ด้วย fake process ที่สั่งให้ตาย/ค้�
 
 <!-- ISSUE -->
 title: M10-02 User-facing error surface
-milestone: M10 Robustness
 labels: electron, ux, resilience
 depends: M10-01, M7-02
 
@@ -1646,7 +1654,6 @@ vitest สำหรับการจัดลำดับความสำค�
 
 <!-- ISSUE -->
 title: M10-03 Logging with rotation + timing metrics
-milestone: M10 Robustness
 labels: electron, observability
 depends: M1-01
 
@@ -1687,7 +1694,6 @@ vitest: rotation, level filtering, ตรวจว่า level info ไม่ม
 
 <!-- ISSUE -->
 title: M10-04 Overlay content protection (exclude from capture)
-milestone: M10 Robustness
 labels: electron, overlay, correctness
 depends: M1-05, M2-02
 
@@ -1724,32 +1730,90 @@ manual + `debugFrame` — นี่คือ acceptance test ตัวจริ�
 
 ---
 
+<!-- ISSUE -->
+title: PKG-01 Packaging — bundle sidecar exe + Electron installer
+labels: setup, infra, dotnet, electron
+depends: M5-02, M2-01
+
+## Context
+
+Features **B1 + B2** จาก [feature-spec หัวข้อ 1.13](https://github.com/zsitthiporn/textlens/blob/main/docs/feature-spec.md) — ไม่มี issue รองรับเลยใน 43 ใบแรก
+
+ตอนนี้ M1-04 resolve path ด้วย `TEXTLENS_SIDECAR_PATH` ซึ่งพอสำหรับ dev รันเอง แต่ไม่มีงานไหนที่ทำให้ **คนที่ไม่มี Node/.NET SDK ติดตั้งแล้วรันได้**
+
+ไม่ใช่ตัวบล็อกของ MVP path (Phase 0-8) แต่เป็นเส้นแบ่งระหว่าง "ผู้พัฒนารันเองได้" กับ "ส่งให้คนอื่นใช้ได้"
+
+## Scope
+
+- publish sidecar เป็น self-contained AOT single-file exe แล้ววางลง output ของ Electron build
+- path resolution ฝั่ง prod ใน M1-04 — หา exe ข้างแอปได้จริงหลัง package (ตอนนี้เขียนไว้ว่า "prod ใช้ไฟล์ข้างแอป" แต่ยังไม่มีใครทดสอบ)
+- electron-builder (หรือเทียบเท่า): NSIS installer + portable zip
+- bundle Thai font จาก M5-02 เข้าไปใน package (ห้ามพึ่ง font ระบบ — H1)
+- ตรวจว่า config/cache/log เขียนลง `%APPDATA%` ไม่ใช่โฟลเดอร์ติดตั้ง
+
+## Out of scope
+
+- code signing (ยังไม่มี cert)
+- auto-update (B3, P2)
+- CI build on tag (B4, P2)
+
+## Acceptance criteria
+
+- [ ] `npm run package` ได้ทั้ง installer และ portable
+- [ ] **ติดตั้งบนเครื่องที่ไม่มี Node และไม่มี .NET runtime แล้วเปิดใช้งานได้ครบเส้นทางในหัวข้อ 2 ของ feature-spec**
+- [ ] sidecar exe ถูก spawn ได้โดยไม่ต้องตั้ง `TEXTLENS_SIDECAR_PATH`
+- [ ] ถอนการติดตั้งแล้วไม่เหลือ process ค้าง และไม่ลบ config ของผู้ใช้ใน `%APPDATA%`
+- [ ] คำแปลไทยแสดงด้วย font ที่ bundle มา — ทดสอบบนเครื่องที่ถอน Noto Sans Thai / Sarabun ออก
+- [ ] ขนาด installer รวม < 150MB
+- [ ] preflight ของ M2-01 (en-US recognizer) ยังทำงานถูกต้องใน build ที่ package แล้ว
+
+## Files
+
+- Create: `electron-builder.yml` (หรือ config ใน `package.json`)
+- Create: `scripts/build-sidecar.ps1`
+- Modify: `src/main/services/sidecar-client.ts` (prod path resolution)
+- Modify: `package.json` (script `package`)
+
+## Testing
+
+manual บน VM/เครื่องสะอาดที่ไม่มี Node และ .NET runtime — นี่คือ acceptance test ตัวจริง
+
+---
+
 <!-- END ISSUES -->
 
 > ทุกอย่างใต้เส้นนี้เป็นเนื้อหาของเอกสาร ไม่ใช่ issue — `create-issues.ps1` จะไม่หยิบไป
 
-## Dependency graph (ระดับ milestone)
+## Execution order
 
-```
-M1 Walking skeleton
- ├─→ M2 Pixel side ──┐
- └─→ M3 Text side ←──┘
-        │
-        ├─→ M4 Translation
-        │      │
-        │      └─→ M5 Overlay rendering  ← E2E ครบเส้นตรงนี้
-        │             │
-        │             ├─→ M6 Region and monitor
-        │             ├─→ M8 Anti-flicker
-        │             └─→ M10 Robustness
-        │
-        └─→ M7 Control surface
-               │
-               └─→ M9 Config and settings
-```
+ลำดับที่ใช้ทำงานจริง แทนที่การไล่ตามกลุ่ม M1→M10 ซึ่งไม่ใช่ลำดับที่ถูกต้อง
+แต่ละ phase เขียนเรียงตามลำดับที่รันได้ — **`depends:` ของแต่ละ issue คือแหล่งอ้างอิงที่แท้จริง**
 
-**เส้นทางสั้นที่สุดสู่ของที่ใช้งานได้จริง**: M1 → M2 → M3 → M4 → M5 (22 issues)
-หลังจากนั้นเห็นคำแปลบนจอได้แล้ว M6-M10 คือทำให้ใช้งานได้จริงในชีวิตประจำวัน
+| Phase | Issues | จบแล้วได้อะไร |
+|---|---|---|
+| 0. วางราง | M1-01 (#1) · M1-02 (#2) · M1-03 (#3) · M1-05 (#5) | Electron เปิดได้ · sidecar build ได้ · protocol นิ่ง · overlay โปร่งใสขึ้นจอ |
+| 1. spike S2 | M2-02 (#7) · M10-04 (#43) | **รู้ว่า F1 ใช้ได้ไหม ก่อนสร้างอะไรทับ** |
+| 2. sidecar ครบ | M1-04 (#4) · M10-03 (#42) · M2-01 (#6) · M2-03 (#8) · M2-04 (#9) · M2-05 (#10) · M2-06 (#11) | รัน sidecar เดี่ยวได้ JSON text+bbox จากจอจริง · Node spawn ได้ · มี log ไล่ปัญหา |
+| 3. text pipeline | M3-06 (#17) · M3-01 (#12) · M3-02 (#13) · M3-03 (#14) · M3-04 (#15) · M3-05 (#16) | frame → พิกัด → จัดกลุ่ม → กรอง → dedup ทดสอบด้วย fixture ได้ |
+| 4. แปล | M4-01 (#18) · M4-02 (#19) · M4-03 (#20) · M4-04 (#21) · **M4-06 (#44 spike S3)** · M4-05 (#22) | ได้ข้อความไทย มี cache/backoff/fallback และรู้ผล S3 แล้ว |
+| 5. เห็นบนจอ | M5-01 (#23) · M5-02 (#24) · M5-03 (#25) · M5-04 (#26) | **เห็นกล่องคำแปลไทยบนจอจริงครั้งแรก** (region ยัง hardcode) |
+| 6. ขับได้ | M7-01 (#32) · M7-02 (#33) · M7-03 (#34) | hotkey + tray + โหมด auto/snapshot/pause |
+| 7. เลือกกรอบเอง | M9-01 (#38) · M6-01 (#28) · M6-02 (#29) · M6-03 (#30) · M6-04 (#31) | 🎯 **เปิดแอป เลือกจอ ลากกรอบ กด auto — ใช้ได้จริงกับเนื้อหานิ่ง** |
+| 8. ไม่กระพริบ | M8-01 (#35) · M8-03 (#37) · M8-02 (#36) | 🎯 **subtitle / เกม ใช้ได้จริง — use case หลัก** |
+| 9. ไม่ตายเงียบ | M10-01 (#40) · M10-02 (#41) | sidecar ตายแล้วฟื้น · error ถึงผู้ใช้ |
+| 10. ที่เหลือ | M5-05 (#27) · M9-02 (#39) · PKG-01 (#45) | area budget · Settings UI (+PR1) · installer ให้คนอื่นรันได้ |
+
+**เส้นชัยของ "ใช้งานได้จริง" คือจบ Phase 8 (37 issues)** — Phase 7 ขับได้แล้วก็จริง แต่ subtitle จะกระพริบ ซึ่งเป็น use case หลัก ถ้ายอมใช้กับเอกสาร/snapshot ไปก่อน หยุดที่ Phase 7 (34 issues) ก็เริ่มใช้งานได้
+
+### 3 จุดที่ย้ายจากลำดับตามกลุ่มเดิม
+
+| Issue | ย้ายไป | เหตุผล |
+|---|---|---|
+| M10-04 (#43) | Phase 1 | `depends: M1-05, M2-02` เท่านั้น และ output คือรายงาน spike S2 — ถ้า F1 ใช้ไม่ได้ ต้องรู้ก่อนที่ M3-04 กับ Phase 5 จะถูกสร้างบนสมมติฐานว่ามันทำงาน |
+| M10-03 (#42) | Phase 2 | ไม่มี dependency นอกจาก M1-01 · Phase 2–5 เป็นช่วงที่ไล่ปัญหายากที่สุด (DPI, timing budget) มี log ก่อนคุ้มมาก |
+| M3-06 (#17) | หัว Phase 3 | พร้อมทำทันทีที่ M1-04 + M2-06 เสร็จ และเป็นตัวที่ทำให้ Phase 3–5 ทดสอบได้โดยไม่ต้องเปิดจอจริงทุกครั้ง |
+
+M7 (control surface) ขึ้นก่อน M6 (region) ด้วย เพราะ M7-03 เป็น dependency ของ M8-02 และ M10-01 อยู่แล้ว และมี hotkey ก่อนทำให้ทดสอบ region picker สะดวกกว่ามาก
 
 ## P0 coverage map
 
@@ -1783,8 +1847,16 @@ M1 Walking skeleton
 | K1 K2 | M4-04 | L5 | M10-02 |
 | | | PR1 | M9-02 |
 
+นอกเหนือจาก P0 มีอีก 2 ใบที่ไม่ได้อยู่ในแผน 43 ใบแรก:
+
+| Issue | ครอบคลุม |
+|---|---|
+| M4-06 (#44) | spike S3 — ไม่ใช่ feature แต่เป็นตัวตัดสินว่า T3 ต้องขึ้นเป็น P0 ไหม |
+| PKG-01 (#45) | B1 + B2 (P1) — เส้นแบ่ง "ผู้พัฒนารันเองได้" → "ส่งให้คนอื่นใช้ได้" |
+
 ## หมายเหตุ
 
 - ตัวเลข threshold ทุกตัวที่อ้างในนี้มาจาก [spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs/spikes/2026-08-15-s1-ocr-engine.md) ซึ่งวัดจากภาพจริง ไม่ใช่ค่าที่เดาหรือลอกจาก reference
-- ความเสี่ยง S2 (content protection) และ S3 (Google rate limit) ยังไม่ได้ spike — S2 ฝังอยู่ใน M10-04 ส่วน S3 จะรู้ผลตอนทดสอบ M8-03 กับวิดีโอจริง
+- ความเสี่ยง S2 และ S3 ยังไม่ได้ spike — **S2 อยู่ใน M10-04 (#43) ทำที่ Phase 1 · S3 อยู่ใน M4-06 (#44) ทำที่ Phase 4** ทั้งคู่ถูกดึงขึ้นมาให้รู้ผลก่อนที่จะมีโค้ดสร้างทับบนสมมติฐาน
+- ถ้า S3 ไม่ผ่าน ต้องเปิด issue ใหม่สำหรับ T3 (Google Cloud API key) และดันเป็น P0
 - ทุก issue ที่แตะพิกัดต้องใช้ converter จาก M3-01 เท่านั้น (architecture invariant ข้อ 3)
