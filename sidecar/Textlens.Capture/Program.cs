@@ -1,5 +1,6 @@
 using System.Text;
 using Textlens.Capture.Protocol;
+using Textlens.Capture.Services;
 
 namespace Textlens.Capture;
 
@@ -16,8 +17,31 @@ namespace Textlens.Capture;
 /// </summary>
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
+        // Before any monitor is queried and before any WinRT capture object exists: the
+        // process DPI awareness context is latched at first use, and getting it wrong
+        // silently corrupts every rectangle the sidecar reports on a scaled display.
+        // See MonitorEnumerator.EnsurePerMonitorDpiAwareness for why this cannot be
+        // observed on an all-100% machine.
+        if (!MonitorEnumerator.EnsurePerMonitorDpiAwareness())
+        {
+            Console.Error.WriteLine(
+                "WARN: SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) failed; "
+                + "monitor bounds on scaled displays may be virtualized");
+        }
+
+        // Diagnostic modes, used to drive real hardware while the command loop (M2-06)
+        // does not exist yet. They never emit protocol events.
+        //
+        // Matched against a known list rather than "starts with --": switches that
+        // modify normal protocol mode (--require-ocr-language) also start with two
+        // dashes, and treating those as a probe silently swallows the run.
+        if (args.Length > 0 && ProbeModes.Contains(args[0]))
+        {
+            return RunProbe(args);
+        }
+
         // stdout carries the JSON-lines protocol and nothing else. UTF-8 without a
         // BOM, '\n' line endings, autoflush — a stray BOM or '\r' would corrupt the
         // first frame for the Node-side line reader.
@@ -47,11 +71,26 @@ internal static class Program
             return 1;
         }
 
+        var ocrLanguages = InstalledOcrLanguages();
+
         stdout.WriteLine(ProtocolCodec.Encode(new ReadyEvent
         {
             Version = Version,
-            OcrLanguages = InstalledOcrLanguages(),
+            OcrLanguages = ocrLanguages,
         }));
+
+        // Feature O8. Ordered after `ready` deliberately: `ready` is defined as the
+        // first line on the stream (Events.cs), and a machine with no English pack
+        // still has a valid — merely disappointing — language list to report. Node
+        // therefore always gets the handshake before it gets the bad news.
+        //
+        // Emitting and continuing, rather than exiting, is the acceptance criterion:
+        // the user installs the pack and retries against a process that is still here.
+        var preflight = OcrPreflight.Check(ocrLanguages, RequiredOcrLanguage(args));
+        if (preflight is not null)
+        {
+            stdout.WriteLine(ProtocolCodec.Encode(preflight));
+        }
 
         // Hold the process open on stdin. M2-06 replaces this with the command
         // dispatcher; for now every line is consumed and ignored. A null read means
@@ -63,6 +102,98 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>Arguments that select a diagnostic mode instead of the protocol stream.</summary>
+    private static readonly string[] ProbeModes = ["--list-monitors", "--probe-capture", "--help"];
+
+    /// <summary>
+    /// Source language the start-up preflight asks about.
+    ///
+    /// <c>--require-ocr-language &lt;tag&gt;</c> overrides it. That switch exists so the
+    /// missing-recognizer path can be exercised against the real binary on a machine
+    /// that <i>has</i> the recognizer — every dev box does, which is precisely why the
+    /// branch that matters to users would otherwise never be run outside a unit test.
+    /// It is a diagnostic, not a setting: M2-06 takes the real value from
+    /// <c>configure.ocrLanguage</c>.
+    /// </summary>
+    private static string RequiredOcrLanguage(string[] args)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--require-ocr-language")
+            {
+                return args[i + 1];
+            }
+        }
+
+        return OcrPreflight.DefaultSourceLanguage;
+    }
+
+    /// <summary>
+    /// Diagnostic entry points for M2-02. Output goes to stderr and consists of
+    /// statistics only — never captured pixels.
+    /// </summary>
+    private static int RunProbe(string[] args)
+    {
+        var log = Console.Error;
+
+        try
+        {
+            switch (args[0])
+            {
+                case "--list-monitors":
+                    return CaptureProbe.ListMonitors(log);
+
+                case "--probe-capture":
+                    return CaptureProbe.Run(
+                        log,
+                        ArgValue(args, "--monitor") ?? MonitorEnumerator.Primary().Info.Id,
+                        ParseRect(ArgValue(args, "--region") ?? "0,0,1200,200"),
+                        int.Parse(ArgValue(args, "--frames") ?? "100", System.Globalization.CultureInfo.InvariantCulture));
+
+                default:
+                    log.WriteLine("Textlens.Capture — sidecar. With no arguments it speaks the JSON-lines");
+                    log.WriteLine("protocol on stdio. Diagnostic modes (stderr only, never pixels):");
+                    log.WriteLine("  --list-monitors");
+                    log.WriteLine("  --probe-capture [--monitor <id>] [--region x,y,w,h] [--frames n]");
+                    log.WriteLine("  --require-ocr-language <bcp47>   (applies to normal protocol mode)");
+                    return 2;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.WriteLine($"probe failed: {ex.GetType().FullName}: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static string? ArgValue(string[] args, string name)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == name)
+            {
+                return args[i + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static Rect ParseRect(string value)
+    {
+        var parts = value.Split(',');
+        if (parts.Length != 4)
+        {
+            throw new FormatException($"expected \"x,y,w,h\", got \"{value}\"");
+        }
+
+        return new Rect(
+            int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture));
     }
 
     /// <summary>Assembly version as "major.minor.patch".</summary>

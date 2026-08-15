@@ -36,13 +36,24 @@
  * Units and origins are per field, and getting them wrong is the DPI bug the design
  * doc says the reference project shipped:
  *
- *   - `lines[].bbox` - physical px, relative to the region's top-left
- *   - `region`       - physical px, relative to the monitor's top-left
- *   - `monitor.bounds` - **logical** px, absolute on the virtual desktop
+ *   - `lines[].bbox`   - physical px, relative to the region's top-left
+ *   - `region`         - physical px, relative to the monitor's top-left
+ *   - `monitor.bounds` - physical px, absolute on the virtual desktop
  *
- * `bounds` is the one rectangle on the wire that is not physical px. That follows
- * from M3-01's own conversion, `logicalX = (regionX + bboxX) / scale + boundsX`:
- * `boundsX` is added *after* the division, so it must already be logical.
+ * Every rectangle on the wire is physical px. The sidecar performs no scale
+ * arithmetic at all (invariant #1), and all of it lives in `coordinates.ts`
+ * (invariant #3).
+ *
+ * `bounds` being physical is precisely why M3-01 takes the logical origin from
+ * Electron rather than from this field:
+ *
+ *     logicalX = (regionX + bboxX) / scale + display.bounds.x
+ *
+ * When monitors differ in DPI a logical origin cannot be derived from a physical
+ * one at all, because Chromium lays displays out adjacent in DIP space instead of
+ * dividing each physical rect by its own scale. A 4K display at 200% followed by a
+ * 1080p display at 100% puts the second at DIP x=1920, while physical/scale says
+ * 3840. See design doc section 3.
  */
 export type Rect = readonly [x: number, y: number, width: number, height: number];
 

@@ -15,6 +15,11 @@
     <Version>0.1.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The capture path calls D3D11 through raw vtable function pointers
+         (Interop/NativeMethods.cs). Function pointers and the mapped-texture row copy
+         both require an unsafe context; this is confined to Interop/ and
+         CaptureService, not a project-wide invitation. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- Publish shape: self-contained NativeAOT single native exe.

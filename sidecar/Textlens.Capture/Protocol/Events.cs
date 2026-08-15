@@ -55,7 +55,10 @@ public sealed record MonitorInfo
     /// <summary>DPI scale factor, e.g. 1.0 / 1.25 / 1.5.</summary>
     public required double Scale { get; init; }
 
-    /// <summary>Monitor rectangle in logical px, absolute on the virtual desktop.</summary>
+    /// <summary>
+    /// Monitor rectangle in <b>raw physical px straight from Win32</b>, absolute on the
+    /// virtual desktop. Never divided by <see cref="Scale"/> — see <see cref="Rect"/>.
+    /// </summary>
     public required Rect Bounds { get; init; }
 }
 

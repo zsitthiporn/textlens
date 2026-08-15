@@ -17,12 +17,18 @@ namespace Textlens.Capture.Protocol;
 /// <list type="bullet">
 ///   <item><c>lines[].bbox</c> — physical px, relative to the region's top-left</item>
 ///   <item><c>region</c> — physical px, relative to the monitor's top-left</item>
-///   <item><c>monitor.bounds</c> — <b>logical</b> px, absolute on the virtual desktop</item>
+///   <item><c>monitor.bounds</c> — physical px, absolute on the virtual desktop</item>
 /// </list>
-/// <c>bounds</c> is the one rectangle on the wire that is not physical px. That
-/// follows from M3-01's own conversion, <c>logicalX = (regionX + bboxX) / scale +
-/// boundsX</c>: <c>boundsX</c> is added <i>after</i> the division, so it must already
-/// be logical.
+/// Every rectangle on the wire is physical px; the sidecar performs no scale
+/// arithmetic at all (coordinate ruling of 2026-08-16, design doc section 3).
+///
+/// <c>bounds</c> being physical is why M3-01 takes the logical origin from Electron
+/// rather than from this field — <c>logicalX = (regionX + bboxX) / scale +
+/// display.bounds.x</c>, where <c>display</c> is the Electron Display. When monitors
+/// differ in DPI a logical origin simply cannot be derived from a physical one, because
+/// Chromium lays displays out adjacent in DIP space instead of dividing each physical
+/// rect by that display's own scale. <c>monitor.bounds</c> is carried for
+/// identification and diagnostics.
 ///
 /// A named 4-tuple rather than an <c>int[]</c> for two concrete reasons: the arity
 /// becomes a compile-time fact, and value equality makes the round-trip test compare
