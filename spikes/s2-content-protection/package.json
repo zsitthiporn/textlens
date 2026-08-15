@@ -1,0 +1,7 @@
+{
+  "name": "s2-content-protection",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Throwaway harness for spike S2 — does WGC respect setContentProtection on the overlay",
+  "main": "harness.js"
+}

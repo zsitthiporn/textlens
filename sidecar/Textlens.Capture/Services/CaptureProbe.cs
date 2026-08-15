@@ -155,6 +155,200 @@ internal static class CaptureProbe
         return 0;
     }
 
+    /// <summary>
+    /// Spike S2 instrument. Captures <paramref name="frameCount"/> frames of
+    /// <paramref name="region"/> and reports, for each colour the caller names, how much
+    /// of the region that colour covers.
+    ///
+    /// <para><b>Why only named colours.</b> The question S2 asks is "is the exact value we
+    /// painted on the overlay present in what WGC hands us". Counting arbitrary colours
+    /// would mean reporting the user's screen; counting only the values the experiment
+    /// itself painted keeps the rule that no screen content leaves this process.
+    /// <c>dominant</c> is the one exception and is a diagnostic: it is printed only when a
+    /// single value covers most of the region, which under this experiment's construction
+    /// is a value we painted.</para>
+    ///
+    /// <para><b>Why a series and not one frame.</b> A single frame cannot be told apart
+    /// from a stale one. Reporting min/max/last across N frames, plus how many frames the
+    /// colour dominated, makes a "the overlay was simply never there" explanation visible
+    /// instead of indistinguishable from success.</para>
+    /// </summary>
+    /// <param name="colors">0xRRGGBB values; alpha is ignored, WGC's alpha channel is not meaningful here.</param>
+    /// <param name="tolerance">Per-channel slack for the "near" counts, absorbing any colour management on the way to the screen.</param>
+    public static int ProbeColors(
+        TextWriter log,
+        string monitorId,
+        Rect region,
+        int frameCount,
+        uint[] colors,
+        int tolerance)
+    {
+        var target = MonitorEnumerator.Find(monitorId);
+        if (target is null)
+        {
+            log.WriteLine($"no display named \"{monitorId}\". Known displays:");
+            ListMonitors(log);
+            return 2;
+        }
+
+        if (!CaptureService.IsSupported)
+        {
+            log.WriteLine("GraphicsCaptureSession.IsSupported() == false on this system");
+            return 3;
+        }
+
+        using var capture = new CaptureService();
+        capture.Open(target);
+
+        log.WriteLine(
+            $"probe-colors monitor={target.Info.Id} region=[{region.X},{region.Y},{region.Width},{region.Height}] "
+            + $"frames={frameCount} tolerance={tolerance} surface={capture.SurfaceSize.Width}x{capture.SurfaceSize.Height}");
+
+        var exact = new double[colors.Length];
+        var near = new double[colors.Length];
+        var exactMin = new double[colors.Length];
+        var exactMax = new double[colors.Length];
+        var nearMin = new double[colors.Length];
+        var nearMax = new double[colors.Length];
+        var framesOverHalf = new int[colors.Length];
+        Array.Fill(exactMin, 1.0);
+        Array.Fill(nearMin, 1.0);
+
+        var captured = 0;
+        var starved = 0;
+        uint dominantValue = 0;
+        var dominantShare = 0.0;
+
+        while (captured < frameCount)
+        {
+            if (!capture.WaitForFrame(TimeSpan.FromSeconds(2)))
+            {
+                starved++;
+                if (starved > 5)
+                {
+                    log.WriteLine($"starved: only {captured} frames; the screen is not changing");
+                    break;
+                }
+
+                continue;
+            }
+
+            var frame = capture.CaptureRegion(region);
+            if (frame is null)
+            {
+                continue;
+            }
+
+            var value = frame.Value;
+            var pixels = value.Width * (long)value.Height;
+            if (pixels == 0)
+            {
+                continue;
+            }
+
+            var span = value.Pixels.Span;
+            for (var c = 0; c < colors.Length; c++)
+            {
+                Count(span, colors[c], tolerance, out var exactHits, out var nearHits);
+                exact[c] = exactHits / (double)pixels;
+                near[c] = nearHits / (double)pixels;
+                exactMin[c] = Math.Min(exactMin[c], exact[c]);
+                exactMax[c] = Math.Max(exactMax[c], exact[c]);
+                nearMin[c] = Math.Min(nearMin[c], near[c]);
+                nearMax[c] = Math.Max(nearMax[c], near[c]);
+                if (near[c] > 0.5)
+                {
+                    framesOverHalf[c]++;
+                }
+            }
+
+            (dominantValue, dominantShare) = Dominant(span, pixels);
+            captured++;
+        }
+
+        if (captured == 0)
+        {
+            log.WriteLine("no frames captured");
+            return 4;
+        }
+
+        log.WriteLine($"frames captured={captured} starved={starved}");
+        for (var c = 0; c < colors.Length; c++)
+        {
+            log.WriteLine(
+                $"color {colors[c]:X6} exact last={exact[c]:0.0000} min={exactMin[c]:0.0000} max={exactMax[c]:0.0000}"
+                + $" | near last={near[c]:0.0000} min={nearMin[c]:0.0000} max={nearMax[c]:0.0000}"
+                + $" | framesOver50={framesOverHalf[c]}/{captured}");
+        }
+
+        // Only when one value owns the region, which by this experiment's construction is
+        // a value the experiment painted. Below that it stays unreported.
+        log.WriteLine(dominantShare >= 0.80
+            ? $"dominant {dominantValue:X6} share={dominantShare:0.0000}"
+            : $"dominant (region is not uniform; share={dominantShare:0.0000}, value withheld)");
+
+        return 0;
+    }
+
+    /// <summary>Exact and within-tolerance hits for one 0xRRGGBB value over a BGRA buffer.</summary>
+    private static void Count(ReadOnlySpan<byte> bgra, uint rgb, int tolerance, out long exact, out long near)
+    {
+        var r = (byte)(rgb >> 16);
+        var g = (byte)(rgb >> 8);
+        var b = (byte)rgb;
+
+        exact = 0;
+        near = 0;
+
+        for (var i = 0; i + 3 < bgra.Length; i += 4)
+        {
+            var pb = bgra[i];
+            var pg = bgra[i + 1];
+            var pr = bgra[i + 2];
+
+            if (pb == b && pg == g && pr == r)
+            {
+                exact++;
+                near++;
+                continue;
+            }
+
+            if (Math.Abs(pb - b) <= tolerance && Math.Abs(pg - g) <= tolerance && Math.Abs(pr - r) <= tolerance)
+            {
+                near++;
+            }
+        }
+    }
+
+    /// <summary>Most common 0xRRGGBB value in the buffer and the share of the region it covers.</summary>
+    private static (uint Value, double Share) Dominant(ReadOnlySpan<byte> bgra, long pixels)
+    {
+        var counts = new Dictionary<uint, int>(1024);
+        for (var i = 0; i + 3 < bgra.Length; i += 4)
+        {
+            var rgb = (uint)((bgra[i + 2] << 16) | (bgra[i + 1] << 8) | bgra[i]);
+            counts.TryGetValue(rgb, out var n);
+            counts[rgb] = n + 1;
+            if (counts.Count > 200_000)
+            {
+                break;
+            }
+        }
+
+        uint best = 0;
+        var bestCount = 0;
+        foreach (var pair in counts)
+        {
+            if (pair.Value > bestCount)
+            {
+                best = pair.Key;
+                bestCount = pair.Value;
+            }
+        }
+
+        return (best, bestCount / (double)pixels);
+    }
+
     private static long Percentile(List<long> sorted, double q)
     {
         var index = (int)Math.Ceiling(q * sorted.Count) - 1;

@@ -105,7 +105,7 @@ internal static class Program
     }
 
     /// <summary>Arguments that select a diagnostic mode instead of the protocol stream.</summary>
-    private static readonly string[] ProbeModes = ["--list-monitors", "--probe-capture", "--help"];
+    private static readonly string[] ProbeModes = ["--list-monitors", "--probe-capture", "--probe-colors", "--help"];
 
     /// <summary>
     /// Source language the start-up preflight asks about.
@@ -152,11 +152,24 @@ internal static class Program
                         ParseRect(ArgValue(args, "--region") ?? "0,0,1200,200"),
                         int.Parse(ArgValue(args, "--frames") ?? "100", System.Globalization.CultureInfo.InvariantCulture));
 
+                // Spike S2's instrument: does a value painted on the overlay survive into
+                // what our own WGC path sees. Reports coverage of named colours only.
+                case "--probe-colors":
+                    return CaptureProbe.ProbeColors(
+                        log,
+                        ArgValue(args, "--monitor") ?? MonitorEnumerator.Primary().Info.Id,
+                        ParseRect(ArgValue(args, "--region") ?? "0,0,1200,200"),
+                        int.Parse(ArgValue(args, "--frames") ?? "20", System.Globalization.CultureInfo.InvariantCulture),
+                        ParseColors(ArgValue(args, "--colors") ?? "000000"),
+                        int.Parse(ArgValue(args, "--tolerance") ?? "4", System.Globalization.CultureInfo.InvariantCulture));
+
                 default:
                     log.WriteLine("Textlens.Capture — sidecar. With no arguments it speaks the JSON-lines");
                     log.WriteLine("protocol on stdio. Diagnostic modes (stderr only, never pixels):");
                     log.WriteLine("  --list-monitors");
                     log.WriteLine("  --probe-capture [--monitor <id>] [--region x,y,w,h] [--frames n]");
+                    log.WriteLine("  --probe-colors  [--monitor <id>] [--region x,y,w,h] [--frames n]");
+                    log.WriteLine("                  [--colors RRGGBB,...] [--tolerance n]");
                     log.WriteLine("  --require-ocr-language <bcp47>   (applies to normal protocol mode)");
                     return 2;
             }
@@ -180,6 +193,13 @@ internal static class Program
 
         return null;
     }
+
+    /// <summary>Comma-separated <c>RRGGBB</c> hex values for <c>--probe-colors</c>.</summary>
+    private static uint[] ParseColors(string value)
+        => value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => uint.Parse(part.TrimStart('#'), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
 
     private static Rect ParseRect(string value)
     {

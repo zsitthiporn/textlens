@@ -19,9 +19,6 @@
  *
  * No coordinate arithmetic happens here: `display.bounds` is handed to `setBounds`
  * unchanged. Conversion has exactly one owner and it is not this file (invariant 3).
- *
- * Deliberately not here: `setContentProtection`. Excluding the overlay from capture is
- * issue M10-04 and depends on spike S2.
  */
 
 import path from 'node:path';
@@ -111,6 +108,16 @@ export class WindowManager {
         preload: path.join(this.#distDir, 'preload', 'index.cjs'),
       },
     });
+
+    // Feature F1, layer 1 of the feedback-loop defence (design doc section 6). Electron
+    // maps this to SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE), which spike S2
+    // verified our own WGC path honours: with it set, the sidecar sees the window
+    // *behind* the overlay, not the overlay.
+    //
+    // Set here, before the window is ever shown, and never toggled afterwards. S2 also
+    // measured the other ordering - the overlay is capturable for as long as it is
+    // visible without the flag, and "as long as" is not bounded by anything we control.
+    overlay.setContentProtection(true);
 
     // Clicks, drags and hovers all pass through to whatever is underneath. `forward`
     // keeps mousemove events coming to the renderer so hover effects remain possible

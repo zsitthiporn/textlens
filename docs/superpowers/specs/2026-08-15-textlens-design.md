@@ -203,11 +203,15 @@ overlay วาดคำแปลใต้ข้อความต้นฉบั
 
 | ชั้น | กลไก | ความมั่นใจ |
 |---|---|---|
-| 1 | overlay window ตั้ง content protection → WGC ไม่เห็น | สูง แต่ต้องยืนยันด้วย S2 |
+| 1 | overlay window ตั้ง content protection → WGC ไม่เห็น | **ยืนยันแล้ว ([S2](../../spikes/2026-08-16-s2-content-protection.md))** |
 | 2 | recentOutputs — เก็บข้อความที่เพิ่งแสดง กรอง OCR ที่ตรงกัน | ปานกลาง (OCR อ่านเพี้ยนแล้วไม่ตรง) |
 | 3 | **Thai script filter — เจอ U+0E00–0E7F ทิ้งทันที** | **เกือบ 100%** |
 
 ชั้น 3 คือด่านจริง เพราะข้อความต้นทางเป็นอังกฤษ อักษรไทยจึงไม่มีทางโผล่จากแหล่งอื่นนอกจากคำแปลของเราเอง — ต่างจาก reference ที่เป้าหมายเป็นภาษาจีนซึ่งปนกับข้อความต้นทางได้
+
+S2 วัดชั้น 1 บน Windows 11 25H2 build 26200.9168 ได้ผลเด็ดขาด: `setContentProtection(true)` ทำให้ HWND ได้ affinity `WDA_EXCLUDEFROMCAPTURE` (`0x11`) และ WGC path ของเราเองเห็น**หน้าต่างที่อยู่ข้างหลัง overlay** ไม่ใช่ overlay — ครบทั้ง 3 จอ ไม่ใช่การทาดำทับ (สำคัญ เพราะ overlay กินเต็มจอ ถ้าเป็นการทาดำ capture จะพังทั้งใบ)
+
+**แต่ยังคงชั้น 2 กับ 3 ไว้ทั้งคู่**: ทดสอบได้บน build เดียว และ `WDA_EXCLUDEFROMCAPTURE` ต้องการ Windows 10 2004+ เครื่องที่เก่ากว่านั้นจะ degrade เงียบ ๆ → ตอน runtime ควรอ่าน `GetWindowDisplayAffinity` กลับมายืนยันว่าได้ `0x11` จริง และแจ้งผู้ใช้ถ้าไม่ได้ (ข้อ 7 — ไม่มีความล้มเหลวไหนที่เงียบ)
 
 ---
 
@@ -272,7 +276,7 @@ Textlens/
 | # | ความเสี่ยง | ทดสอบยังไง | ผลถ้าเป็นจริง |
 |---|-----------|-----------|---------------|
 | **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี — font ตกแต่ง, anti-alias, พื้นหลังโปร่ง | เก็บภาพ subtitle จริง 10-15 ภาพจากเกม/วิดีโอที่จะใช้ → รัน Windows.Media.Ocr เทียบกับ PaddleOCR | เหตุผลหลักของ .NET sidecar หายไปครึ่งหนึ่ง → เปลี่ยน OcrService เป็น PaddleOCR ONNX (กระทบไฟล์เดียวเพราะ grouping อยู่ฝั่ง Node แล้ว) |
-| **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | สร้าง overlay window ตั้ง content protection แล้วดูว่า WGC เห็นไหม | F1 ใช้ไม่ได้ → พึ่ง F2/F3 ซึ่งยังแข็งแรงพอสำหรับไทย |
+| ~~**S2**~~ **ปิดแล้ว 2026-08-16** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | สร้าง overlay window ตั้ง content protection แล้วดูว่า WGC เห็นไหม | **ความเสี่ยงไม่เกิด** — F1 ใช้ได้จริง ([รายงาน](../../spikes/2026-08-16-s2-content-protection.md)) แต่ยังคง F2/F3 ไว้ เพราะทดสอบได้บน OS build เดียว |
 | **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | รัน auto mode กับวิดีโอจริง 30 นาที นับ request และ 429 | เร่ง T3 (Google Cloud API key) ขึ้นเป็น P0 |
 
 **ลำดับ: S1 → S2 → S3** — S1 กระทบการตัดสินใจมากที่สุด ควรทำก่อนเขียนอะไรจริงจัง

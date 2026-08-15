@@ -128,7 +128,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 | ID | Feature | P | Src | รายละเอียด |
 |----|---------|---|-----|-----------|
-| F1 | Exclude overlay from capture | P0 | 🔵 | WGC + content protection flag |
+| F1 | Exclude overlay from capture | P0 | 🔵 | WGC + content protection flag — [spike S2](spikes/2026-08-16-s2-content-protection.md) ยืนยันว่า WGC เคารพจริง ต้องตั้ง flag **ก่อน** หน้าต่างถูก show |
 | F2 | Recent output filter | P0 | 🔵 | เก็บข้อความที่เพิ่งแสดง แล้วกรอง OCR ที่ตรงกัน |
 | F3 | **Thai script filter** | P0 | 🔵🟢 | เจอ U+0E00–0E7F = อ่านคำแปลตัวเอง → ทิ้ง. **แม่นเกือบ 100% เพราะอักษรไทยไม่ปนกับ Latin** — ตัวนี้คือด่านจริง |
 
@@ -270,5 +270,5 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | # | ความเสี่ยง | สถานะ | ผล |
 |---|-----------|-------|-----|
 | **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี | ✅ **ผ่าน** — [รายงาน](spikes/2026-08-15-s1-ocr-engine.md) | เร็วกว่า PaddleOCR 6 เท่า (p50 99ms vs 580ms เต็มจอ / 30ms บน region) และแม่นกว่าในเนื้อหาเกม → คงสถาปัตยกรรม .NET sidecar. **เหลือช่องว่าง**: ยังไม่ได้ทดสอบ subtitle ตัวอักษรขาวลอยบนวิดีโอที่ไม่มีกล่องพื้นหลัง |
-| **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | ⬜ ถัดไป | F1 ใช้ไม่ได้ ต้องพึ่ง F2/F3 อย่างเดียว |
+| **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | ✅ **ผ่าน** — [รายงาน](spikes/2026-08-16-s2-content-protection.md) | `setContentProtection` ได้ affinity `WDA_EXCLUDEFROMCAPTURE` และ WGC path ของเราเห็นหน้าต่างข้างหลัง overlay ไม่ใช่ overlay — ครบทั้ง 3 จอ ไม่ใช่การทาดำทับ → F1 ใช้ได้จริง. **เหลือช่องว่าง**: ทดสอบได้บน OS build เดียว (26200.9168) และยังไม่ได้ลองกับเกม fullscreen exclusive → **ยังคง F2/F3 ไว้ทั้งคู่** |
 | **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | ⬜ | ต้องเร่ง T3 (API key) ขึ้นมาเป็น P0 |
