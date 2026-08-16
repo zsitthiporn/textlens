@@ -67,6 +67,28 @@ function collectingLogger(): {
 const PRIMARY: MonitorInfo = { id: '\\\\.\\DISPLAY1', bounds: [0, 0, 1920, 1080], scale: 1 };
 const SECONDARY: MonitorInfo = { id: '\\\\.\\DISPLAY2', bounds: [1920, 0, 1080, 1920], scale: 1.5 };
 
+/**
+ * The harness's default config, and **it has a region** (#51).
+ *
+ * `DEFAULT_CONFIG` has `region: null`, which since #51 means "this user has never chosen what to
+ * translate" - and that is now a distinct state with its own behaviour: `initialize` rests in
+ * `idle` and `toggleAuto` opens the picker instead of starting capture. Every test in this file
+ * that is about mode transitions, snapshots, pausing or reconfiguration is about a *configured*
+ * user, so that is what the default models. The first-run state is exercised deliberately, by the
+ * tests that pass `DEFAULT_CONFIG` and by the `first run` describe at the end.
+ *
+ * The rectangle is the whole of `PRIMARY` on purpose: padded and clamped it comes back as
+ * `[0, 0, 1920, 1080]`, which is the same region a null one produces - so making this the default
+ * changed no assertion about what reaches the wire.
+ */
+const CONFIGURED_CONFIG: Config = {
+  ...DEFAULT_CONFIG,
+  capture: {
+    ...DEFAULT_CONFIG.capture,
+    region: { rect: [0, 0, 1920, 1080], monitorId: PRIMARY.id, monitorSize: [1920, 1080] },
+  },
+};
+
 interface FakeSidecar extends CaptureSidecar {
   /** Every command written, in order. */
   readonly sent: SidecarCommand[];
@@ -291,7 +313,7 @@ function harness(
 ): Harness {
   const sidecar = fakeSidecar(options);
   const windows = fakeWindows();
-  const config = fakeConfig(options.config ?? DEFAULT_CONFIG);
+  const config = fakeConfig(options.config ?? CONFIGURED_CONFIG);
   const { logger, lines } = collectingLogger();
   const orchestrator = new AppOrchestrator({
     sidecar,
@@ -343,7 +365,7 @@ describe('AppOrchestrator.initialize', () => {
   });
 
   it('configures the whole primary display when config names no region', async () => {
-    const h = harness();
+    const h = harness({ config: DEFAULT_CONFIG });
     await h.orchestrator.initialize();
 
     expect(h.sidecar.sent[1]).toMatchObject({
@@ -886,7 +908,10 @@ describe('AppOrchestrator: idle detection (#50)', () => {
   function idleHarness(nowRef: { value: number }) {
     const sidecar = fakeSidecar({});
     const windows = fakeWindows();
-    const config = fakeConfig(DEFAULT_CONFIG);
+    // A configured user, like the shared harness (#51). These tests are about auto mode finding
+    // nothing in a region the user chose; with no region the app would not be in auto at all, and
+    // the warning channel would be carrying the first-run message instead.
+    const config = fakeConfig(CONFIGURED_CONFIG);
     const { logger, lines } = collectingLogger();
     const orchestrator = new AppOrchestrator({
       sidecar,
@@ -1076,15 +1101,21 @@ describe('AppOrchestrator: region edge warning', () => {
     expect(h.orchestrator.status.warning).toBeNull();
   });
 
-  it('never warns when the whole monitor is the region', async () => {
+  it('never warns about edges when the whole monitor is the region', async () => {
     // Text against the edge of a full-screen capture is constant and legitimate. Warning about
     // it would be pure noise, and noise is how a warning gets ignored when it matters.
-    const h = harness();
+    //
+    // The assertion is "not an edge warning" rather than "no warning at all", and the difference
+    // is #51: a config with no region now carries a standing warning of its own, because a
+    // full-screen region is the state that makes the app translate the whole desktop. So the
+    // channel is occupied - by the more useful of the two messages.
+    const h = harness({ config: DEFAULT_CONFIG });
     await h.orchestrator.initialize();
 
     h.sidecar.emit('frame', frameWith([{ bbox: [0, 0, 300, 40] }]));
 
-    expect(h.orchestrator.status.warning).toBeNull();
+    expect(h.orchestrator.status.warning).not.toContain('touching');
+    expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
   });
 });
 
@@ -1341,5 +1372,199 @@ describe('AppOrchestrator: subscribers', () => {
     h.sidecar.emit('error', { ev: 'error', code: 'OCR_FAILED', message: 'boom' });
 
     expect(h.orchestrator.status.error).toBeNull();
+  });
+});
+
+/**
+ * The first run (issue #51).
+ *
+ * With no region chosen the region is the whole display, and `effectiveDiffThreshold` turns the
+ * default 0.005 fraction into 0.0008 on a 3440x1440 screen because `diffMinChangedPx` is the
+ * smaller of the two there (#54). A live desktop is never still - measured at 3 frames in 8 seconds
+ * even at the old 0.02 - so a fresh install pressing auto captures, OCRs and translates on nearly
+ * every tick, on content nobody asked about.
+ *
+ * #51 is explicit that this is a **flow** problem: the numbers that make a subtitle detectable and
+ * the numbers that make a desktop quiet are on opposite sides of each other, and three regression
+ * tests in `region-guard.test.ts` hold the current ones shut so that #50 cannot come back. So
+ * nothing below touches `diffThreshold` or `diffMinChangedPx`; what changes is where the app rests
+ * and where it sends the user.
+ */
+describe('AppOrchestrator: the first run has no region (#51)', () => {
+  const DISPLAY = {
+    id: 11,
+    label: 'Acme 24',
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+    size: { width: 1920, height: 1080 },
+    scaleFactor: 1,
+  };
+
+  function registry(): MonitorRegistry {
+    return {
+      monitors: [PRIMARY],
+      setMonitors: () => undefined,
+      displayFor: (id) => (id === PRIMARY.id ? DISPLAY : undefined),
+    };
+  }
+
+  /** A picker that answers with one rectangle, and counts how often it was opened. */
+  function countingPicker(): RegionPickerWindows & { opened: number } {
+    const picker = {
+      opened: 0,
+      pickRegion: async () => {
+        picker.opened += 1;
+        return await Promise.resolve({
+          rect: { x: 400, y: 900, width: 1200, height: 150 },
+          origin: { x: 0, y: 0 },
+          displayId: 11,
+        });
+      },
+    };
+    return picker;
+  }
+
+  it('configures the sidecar but rests in idle instead of starting auto', async () => {
+    const h = harness({ config: DEFAULT_CONFIG });
+    await h.orchestrator.initialize();
+
+    // Configured, so the tray, the monitor list and a deliberate snapshot all still work...
+    expect(h.orchestrator.configured).toBe(true);
+    // ...but nothing is capturing, which is the whole of the issue.
+    expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure']);
+    expectConverged(h, 'idle');
+  });
+
+  it('says why, through the standing warning channel', async () => {
+    const h = harness({ config: DEFAULT_CONFIG });
+    await h.orchestrator.initialize();
+
+    // Invariant 4: an app that does nothing on launch and does not say why is an app the user
+    // reads as broken. A warning rather than an error, because nothing has failed - and because an
+    // error is cleared by the next frame, which is exactly what will never arrive here.
+    expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
+  });
+
+  it('opens the picker instead of starting auto when the hotkey is pressed', async () => {
+    const picker = countingPicker();
+    const h = harness({ config: DEFAULT_CONFIG, registry: registry(), picker });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.toggleAuto();
+
+    await vi.waitFor(() => {
+      expect(picker.opened).toBe(1);
+    });
+  });
+
+  it('routes resume to the picker as well, not only toggleAuto', async () => {
+    const picker = countingPicker();
+    const h = harness({ config: DEFAULT_CONFIG, registry: registry(), picker });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.resume();
+
+    await vi.waitFor(() => {
+      expect(picker.opened).toBe(1);
+    });
+  });
+
+  it('enters auto once a region has actually been picked', async () => {
+    const h = harness({ config: DEFAULT_CONFIG, registry: registry(), picker: countingPicker() });
+    await h.orchestrator.initialize();
+    expect(h.orchestrator.mode).toBe('idle');
+
+    await h.orchestrator.selectRegion();
+
+    // #51's "เลือก region แล้วพฤติกรรมกลับมาเป็นปกติ": the user who just drew a box around a
+    // subtitle has said what they want at least as clearly as pressing the hotkey would.
+    expect(h.orchestrator.mode).toBe('auto');
+    expect(h.orchestrator.status.warning).toBeNull();
+  });
+
+  it('sends configure for the picked region before the first start', async () => {
+    // The ordering that stops one tick of the very behaviour this issue removes: a `start` sent
+    // before the new `configure` landed would capture the whole display once.
+    const h = harness({ config: DEFAULT_CONFIG, registry: registry(), picker: countingPicker() });
+    await h.orchestrator.initialize();
+
+    await h.orchestrator.selectRegion();
+
+    const startIndex = h.sidecar.kinds.indexOf('start');
+    const configures = h.sidecar.kinds
+      .map((kind, index) => (kind === 'configure' ? index : -1))
+      .filter((index) => index >= 0);
+    expect(startIndex).toBeGreaterThan(-1);
+    expect(configures.length).toBeGreaterThanOrEqual(2);
+    expect(configures[1]).toBeLessThan(startIndex);
+    // Padded by 8 and clamped, exactly as `#resolveRegion` does for any other region.
+    expect(h.sidecar.sent[configures[1] ?? 0]).toMatchObject({ region: [392, 892, 1216, 166] });
+  });
+
+  it('stays idle when the picker is cancelled, and keeps saying why', async () => {
+    // The user was asked and declined. Starting anything behind that would be the app deciding it
+    // knew better - and it would be the #51 behaviour again.
+    const h = harness({
+      config: DEFAULT_CONFIG,
+      registry: registry(),
+      picker: { pickRegion: async () => await Promise.resolve(null) },
+    });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.toggleAuto();
+
+    await vi.waitFor(() => {
+      expect(h.lines.some((line) => line.message.includes('previous region still applies'))).toBe(true);
+    });
+    expect(h.orchestrator.mode).toBe('idle');
+    expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
+  });
+
+  it('does not promote idle to auto when the sidecar restarts', async () => {
+    // The reason the gate is in `initialize` and not only on the transitions. `SidecarSupervisor`
+    // re-runs `initialize` after every restart, so a gate on `toggleAuto` alone would have any
+    // crash quietly start full-screen capture on a machine that never chose a region.
+    const h = harness({ config: DEFAULT_CONFIG });
+    await h.orchestrator.initialize();
+    expect(h.orchestrator.mode).toBe('idle');
+
+    h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+    await h.orchestrator.initialize();
+
+    expect(h.orchestrator.mode).toBe('idle');
+    expect(h.sidecar.capturing).toBe(false);
+  });
+
+  it('still resumes a configured user into auto after a restart', async () => {
+    // The other direction of the same gate: a user who has a region must not be left idle by it.
+    const h = harness();
+    await h.orchestrator.initialize();
+    expect(h.orchestrator.mode).toBe('auto');
+
+    h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+    await h.orchestrator.initialize();
+
+    expectConverged(h, 'auto');
+  });
+
+  it('raises the warning again if the region is cleared from the settings window', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    expect(h.orchestrator.status.warning).toBeNull();
+
+    h.config.change({ capture: { region: null } });
+
+    expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
+  });
+
+  it('still allows a deliberate snapshot, which costs one tick', async () => {
+    // G4's document-reading mode is one frame on demand. It is not the runaway loop #51 is about,
+    // and refusing it would take a working feature away to fix a different one.
+    const h = harness({ config: DEFAULT_CONFIG });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.snapshot();
+
+    expect(h.orchestrator.mode).toBe('snapshot');
+    expect(h.sidecar.kinds).toContain('snapshot');
   });
 });

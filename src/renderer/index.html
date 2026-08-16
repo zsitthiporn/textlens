@@ -1,49 +1,32 @@
 <!doctype html>
-<html lang="th">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!--
+      Same policy as before: no remote anything, scripts from the bundle only. `unsafe-inline` for
+      styles is what lets the renderer set a custom property on an element; the stylesheet itself
+      is a bundled file, which is 'self'.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
     />
     <title>Textlens</title>
     <style>
+      /*
+        Pre-boot only. Everything this window actually looks like is in `settings/settings.css`,
+        which the bundle imports; these few rules exist so the fallback markup below is legible if
+        the script never runs, and so the window does not flash white before the stylesheet lands.
+      */
       :root {
         color-scheme: dark;
       }
+
       body {
         margin: 0;
-        display: grid;
-        place-items: center;
-        min-height: 100vh;
         background: #101014;
         color: #e8e8ef;
         font-family: 'Segoe UI', system-ui, sans-serif;
-      }
-      main {
-        text-align: center;
-        line-height: 1.6;
-      }
-      h1 {
-        margin: 0 0 0.5rem;
-        font-size: 1.4rem;
-        font-weight: 600;
-      }
-      dl {
-        margin: 1.5rem 0 0;
-        display: grid;
-        grid-template-columns: auto auto;
-        gap: 0.25rem 1rem;
-        font-size: 0.85rem;
-        color: #9a9aa8;
-      }
-      dt {
-        text-align: right;
-      }
-      dd {
-        margin: 0;
-        text-align: left;
-        font-variant-numeric: tabular-nums;
       }
     </style>
   </head>

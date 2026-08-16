@@ -96,6 +96,17 @@ export interface HotkeyRegistration {
 
 export type HotkeyHandlers = Readonly<Record<HotkeyAction, () => void | Promise<void>>>;
 
+/**
+ * Whether an accelerator could be taken right now. See {@link HotkeyService.probe}.
+ *
+ * `duplicate` is not among the reasons: this asks Windows a question, and Windows has no opinion
+ * about which of *our* actions wants the key. That comparison is config's, and `ipc-handlers.ts`
+ * makes it before asking this.
+ */
+export type HotkeyProbe =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'conflict' | 'invalid'; readonly detail?: string };
+
 export interface HotkeyServiceOptions {
   /** Electron's `globalShortcut`, or a fake in tests. */
   readonly shortcuts: ShortcutRegistrar;
@@ -177,6 +188,62 @@ export class HotkeyService {
    * nothing stuck in the system, and unregistering exactly what we took satisfies it without
    * reaching past our own bookkeeping.
    */
+  /**
+   * Ask whether an accelerator can be taken, without keeping it (issue #39).
+   *
+   * The rebind flow needs an answer *before* it writes anything to disk. `Control+Alt+R` has failed
+   * to register on this project's development machine every run since the hotkeys shipped, and the
+   * only remedy was hand-editing JSON; a settings window that persists a key and lets the failure
+   * surface afterwards would be a window that agrees with the user about a shortcut that does
+   * nothing. So this registers a no-op, reads the answer, and releases it again.
+   *
+   * **A key this service already holds is not a conflict with a foreign program.** Electron returns
+   * `false` for both, so probing `Control+Alt+S` while `snapshot` is bound to it would report that
+   * another program owns it - and the other program would be us. The bookkeeping is consulted
+   * first, which is the same distinction {@link register} draws for duplicates and for the same
+   * reason `error-reporter.ts` gives them different messages.
+   *
+   * The modifier check runs first here too, so a probe can never be the thing that hands Electron
+   * a string it would silently truncate.
+   */
+  probe(accelerator: string): HotkeyProbe {
+    const badModifier = findUnknownModifier(accelerator);
+    if (badModifier !== undefined) {
+      return {
+        ok: false,
+        reason: 'invalid',
+        detail: `"${badModifier}" is not a modifier; expected one of ${[...ACCELERATOR_MODIFIERS].join(', ')}`,
+      };
+    }
+
+    // Ours already. Re-taking it would return `false` and read as a foreign conflict.
+    for (const held of this.#registered.values()) {
+      if (held === accelerator) return { ok: true };
+    }
+
+    let taken: boolean;
+    try {
+      taken = this.#shortcuts.register(accelerator, () => {
+        // Never invoked: the accelerator is released on the next line. A no-op rather than a
+        // handler, so that a keypress landing inside the probe window cannot run an action the
+        // user has not finished choosing.
+      });
+    } catch (error) {
+      return { ok: false, reason: 'invalid', detail: describeError(error) };
+    }
+
+    if (!taken) return { ok: false, reason: 'conflict' };
+
+    try {
+      this.#shortcuts.unregister(accelerator);
+    } catch (error) {
+      // The probe succeeded; failing to let go is still worth a line, because a key held by a
+      // probe is a key nothing will ever route to a handler.
+      this.#log.error('failed to release a probed hotkey', { accelerator, message: describeError(error) });
+    }
+    return { ok: true };
+  }
+
   unregisterAll(): void {
     for (const [action, accelerator] of this.#registered) {
       try {

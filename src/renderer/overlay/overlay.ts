@@ -87,6 +87,8 @@ const FALLBACK_CONFIG: OverlayRenderConfig = {
   stickyMaxEntries: 128,
   minDisplayMs: 400,
   fadeMs: 120,
+  fontSize: 17,
+  opacity: 0.82,
 };
 
 /**
@@ -199,14 +201,7 @@ function newSession(current: OverlayRenderConfig): RenderSession {
  * positions the new settings would never produce - stale in a way nothing else would report.
  */
 function adopt(message: OverlayRenderMessage): void {
-  const next = message.config;
-  const rebuilt =
-    next.anchorGrid !== config.anchorGrid ||
-    next.anchorTolerance !== config.anchorTolerance ||
-    next.stickyMaxEntries !== config.stickyMaxEntries;
-
-  config = next;
-  boxContainer.style.setProperty('--textlens-fade', `${String(next.fadeMs)}ms`);
+  const rebuilt = adoptConfig(message.config);
 
   if (epoch !== message.epoch) {
     // #35: a new region, monitor or display. Every remembered position describes a screen that
@@ -219,6 +214,39 @@ function adopt(message: OverlayRenderMessage): void {
   }
 
   if (rebuilt) session = newSession(config);
+}
+
+/**
+ * Take a new set of tuning numbers and write the ones that are pure CSS.
+ *
+ * Shared by the payload path above and by the standalone push {@link OverlayRenderConfigMessage}
+ * describes, so there is one place that decides what a config change means. The standalone push is
+ * what makes #39's "เปลี่ยน font size / opacity → overlay เปลี่ยนทันที" true on a still screen: a
+ * payload only exists when there is text to draw, and a slider that does nothing until the next
+ * subtitle is a slider that does nothing.
+ *
+ * @returns whether the positional memory has to be rebuilt.
+ */
+function adoptConfig(next: OverlayRenderConfig): boolean {
+  const rebuilt =
+    next.anchorGrid !== config.anchorGrid ||
+    next.anchorTolerance !== config.anchorTolerance ||
+    next.stickyMaxEntries !== config.stickyMaxEntries ||
+    // #39. A remembered position was chosen for a box of a particular height, and height is a
+    // function of the font size - so a sticky placement carried across a font change would hold a
+    // taller box at a position computed for a shorter one, overlapping its neighbour. Same
+    // argument as the grid and the tolerance above: the rules the anchors were computed under
+    // are not the rules in force any more.
+    next.fontSize !== config.fontSize;
+
+  config = next;
+  boxContainer.style.setProperty('--textlens-fade', `${String(next.fadeMs)}ms`);
+  // ST4's two live-tunable knobs. Written to the container rather than to each box, so the value
+  // is inherited by every pooled node including ones that are hidden right now - a box reclaimed
+  // from the pool three frames later must not still carry the previous size.
+  boxContainer.style.setProperty('--textlens-font-size', `${String(next.fontSize)}px`);
+  boxContainer.style.setProperty('--textlens-opacity', String(next.opacity));
+  return rebuilt;
 }
 
 function draw(message: OverlayRenderMessage): void {
@@ -318,6 +346,24 @@ const gate = new MinDisplayGate<OverlayRenderMessage>({
 
 window.textlensOverlay?.onPayload((message) => {
   gate.submit(message);
+});
+
+/**
+ * Tuning that changed while nothing was being drawn (#39).
+ *
+ * Outside both gates, like the status banner and for the same kind of reason: the gates exist to
+ * stop *boxes* flickering as text is replaced, and this is a user turning a knob. Holding it behind
+ * a minimum-display timer would delay the one thing they are watching for.
+ *
+ * A rebuild here rather than only on the next payload, because a font size change makes every
+ * remembered position wrong immediately - the boxes on screen resize the moment the custom
+ * property lands.
+ */
+window.textlensOverlay?.onRenderConfig((message) => {
+  if (adoptConfig(message.config)) {
+    session = newSession(config);
+    pool.hideAll();
+  }
 });
 
 /**

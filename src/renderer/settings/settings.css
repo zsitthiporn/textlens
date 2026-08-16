@@ -1,0 +1,417 @@
+/*
+ * The settings window's chrome (issue M9-02 / #39).
+ *
+ * Nothing here is shared with the overlay or the region picker, and that is the same decision
+ * `vite.config.ts` records for the documents themselves: this window is opaque, focusable and
+ * wants every event, which is the exact opposite of the overlay's requirements. One stylesheet
+ * between them is how an overlay ends up with an opaque background.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #101014;
+  --panel: #181820;
+  --line: #2a2a36;
+  --text: #e8e8ef;
+  --muted: #9a9aa8;
+  --accent: #63b3ff;
+  --bad: #ff6b5e;
+  --warn: #ffb84d;
+  --good: #5fd08a;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: block;
+  place-items: initial;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#root {
+  display: block;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 18px 22px 40px;
+  text-align: left;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.mode-pill {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.mode-pill[data-mode='auto'] {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.mode-pill[data-mode='paused'],
+.mode-pill[data-mode='snapshot'] {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.mode-buttons {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  background: #22222c;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04121f;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+button.small {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+/* --- the alert band: the same single worst condition the overlay banner shows ------------- */
+
+.alert {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border-left: 4px solid var(--muted);
+  background: #1c1c26;
+}
+
+.alert[data-severity='fatal'],
+.alert[data-severity='error'] {
+  border-left-color: var(--bad);
+  background: rgb(38 10 10 / 90%);
+}
+
+.alert[data-severity='warning'] {
+  border-left-color: var(--warn);
+  background: rgb(38 26 8 / 90%);
+}
+
+.alert[data-severity='info'] {
+  border-left-color: var(--accent);
+}
+
+.alert-cause {
+  font-weight: 600;
+}
+
+.alert-remedy {
+  color: var(--muted);
+}
+
+/* --- #51's first-run prompt ---------------------------------------------------------------- */
+
+.first-run {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: rgb(15 34 52 / 70%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.first-run[hidden] {
+  display: none;
+}
+
+.first-run-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.first-run-text span {
+  color: var(--muted);
+}
+
+/* --- panels -------------------------------------------------------------------------------- */
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+  align-items: start;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 14px 16px 16px;
+}
+
+.panel h2 {
+  margin: 0 0 2px;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.panel-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.row-label {
+  flex: 0 0 150px;
+  color: var(--muted);
+}
+
+.control,
+.number,
+.range {
+  font: inherit;
+  color: inherit;
+  background: #12121a;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.range {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  accent-color: var(--accent);
+  background: transparent;
+  border: none;
+}
+
+.number {
+  width: 78px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.unit {
+  flex: 0 0 26px;
+  color: var(--muted);
+}
+
+.fixed-value {
+  color: var(--text);
+}
+
+.region-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  margin: 2px 0 0 160px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-error {
+  margin: 3px 0 0 160px;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.field-error[hidden] {
+  display: none;
+}
+
+/* --- hotkeys ------------------------------------------------------------------------------- */
+
+.hotkey-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 4px 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.hotkey-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.hotkey-button {
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.hotkey-button.capturing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hotkey-status {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hotkey-status.bad {
+  color: var(--warn);
+}
+
+/* --- privacy (PR1) -------------------------------------------------------------------------
+ *
+ * Deliberately the loudest thing in this panel. PR1 is a requirement, not a footnote: a user
+ * cannot consent to their screen text leaving the machine if the sentence saying so is styled
+ * like a hint.
+ */
+
+.privacy {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--warn);
+  background: rgb(38 26 8 / 60%);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.privacy span {
+  color: #f0dcc0;
+}
+
+/* --- configuration --------------------------------------------------------------------------- */
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.dot[data-state='running'] {
+  background: var(--good);
+}
+
+.dot[data-state='backoff'],
+.dot[data-state='starting'] {
+  background: var(--warn);
+}
+
+.dot[data-state='gave-up'],
+.dot[data-state='stopped'] {
+  background: var(--bad);
+}
+
+.path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.issues {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issue {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--warn);
+  background: #1c1c26;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.issue span {
+  color: var(--muted);
+}
+
+.issue-fields {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.versions {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}

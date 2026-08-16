@@ -32,7 +32,9 @@ import type {
   OverlayDrawnChannel,
   OverlayDrawnMessage,
   OverlayPayloadChannel,
+  OverlayRenderChannel,
   OverlayRenderConfig,
+  OverlayRenderConfigMessage,
   OverlayRenderPayload,
   OverlayStatusChannel,
   OverlayStatusMessage,
@@ -55,6 +57,7 @@ import { nullLogger, type Logger } from './logger.js';
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
 const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
 const OVERLAY_DRAWN_CHANNEL: OverlayDrawnChannel = 'textlens:overlay-drawn';
+const OVERLAY_RENDER_CHANNEL: OverlayRenderChannel = 'textlens:overlay-render';
 
 /**
  * What a payload carries before {@link WindowManager.setOverlayRender} has been called.
@@ -71,6 +74,8 @@ const FALLBACK_OVERLAY_RENDER: OverlayRenderConfig = {
   stickyMaxEntries: 128,
   minDisplayMs: 400,
   fadeMs: 120,
+  fontSize: 17,
+  opacity: 0.82,
 };
 
 /** Same arrangement as the overlay channel above, and the same compile-time drift guard. */
@@ -595,6 +600,19 @@ export class WindowManager {
    */
   setOverlayRender(config: OverlayRenderConfig): void {
     this.#overlayRender = config;
+
+    // #39, and a defect a real run caught: held here and sent only with the next payload, a font
+    // size or an opacity changed from the settings window reached the main process and stopped.
+    // A payload exists only when there is text to draw, so on a still screen - or a paused app -
+    // the user drags a slider and nothing happens, which is precisely the acceptance criterion
+    // "เปลี่ยน font size / opacity → overlay เปลี่ยนทันทีโดยไม่ต้อง restart".
+    //
+    // Not queued when the document is not ready, unlike the status banner. There is nothing to
+    // replay: the first payload carries the whole config anyway, so a push that missed the window
+    // costs nothing, while a banner that missed it is the only thing the user had.
+    const overlay = this.#overlay;
+    if (overlay === null || overlay.isDestroyed() || !this.#overlayReady) return;
+    overlay.webContents.send(OVERLAY_RENDER_CHANNEL, { config } satisfies OverlayRenderConfigMessage);
   }
 
   /** The epoch the renderer is currently drawing under. */

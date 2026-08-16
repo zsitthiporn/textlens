@@ -72,6 +72,28 @@ export interface ConfigIssue {
 
 export type ConfigListener = (current: Config, previous: Config) => void;
 
+/**
+ * Told whenever {@link ConfigService.issues} changes, with the new list.
+ *
+ * Separate from {@link ConfigListener} because the two fire on opposite events: a config listener
+ * runs when a *value* changed, and the case this exists for is a value that changed successfully
+ * in memory and then failed to reach the disk - same `current`, new issue.
+ *
+ * ## The decision this settles (#39)
+ *
+ * `not-persisted` was unreachable. `index.ts` read `config.issues` exactly once, at boot, so a
+ * failed write later in the session - the region picker's, or the settings window's - reached the
+ * log and stopped there. A previous worker left it deliberately, because closing it needs a
+ * decision about *when* `issues` is re-read, and re-reading on a timer or on every `current` access
+ * would both be guesses.
+ *
+ * The decision: the service announces its own issues, the same way it announces its own values.
+ * Nothing polls, nothing re-reads, and every route that can add an issue - a reload, a failed write
+ * from any caller - publishes through one place. That is what makes "เขียนดิสก์ไม่ได้ → ค่ายังมีผล
+ * + แจ้งผู้ใช้ว่าจะไม่ถูกจำ" true of a running app rather than only of a launch.
+ */
+export type ConfigIssueListener = (issues: readonly ConfigIssue[]) => void;
+
 export interface ConfigServiceOptions {
   /** Absolute path to the user override file, e.g. `<userData>/config.json`. */
   readonly filePath: string;
@@ -92,6 +114,7 @@ export class ConfigService {
   readonly #filePath: string;
   readonly #log: Logger;
   readonly #listeners = new Set<ConfigListener>();
+  readonly #issueListeners = new Set<ConfigIssueListener>();
 
   #current: Config = DEFAULT_CONFIG;
   /** The user layer as last validated. What gets written back, and what `set` merges into. */
@@ -145,6 +168,20 @@ export class ConfigService {
   }
 
   /**
+   * Subscribe to {@link issues} changing. Returns an unsubscribe, like {@link subscribe}.
+   *
+   * Not called on subscribe, for the same reason {@link subscribe} is not: a caller already has
+   * the getter, and the one caller that matters (`index.ts`) publishes the boot issues explicitly
+   * before subscribing, so a synthetic first notification would only duplicate it.
+   */
+  subscribeIssues(listener: ConfigIssueListener): () => void {
+    this.#issueListeners.add(listener);
+    return () => {
+      this.#issueListeners.delete(listener);
+    };
+  }
+
+  /**
    * Re-read the file and apply it. Safe to call repeatedly.
    *
    * On any failure the current config is left exactly as it was, which on first load means
@@ -160,7 +197,7 @@ export class ConfigService {
         const merged = configSchema.safeParse(mergeDeep(DEFAULT_CONFIG, parsed.data));
         if (merged.success) {
           this.#override = parsed.data;
-          this.#issues = issues;
+          this.#setIssues(issues);
           this.#commit(merged.data);
           return;
         }
@@ -173,7 +210,7 @@ export class ConfigService {
       }
     }
 
-    this.#issues = issues;
+    this.#setIssues(issues);
   }
 
   /**
@@ -267,6 +304,11 @@ export class ConfigService {
       await fs.mkdir(path.dirname(this.#filePath), { recursive: true });
       await fs.writeFile(temp, `${JSON.stringify(override, null, 2)}\n`, 'utf8');
       await fs.rename(temp, this.#filePath);
+      // A write that succeeded is the only evidence that a previous one's failure is over, so it
+      // is what clears the report. Without this, a user who fixed the permissions and saved again
+      // would be told for the rest of the session that their settings are not being remembered -
+      // while they were being remembered.
+      this.#setIssues(this.#issues.filter((issue) => issue.kind !== 'not-persisted'));
       return true;
     } catch (error) {
       const message = describeError(error);
@@ -274,10 +316,40 @@ export class ConfigService {
         filePath: this.#filePath,
         message,
       });
-      this.#issues = [...this.#issues, { kind: 'not-persisted', message, fields: [] }];
+      // **Replaces** any previous `not-persisted` rather than appending to it. The old code
+      // appended, so a read-only config directory grew this list by one entry per save for the
+      // life of the process - every entry saying the same thing, and every one of them re-rendered
+      // by the settings window that now reads it.
+      this.#setIssues([
+        ...this.#issues.filter((issue) => issue.kind !== 'not-persisted'),
+        { kind: 'not-persisted', message, fields: [] },
+      ]);
       // Best effort - a leftover temp file is untidy, not harmful, and the write already failed.
       await fs.rm(temp, { force: true }).catch(() => undefined);
       return false;
+    }
+  }
+
+  /**
+   * Adopt a new issue list and tell subscribers, but only if it actually differs.
+   *
+   * The same guard {@link #commit} uses, and for a sharper reason: this is called on every
+   * successful write, which for a healthy app means "no issues" replacing "no issues" several
+   * times a second while a user drags a slider. Notifying on that would rewrite the tray tooltip
+   * and re-render the settings window on each one.
+   */
+  #setIssues(next: readonly ConfigIssue[]): void {
+    const previous = this.#issues;
+    this.#issues = [...next];
+    if (JSON.stringify(previous) === JSON.stringify(this.#issues)) return;
+
+    for (const listener of [...this.#issueListeners]) {
+      try {
+        listener(this.#issues);
+      } catch (error) {
+        // One bad subscriber must not stop the others, exactly as in `#commit`.
+        this.#log.error('a config issue listener threw', { message: describeError(error) });
+      }
     }
   }
 

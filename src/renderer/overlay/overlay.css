@@ -62,6 +62,12 @@ body {
   pointer-events: none;
 
   --textlens-fade: 120ms;
+
+  /* ST4 / #39 — written here by overlay.ts from `render.fontSize` and `render.opacity` on every
+     payload, so both are configurable without a rebuild and without a restart. The literals are
+     only what is in force before the first payload arrives, and they match `DEFAULT_CONFIG`. */
+  --textlens-font-size: 17px;
+  --textlens-opacity: 0.82;
 }
 
 /*
@@ -77,7 +83,13 @@ body {
   box-sizing: border-box;
   padding: 4px 10px;
   border-radius: 6px;
-  background: rgb(8 8 12 / 82%);
+  /*
+   * ST4 — the alpha comes from `--textlens-opacity`, and it is applied to the **plate**, never to
+   * the element's own `opacity`. A9 animates element opacity for the crossfade; a user-set value
+   * on the same property would either be overwritten by the transition's end state or would cap
+   * the fade, and the two would fight on every frame that replaces a string.
+   */
+  background: rgb(8 8 12 / var(--textlens-opacity, 0.82));
   color: #fff;
   /* Legibility over an arbitrary screen: a dark plate plus a hard shadow, so the text survives
      both a white document and a bright game frame underneath. */
@@ -92,7 +104,9 @@ body {
    * asking for: the fallback chain is never consulted mid-string in the first place.
    */
   font-family: 'Textlens Thai', 'Leelawadee UI', 'Noto Sans Thai', sans-serif;
-  font-size: 17px;
+  /* ST4 — see `--textlens-font-size` on `#boxes`. M5-03's two-pass layout measures the box after
+     this applies, so a size change is reflected in placement rather than only in the glyphs. */
+  font-size: var(--textlens-font-size, 17px);
   font-weight: 500;
 
   /*

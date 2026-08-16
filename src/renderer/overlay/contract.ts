@@ -65,6 +65,10 @@ export interface OverlayRenderConfig {
   readonly stickyMaxEntries: number;
   readonly minDisplayMs: number;
   readonly fadeMs: number;
+  /** Translation text size in CSS px (#39). Written to a custom property, not to each box. */
+  readonly fontSize: number;
+  /** Opacity of a box's background plate, 0..1 (#39). Never the element's own `opacity` - A9. */
+  readonly opacity: number;
 }
 
 /**
@@ -138,6 +142,35 @@ export interface OverlayDrawnMessage {
   readonly id: number;
 }
 
+/**
+ * The tuning on its own, pushed the moment it changes (issue #39).
+ *
+ * ## Why this exists next to the copy that rides on every payload
+ *
+ * {@link OverlayRenderMessage.config} is still the authority, and the ordering argument for it is
+ * unchanged: a payload must never be laid out against numbers that arrived separately, so the
+ * numbers travel with the frame they govern.
+ *
+ * But #39 requires that changing the text size or the opacity is visible **immediately**, and a
+ * payload only exists when there is text to draw. Measured in a real run: a font size changed from
+ * the settings window reached config, reached the main process and stopped there, because the
+ * screen was not producing frames - so the user drags a slider and nothing happens until the next
+ * subtitle. On a paused app, or a still screen, that is never.
+ *
+ * This channel closes that gap without weakening the invariant, because the two do not overlap:
+ * the push updates the CSS custom properties that decide how a box *looks*, and every payload still
+ * carries the full config that decides where a box *goes*.
+ */
+export interface OverlayRenderConfigMessage {
+  readonly config: OverlayRenderConfig;
+}
+
+/** IPC channel for {@link OverlayRenderConfigMessage}. */
+export const OVERLAY_RENDER_CHANNEL = 'textlens:overlay-render';
+
+/** Same compile-time drift guard as {@link OverlayPayloadChannel}; see its comment. */
+export type OverlayRenderChannel = typeof OVERLAY_RENDER_CHANNEL;
+
 /** IPC channel for {@link OverlayDrawnMessage}. */
 export const OVERLAY_DRAWN_CHANNEL = 'textlens:overlay-drawn';
 
@@ -205,6 +238,8 @@ export interface OverlayBridge {
   onPayload(listener: (message: OverlayRenderMessage) => void): () => void;
   /** Registers `listener` for every status change (#41). Returns a function that unsubscribes. */
   onStatus(listener: (message: OverlayStatusMessage) => void): () => void;
+  /** Registers `listener` for tuning changes that must show before the next payload (#39). */
+  onRenderConfig(listener: (message: OverlayRenderConfigMessage) => void): () => void;
   /** Report that a payload reached the document and was drawn (#52). Fire and forget. */
   reportDrawn(id: number): void;
 }

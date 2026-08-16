@@ -365,41 +365,48 @@ function matchesLanguage(wanted: string, available: readonly string[]): boolean 
  */
 export function describeHotkeyFailures(
   failures: readonly HotkeyRegistration[],
-  configPath: string | null,
 ): Omit<Alert, 'source'> | null {
   const relevant = failures.filter((failure) => !failure.ok && failure.reason !== 'disabled');
   if (relevant.length === 0) return null;
 
-  const where = configPath === null ? 'your config file' : configPath;
   const first = relevant[0];
   if (first === undefined) return null;
   const more = relevant.length > 1 ? ` (and ${String(relevant.length - 1)} more)` : '';
   const key = first.accelerator ?? 'a shortcut';
+  // **Not the config file path any more (#39).** Every one of these used to end in "under
+  // "hotkeys" in C:\...\config.json", which was the only honest advice available while there was
+  // no other way to rebind - and it walked the user straight into the two traps this app has
+  // already been bitten by: Notepad and PowerShell 5.1 write a UTF-8 BOM that makes `JSON.parse`
+  // reject a perfectly valid file, and a misspelled modifier is silently dropped by Electron so
+  // `Contrl+Alt+A` binds `Alt+A` while reporting success. The settings window captures a real
+  // keystroke and probes it before saving, so it cannot produce either. An alert that still
+  // pointed at the file would be the app recommending the failure mode it just fixed.
+  const where = 'the tray menu → "Settings…", under "Shortcuts"';
 
   switch (first.reason) {
     case 'duplicate':
       return {
         severity: 'warning',
         cause: `the "${first.action}" shortcut ${key} is bound to two Textlens actions at once${more}`,
-        remedy: `give one of them a different key under "hotkeys" in ${where}`,
+        remedy: `give one of them a different key in ${where}`,
       };
     case 'conflict':
       return {
         severity: 'warning',
         cause: `another program already owns ${key}, so the "${first.action}" shortcut does nothing${more}`,
-        remedy: `close that program, or pick a different key for "${first.action}" under "hotkeys" in ${where}`,
+        remedy: `close that program, or pick a different key for "${first.action}" in ${where}`,
       };
     case 'invalid':
       return {
         severity: 'warning',
         cause: `"${key}" is not a shortcut Windows can register, so "${first.action}" is unbound${more}`,
-        remedy: `fix it under "hotkeys" in ${where} — for example "Control+Alt+A"`,
+        remedy: `press a new one in ${where}`,
       };
     default:
       return {
         severity: 'warning',
         cause: `the "${first.action}" shortcut could not be registered${more}`,
-        remedy: `check "hotkeys" in ${where}`,
+        remedy: `rebind it in ${where}`,
       };
   }
 }

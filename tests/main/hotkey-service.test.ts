@@ -417,3 +417,92 @@ describe('HotkeyService key repeat', () => {
     expect(lines.filter((line) => line.level === 'error')).toHaveLength(2);
   });
 });
+
+/**
+ * Asking whether a key can be taken, without taking it (issue M9-02 / #39).
+ *
+ * The rebind flow needs an answer before it persists anything. `Control+Alt+R` has failed to
+ * register on this project's development machine every run since hotkeys shipped, and the only
+ * remedy was hand-editing JSON - which the settings window exists to replace. A window that wrote
+ * the key first and surfaced the failure afterwards would agree with the user about a shortcut
+ * that does nothing.
+ */
+describe('HotkeyService.probe', () => {
+  it('reports a free accelerator as available and does not keep it', () => {
+    const shortcuts = fakeRegistrar();
+    const service = new HotkeyService({ shortcuts });
+
+    expect(service.probe('Control+Alt+G')).toEqual({ ok: true });
+    // Nothing is left behind: a key held by a probe is a key nothing will ever route to a handler.
+    expect(shortcuts.live.has('Control+Alt+G')).toBe(false);
+    expect(shortcuts.unregistered).toContain('Control+Alt+G');
+  });
+
+  it('reports a key another program owns as a conflict', () => {
+    const shortcuts = fakeRegistrar(['Control+Alt+R']);
+    const service = new HotkeyService({ shortcuts });
+
+    expect(service.probe('Control+Alt+R')).toEqual({ ok: false, reason: 'conflict' });
+  });
+
+  it('does not call our own binding a foreign conflict', () => {
+    // Electron returns `false` both for a foreign program and for a key this process already
+    // holds. Probing an action's current key would otherwise report that another program owns it -
+    // and the other program would be us.
+    const shortcuts = fakeRegistrar();
+    const service = new HotkeyService({ shortcuts });
+    service.register(DEFAULT_HOTKEYS, noopHandlers());
+
+    expect(service.probe(DEFAULT_HOTKEYS.snapshot ?? '')).toEqual({ ok: true });
+    // And the real binding is still live - the probe did not release it on the way past.
+    expect(shortcuts.live.has(DEFAULT_HOTKEYS.snapshot ?? '')).toBe(true);
+  });
+
+  it('rejects a misspelled modifier without letting Electron see it', () => {
+    // The trap this service exists for: `register('Contrl+Alt+A')` returns **true** against real
+    // Electron 43 and binds `Alt+A` instead. A probe that handed the string over would answer
+    // "yes, that works" about a binding the user did not ask for.
+    const shortcuts = fakeRegistrar();
+    const service = new HotkeyService({ shortcuts });
+
+    const result = service.probe('Contrl+Alt+A');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('invalid');
+    expect(shortcuts.live.size).toBe(0);
+  });
+
+  it('rejects an accelerator Electron cannot parse, rather than throwing', () => {
+    const shortcuts = fakeRegistrar([], ['Control+Alt+NotAKey']);
+    const service = new HotkeyService({ shortcuts });
+
+    const result = service.probe('Control+Alt+NotAKey');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('invalid');
+    expect(result.detail).toContain('Invalid accelerator');
+  });
+
+  it('never fires an action while the user is still choosing a key', () => {
+    // The callback registered during a probe is a no-op on purpose: a keypress landing inside the
+    // probe window must not run an action the user has not finished picking.
+    const shortcuts = fakeRegistrar();
+    const service = new HotkeyService({ shortcuts });
+    let fired = 0;
+    service.register(DEFAULT_HOTKEYS, { ...noopHandlers(), snapshot: () => { fired += 1; } });
+
+    let pressedDuringProbe: (() => void) | undefined;
+    const originalRegister = shortcuts.register.bind(shortcuts);
+    shortcuts.register = (accelerator, callback) => {
+      if (accelerator === 'Control+Alt+G') pressedDuringProbe = callback;
+      return originalRegister(accelerator, callback);
+    };
+
+    service.probe('Control+Alt+G');
+    pressedDuringProbe?.();
+
+    expect(fired).toBe(0);
+  });
+});

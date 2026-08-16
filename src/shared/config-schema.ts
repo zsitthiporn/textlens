@@ -315,6 +315,36 @@ const renderShape = {
    * sentence needs evidence rather than confidence. See `tests`/report.
    */
   fadeMs: z.number().int().nonnegative(),
+
+  /**
+   * Translation text size in CSS px (#39, feature ST4's "font").
+   *
+   * 17 is the value `overlay.css` shipped as a literal, kept so this field changes nothing until
+   * a user moves it. Bounded at both ends rather than left open: below about 10px Thai stacked
+   * marks stop being separable at all - H2's whole subject - and above 48 a two-line subtitle
+   * covers enough of the screen that U4's area budget would suppress most of the frame, which
+   * looks like the app losing text rather than like a font size that was set too large.
+   *
+   * Reaches the renderer on every payload as part of {@link renderConfigSchema}, so a change takes
+   * effect on the next frame with no restart - which is #39's acceptance criterion, and the reason
+   * this is in `render` rather than anywhere else.
+   */
+  fontSize: z.number().int().min(10).max(48),
+
+  /**
+   * Opacity of a translation box's **background plate**, 0..1 (#39, feature ST4's "opacity").
+   *
+   * The plate, deliberately, and not the box element. `.box` already animates `opacity` for A9's
+   * crossfade: a user-set opacity written to the same property would either be overwritten by the
+   * transition's end state or would cap the fade, and the two would fight on every frame that
+   * replaces a string. Writing it into the plate's `rgb(... / <alpha>)` instead leaves the
+   * crossfade the sole owner of element opacity.
+   *
+   * Floored at 0.2 rather than 0. A fully transparent plate leaves white text with only its
+   * shadow over an arbitrary screen, which reads as the overlay being broken; a user who wants no
+   * boxes has `toggleOverlay`, which is a mode rather than a setting that looks like a fault.
+   */
+  opacity: z.number().min(0.2).max(1),
 } as const;
 
 export const renderConfigSchema = z.strictObject(renderShape).readonly();
@@ -459,6 +489,10 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     stickyMaxEntries: 128,
     minDisplayMs: 400,
     fadeMs: 120,
+    // Both are the literals `overlay.css` already had, so making them configurable changes
+    // nothing about how the app looks until somebody moves a slider.
+    fontSize: 17,
+    opacity: 0.82,
   },
   stability: {
     enabled: true,

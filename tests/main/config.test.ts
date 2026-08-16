@@ -380,3 +380,120 @@ describe('ConfigService.reload', () => {
     expect(service.current.capture.intervalActive).toBe(900);
   });
 });
+
+/**
+ * Issues become something a running app can react to (issue #39).
+ *
+ * The gap this closes was recorded when #38 was closed and again when #29 shipped: `index.ts` read
+ * `issues` exactly once, at boot, so a write that failed later - from the region picker, or from a
+ * settings control - reached the log and stopped there. `not-persisted` was therefore the one issue
+ * kind that could never be shown to anybody, because it is the only one that cannot exist at boot.
+ *
+ * A read-only config directory is the real condition, produced the same way the existing
+ * `not-persisted` test produces it: the config's parent is a regular file, so `mkdir` fails with a
+ * genuine ENOTDIR.
+ */
+describe('ConfigService: announcing its own issues (#39)', () => {
+  /** A config path whose parent is a file, so every write fails for real. */
+  function unwritablePath(): string {
+    const blocker = path.join(tempDir(), 'not-a-directory');
+    fs.writeFileSync(blocker, 'this is a file', 'utf8');
+    return path.join(blocker, 'config.json');
+  }
+
+  it('tells subscribers when a write fails, so the alert is reachable after boot', async () => {
+    const service = await ConfigService.load({ filePath: unwritablePath() });
+    const seen: Array<readonly { kind: string }[]> = [];
+    service.subscribeIssues((issues) => {
+      seen.push(issues.map((issue) => ({ kind: issue.kind })));
+    });
+
+    const result = await service.set({ capture: { intervalActive: 1500 } });
+
+    expect(result).toMatchObject({ applied: true, persisted: false });
+    // The notification is the whole point: without it this is a getter nobody re-reads.
+    expect(seen).toEqual([[{ kind: 'not-persisted' }]]);
+  });
+
+  it('replaces the not-persisted entry instead of appending one per failed save', async () => {
+    // The mutation this guards, and it was the shipped behaviour: `#write` did
+    // `[...this.#issues, ...]`, so a read-only directory grew this list by one identical entry per
+    // save for the life of the process - and every one of them is now rendered by a settings window
+    // that reads it.
+    const service = await ConfigService.load({ filePath: unwritablePath() });
+
+    await service.set({ capture: { intervalActive: 1500 } });
+    await service.set({ capture: { intervalActive: 1600 } });
+    await service.set({ capture: { intervalActive: 1700 } });
+
+    expect(service.issues.filter((issue) => issue.kind === 'not-persisted')).toHaveLength(1);
+  });
+
+  it('clears the report once a write succeeds again', async () => {
+    // A user who fixes the permissions and saves again must stop being told their settings are not
+    // being remembered - while they are being remembered.
+    const dir = tempDir();
+    const blocker = path.join(dir, 'blocked');
+    fs.writeFileSync(blocker, 'this is a file', 'utf8');
+    const service = await ConfigService.load({ filePath: path.join(blocker, 'config.json') });
+    await service.set({ capture: { intervalActive: 1500 } });
+    expect(service.issues.some((issue) => issue.kind === 'not-persisted')).toBe(true);
+
+    // The same service, now pointed at somewhere writable - which is what fixing the permission
+    // amounts to from this object's point of view.
+    const writable = await ConfigService.load({ filePath: path.join(dir, 'config.json') });
+    const seen: string[][] = [];
+    writable.subscribeIssues((issues) => {
+      seen.push(issues.map((issue) => issue.kind));
+    });
+    await writable.set({ capture: { intervalActive: 1500 } });
+
+    expect(writable.issues).toEqual([]);
+    // And it does not notify on "no issues" replacing "no issues", which would rewrite the tray
+    // tooltip on every keystroke of a settings form.
+    expect(seen).toEqual([]);
+  });
+
+  it('does not notify when a reload produces the same issues', async () => {
+    const filePath = tempConfigPath();
+    await fsp.writeFile(filePath, 'not json at all', 'utf8');
+    const service = await ConfigService.load({ filePath });
+    const seen: number[] = [];
+    service.subscribeIssues((issues) => {
+      seen.push(issues.length);
+    });
+
+    await service.reload();
+    await service.reload();
+
+    expect(seen).toEqual([]);
+  });
+
+  it('survives an issue listener that throws, and still notifies the others', async () => {
+    const service = await ConfigService.load({ filePath: unwritablePath() });
+    let reached = false;
+    service.subscribeIssues(() => {
+      throw new Error('issue listener exploded');
+    });
+    service.subscribeIssues(() => {
+      reached = true;
+    });
+
+    await service.set({ capture: { intervalActive: 1500 } });
+
+    expect(reached).toBe(true);
+  });
+
+  it('stops notifying once unsubscribed', async () => {
+    const service = await ConfigService.load({ filePath: unwritablePath() });
+    let calls = 0;
+    const off = service.subscribeIssues(() => {
+      calls += 1;
+    });
+    off();
+
+    await service.set({ capture: { intervalActive: 1500 } });
+
+    expect(calls).toBe(0);
+  });
+});

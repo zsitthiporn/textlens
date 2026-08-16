@@ -8,6 +8,8 @@ import type {
   OverlayDrawnChannel,
   OverlayDrawnMessage,
   OverlayPayloadChannel,
+  OverlayRenderChannel,
+  OverlayRenderConfigMessage,
   OverlayRenderMessage,
   OverlayStatusChannel,
   OverlayStatusMessage,
@@ -19,6 +21,20 @@ import type {
   PickerResultChannel,
   RegionPickerBridge,
 } from '../renderer/region-picker/contract.js';
+import type {
+  SettingsBridge,
+  SettingsCommand,
+  SettingsCommandChannel,
+  SettingsConfigChannel,
+  SettingsHotkeyChannel,
+  SettingsHotkeyRequest,
+  SettingsHotkeyResult,
+  SettingsRequestChannel,
+  SettingsState,
+  SettingsStateChannel,
+  SettingsWriteResult,
+} from '../renderer/settings/contract.js';
+import type { ConfigOverride } from '../shared/config-schema.js';
 
 const bridge: TextlensBridge = {
   versions: {
@@ -43,6 +59,7 @@ contextBridge.exposeInMainWorld('textlens', bridge);
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
 const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
 const OVERLAY_DRAWN_CHANNEL: OverlayDrawnChannel = 'textlens:overlay-drawn';
+const OVERLAY_RENDER_CHANNEL: OverlayRenderChannel = 'textlens:overlay-render';
 
 /**
  * The overlay half of the bridge, on its own key.
@@ -77,6 +94,18 @@ const overlayBridge: OverlayBridge = {
     ipcRenderer.on(OVERLAY_STATUS_CHANNEL, wrapped);
     return () => {
       ipcRenderer.removeListener(OVERLAY_STATUS_CHANNEL, wrapped);
+    };
+  },
+  // #39. The tuning also rides on every payload, and that copy is still the authority for layout;
+  // this one exists because a payload only happens when there is text to draw, so a font size
+  // changed while the screen is still would otherwise not be visible until the next subtitle.
+  onRenderConfig(listener: (message: OverlayRenderConfigMessage) => void): () => void {
+    const wrapped = (_event: IpcRendererEvent, message: OverlayRenderConfigMessage): void => {
+      listener(message);
+    };
+    ipcRenderer.on(OVERLAY_RENDER_CHANNEL, wrapped);
+    return () => {
+      ipcRenderer.removeListener(OVERLAY_RENDER_CHANNEL, wrapped);
     };
   },
   // `send`, not `invoke`, for the same reason the region picker's `submit` is (#52): the renderer
@@ -122,3 +151,49 @@ const regionPickerBridge: RegionPickerBridge = {
 };
 
 contextBridge.exposeInMainWorld('textlensRegionPicker', regionPickerBridge);
+
+/**
+ * The settings window's bridge (issue M9-02 / #39).
+ *
+ * A fourth key, for the reason each of the others got its own: one preload serves every window in
+ * this app, and the overlay must never hold a capability that writes config. That separation is
+ * defence in depth rather than the defence itself - the main process filters every one of these
+ * channels by sender (`ipc-handlers.ts`), because a key on `window` proves only which script ran.
+ *
+ * `invoke`, not `send`, and that differs from the picker and the overlay on purpose: each of these
+ * has an answer the window has to render. A rebind that was refused, a value that failed
+ * validation, a write that did not reach the disk - all three are the point of the call, and a
+ * fire-and-forget channel would make them arrive as a state push the window could not attribute to
+ * the control the user just touched.
+ */
+const SETTINGS_STATE_CHANNEL: SettingsStateChannel = 'textlens:settings-state';
+const SETTINGS_REQUEST_CHANNEL: SettingsRequestChannel = 'textlens:settings-request';
+const SETTINGS_CONFIG_CHANNEL: SettingsConfigChannel = 'textlens:settings-config';
+const SETTINGS_HOTKEY_CHANNEL: SettingsHotkeyChannel = 'textlens:settings-hotkey';
+const SETTINGS_COMMAND_CHANNEL: SettingsCommandChannel = 'textlens:settings-command';
+
+const settingsBridge: SettingsBridge = {
+  onState(listener: (state: SettingsState) => void): () => void {
+    const wrapped = (_event: IpcRendererEvent, state: SettingsState): void => {
+      listener(state);
+    };
+    ipcRenderer.on(SETTINGS_STATE_CHANNEL, wrapped);
+    return () => {
+      ipcRenderer.removeListener(SETTINGS_STATE_CHANNEL, wrapped);
+    };
+  },
+  async request(): Promise<SettingsState> {
+    return (await ipcRenderer.invoke(SETTINGS_REQUEST_CHANNEL)) as SettingsState;
+  },
+  async setConfig(change: ConfigOverride): Promise<SettingsWriteResult> {
+    return (await ipcRenderer.invoke(SETTINGS_CONFIG_CHANNEL, change)) as SettingsWriteResult;
+  },
+  async setHotkey(request: SettingsHotkeyRequest): Promise<SettingsHotkeyResult> {
+    return (await ipcRenderer.invoke(SETTINGS_HOTKEY_CHANNEL, request)) as SettingsHotkeyResult;
+  },
+  async command(command: SettingsCommand): Promise<void> {
+    await ipcRenderer.invoke(SETTINGS_COMMAND_CHANNEL, command);
+  },
+};
+
+contextBridge.exposeInMainWorld('textlensSettings', settingsBridge);

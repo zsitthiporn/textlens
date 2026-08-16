@@ -224,6 +224,22 @@ export const SIDECAR_EXIT_ERROR = 'the capture sidecar stopped unexpectedly';
  */
 const DEFAULT_IDLE_WARNING_MS = 25_000;
 
+/**
+ * What the user is told while no capture region has been chosen (#51).
+ *
+ * The condition it names is a real one and it is not a matter of taste. With `region: null` the
+ * region is the whole display, and `effectiveDiffThreshold` turns the default 0.005 fraction into
+ * 0.0008 on a 3440x1440 screen because `diffMinChangedPx` is the smaller of the two there (#54).
+ * A live desktop is never still - a clock, a caret, a notification - so a fresh install pressing
+ * auto captures, OCRs and translates on nearly every tick, on content nobody asked about.
+ *
+ * #51 is explicit that retuning the numbers is not the answer: the value that makes a subtitle
+ * detectable and the value that makes a desktop quiet are on opposite sides of each other, and
+ * three regression tests hold the current ones shut precisely so that #50 cannot come back.
+ */
+const NO_REGION_WARNING =
+  'no capture region has been chosen, so Textlens would translate the whole screen';
+
 export class AppOrchestrator {
   readonly #sidecar: CaptureSidecar;
   readonly #config: CaptureConfigSource;
@@ -258,6 +274,8 @@ export class AppOrchestrator {
    * producing frames immediately, and frames clear errors. See {@link #resolveRegion}.
    */
   #regionBindingWarning: string | null = null;
+  /** Standing "you have not chosen a region yet" condition (#51). See {@link NO_REGION_WARNING}. */
+  #noRegionWarning: string | null = null;
   /** When the last `frame` arrived. `null` means none has since capture started. */
   #lastFrameAt: number | null = null;
   readonly #idleWarningMs: number;
@@ -369,12 +387,18 @@ export class AppOrchestrator {
       overlayVisible: this.#overlayVisible,
       error: this.#lastError,
       // Ranked by how badly the user is being misled, most first:
-      //   idle    - nothing is reaching the screen at all
-      //   binding - something is, but it is the whole monitor rather than the region they chose
-      //   region  - the right region, but it is clipping text
+      //   idle     - nothing is reaching the screen at all
+      //   binding  - something is, but it is the whole monitor rather than the region they chose
+      //   noRegion - nothing has been chosen at all, so the whole screen is the region (#51)
+      //   region   - the right region, but it is clipping text
       // In practice they rarely coexist: the frame that raises an edge warning is the frame that
       // ends a dry spell, and a dropped region means there is no region to clip against.
-      warning: this.#idleWarning ?? this.#regionBindingWarning ?? this.#regionWarning,
+      //
+      // `noRegion` sits below `binding` because they describe the same symptom from different
+      // causes and `binding` is the more specific: a saved region that stopped applying tells the
+      // user something changed under them, which "you have not picked one" would not.
+      warning:
+        this.#idleWarning ?? this.#regionBindingWarning ?? this.#noRegionWarning ?? this.#regionWarning,
     };
   }
 
@@ -408,9 +432,39 @@ export class AppOrchestrator {
 
     // Not an unconditional assignment: a user who hit the hotkey during startup has already
     // expressed a preference, and overwriting it here is the race this ordering avoids.
-    if (this.#mode === 'idle') this.#mode = 'auto';
+    //
+    // **And not unconditional in the other direction either, since #51.** With no region chosen
+    // the region is the whole display, and auto on a whole display translates a live desktop on
+    // nearly every tick - see {@link NO_REGION_WARNING}. So a first run rests in `idle` with a
+    // standing warning, and the way in is picking a region: `toggleAuto` and `resume` both route
+    // to the picker while there is none, and {@link selectRegion} enters `auto` itself once one
+    // exists.
+    //
+    // The gate is **here**, not only on those two transitions, and that placement is the whole of
+    // it: this method re-runs after every supervised restart (`SidecarSupervisor.onStarted`), so a
+    // gate that lived only in `toggleAuto` would have any sidecar crash silently promote a
+    // first-run `idle` to `auto` - the #51 behaviour arriving by a route nobody chose.
+    if (this.#mode === 'idle' && this.#hasRegion) this.#mode = 'auto';
+    this.#refreshNoRegionWarning();
     this.#apply();
     this.#notify();
+  }
+
+  /** Whether the user has ever chosen a capture region (#51). */
+  get #hasRegion(): boolean {
+    return this.#config.current.capture.region !== null;
+  }
+
+  /**
+   * Keep {@link #noRegionWarning} in step with config.
+   *
+   * @returns whether it changed and subscribers need telling.
+   */
+  #refreshNoRegionWarning(): boolean {
+    const message = this.#hasRegion ? null : NO_REGION_WARNING;
+    if (this.#noRegionWarning === message) return false;
+    this.#noRegionWarning = message;
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -419,12 +473,45 @@ export class AppOrchestrator {
 
   /** The main switch: `auto` stops, anything else starts. Bound to `Control+Alt+A`. */
   toggleAuto(): void {
-    this.#transition(this.#mode === 'auto' ? 'paused' : 'auto', 'toggleAuto');
+    if (this.#mode === 'auto') {
+      this.#transition('paused', 'toggleAuto');
+      return;
+    }
+    if (this.#routeToPickerIfNoRegion('toggleAuto')) return;
+    this.#transition('auto', 'toggleAuto');
   }
 
   /** Enter `auto` regardless of where we were. */
   resume(): void {
+    if (this.#routeToPickerIfNoRegion('resume')) return;
     this.#transition('auto', 'resume');
+  }
+
+  /**
+   * #51's flow, in one place: asking for `auto` with no region opens the picker instead.
+   *
+   * The issue's first option, and the reason it is the right one is that the region picker already
+   * exists (#29). Full-screen auto was a shortcut worth having while there was no other way to
+   * start; now that there is, defaulting to "translate the entire desktop" is not a shortcut, it is
+   * a setting nobody would choose. It is also **not** a number to retune - see
+   * {@link NO_REGION_WARNING}.
+   *
+   * Cancelling the picker leaves the app exactly where it was, in `idle` with the standing warning
+   * still up, which is the honest outcome: the user was asked and declined, and nothing should
+   * start behind that. {@link selectRegion} is what turns a completed pick into `auto`.
+   *
+   * @returns whether the caller should stop, because the picker was opened instead.
+   */
+  #routeToPickerIfNoRegion(reason: string): boolean {
+    if (this.#hasRegion) return false;
+    this.#log.info('no capture region has been chosen; opening the picker instead of starting auto', {
+      reason,
+      mode: this.#mode,
+    });
+    if (this.#refreshNoRegionWarning()) this.#notify();
+    // Fire and forget, like every other caller of this method - it never rejects.
+    void this.selectRegion();
+    return true;
   }
 
   /**
@@ -576,6 +663,22 @@ export class AppOrchestrator {
         region: clamped,
         persisted: result.persisted,
       });
+
+      // #51's other half. The warning is cleared and, if this is the first region the app has ever
+      // had, capture starts - because the user who just drew a box around a subtitle has said what
+      // they want at least as clearly as pressing the hotkey would.
+      const warningChanged = this.#refreshNoRegionWarning();
+
+      if (this.#mode === 'idle') {
+        // The write above notified `#onConfigChanged`, which started a `configure` for the new
+        // region. Waiting for it means the `start` below cannot be sent against the region being
+        // replaced - which on a first run is the whole display, i.e. exactly one tick of the
+        // behaviour this issue exists to remove. Resolved already when nothing changed.
+        await this.#configuring;
+        this.#transition('auto', 'first region selected');
+      } else if (warningChanged) {
+        this.#notify();
+      }
     } finally {
       this.#picking = false;
     }
@@ -922,6 +1025,12 @@ export class AppOrchestrator {
    * requirement disappear along with the comment describing it.
    */
   #onConfigChanged(current: Config, previous: Config): void {
+    // Before both early returns. The region can be cleared from the settings window (#39) as well
+    // as set from the picker, and a config that is not yet `#configured` can still have been
+    // reloaded from disk - so this is the one place that sees every route by which a region starts
+    // or stops existing (#51).
+    if (this.#refreshNoRegionWarning()) this.#notify();
+
     if (JSON.stringify(current.capture) === JSON.stringify(previous.capture)) return;
     if (!this.#configured) return;
 

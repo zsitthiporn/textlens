@@ -260,36 +260,52 @@ describe('hotkey failures: a duplicate is not a conflict', () => {
   };
 
   it('does not send the user looking for another program when the clash is our own', () => {
-    const alert = describeHotkeyFailures([duplicate], 'C:\\config.json');
+    const alert = describeHotkeyFailures([duplicate]);
 
     expect(alert?.cause).toContain('two Textlens actions');
     expect(describeAlert(alert!)).not.toContain('another program');
   });
 
   it('does name another program when that is genuinely what happened', () => {
-    const alert = describeHotkeyFailures([conflict], 'C:\\config.json');
+    const alert = describeHotkeyFailures([conflict]);
 
     expect(alert?.cause).toContain('another program');
-    expect(alert?.remedy).toContain('C:\\config.json');
+  });
+
+  it.each([
+    ['duplicate', duplicate],
+    ['conflict', conflict],
+    ['invalid', { action: 'snapshot', accelerator: 'Contrl+Alt+S', ok: false, reason: 'invalid' } as const],
+  ])('sends a %s to the settings window, never to the config file (#39)', (_reason, failure) => {
+    // Until #39 every one of these ended in "under \"hotkeys\" in C:\\...\\config.json", which was
+    // the only honest advice while there was no other way to rebind - and it is the exact route
+    // into the two traps this project has already been bitten by: Notepad and PowerShell 5.1 write
+    // a UTF-8 BOM that makes `JSON.parse` reject a valid file, and Electron silently drops a
+    // misspelled modifier and binds what is left. The settings window captures a real keystroke
+    // and probes it before saving, so it can produce neither.
+    const alert = describeHotkeyFailures([failure]);
+
+    expect(alert?.remedy).toContain('Shortcuts');
+    expect(alert?.remedy).not.toContain('config.json');
+    expect(alert?.remedy).not.toContain('hotkeys" in');
   });
 
   it('says which shortcut is unparseable rather than reporting it as taken', () => {
-    const alert = describeHotkeyFailures(
-      [{ action: 'snapshot', accelerator: 'Contrl+Alt+S', ok: false, reason: 'invalid' }],
-      null,
-    );
+    const alert = describeHotkeyFailures([
+      { action: 'snapshot', accelerator: 'Contrl+Alt+S', ok: false, reason: 'invalid' },
+    ]);
 
     expect(alert?.cause).toContain('Contrl+Alt+S');
   });
 
   it('ignores a hotkey the user turned off on purpose', () => {
     expect(
-      describeHotkeyFailures([{ action: 'snapshot', accelerator: null, ok: false, reason: 'disabled' }], null),
+      describeHotkeyFailures([{ action: 'snapshot', accelerator: null, ok: false, reason: 'disabled' }]),
     ).toBeNull();
   });
 
   it('says nothing when every key bound', () => {
-    expect(describeHotkeyFailures([{ action: 'snapshot', accelerator: 'Control+Alt+S', ok: true }], null)).toBeNull();
+    expect(describeHotkeyFailures([{ action: 'snapshot', accelerator: 'Control+Alt+S', ok: true }])).toBeNull();
   });
 });
 

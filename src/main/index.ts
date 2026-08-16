@@ -14,6 +14,7 @@ import {
   Tray,
   app,
   globalShortcut,
+  ipcMain,
   nativeImage,
   net,
   screen,
@@ -22,6 +23,7 @@ import {
 } from 'electron';
 
 import { DEFAULT_CONFIG } from '../shared/config-schema.js';
+import { SettingsIpc } from './ipc-handlers.js';
 import { AppOrchestrator, SIDECAR_EXIT_ERROR, type AppStatus } from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
 import { DrawnPayloads } from './services/drawn-payloads.js';
@@ -42,7 +44,12 @@ import { MonitorService } from './services/monitor-service.js';
 import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
 import { SidecarSupervisor } from './services/sidecar-supervisor.js';
-import { createTextPipeline, type ComposedTextPipeline } from './services/text-pipeline.js';
+import {
+  DEFAULT_SRC_LANG,
+  DEFAULT_TGT_LANG,
+  createTextPipeline,
+  type ComposedTextPipeline,
+} from './services/text-pipeline.js';
 import {
   TrayService,
   resolveTrayIconDir,
@@ -72,6 +79,8 @@ let textPipeline: ComposedTextPipeline | null = null;
 let orchestrator: AppOrchestrator | null = null;
 let tray: TrayService | null = null;
 let monitors: MonitorService | null = null;
+/** The settings window's main-process half (#39). Null until `bootstrap` has built its inputs. */
+let settingsIpc: SettingsIpc | null = null;
 /** F2's writing half (#52). Held so shutdown can drop what the renderer will never answer for. */
 let drawnPayloads: DrawnPayloads | null = null;
 let stopDrawnListener: (() => void) | null = null;
@@ -123,6 +132,10 @@ function renderStatus(): void {
   windows?.sendOverlayStatus({
     alert: alert === null ? null : { severity: alert.severity, cause: alert.cause, remedy: alert.remedy },
   });
+
+  // The third surface (#39). It shows the same single worst alert the other two do - one ranking,
+  // three renderings - plus everything underneath it that the tray has no room for.
+  settingsIpc?.publish();
 }
 
 async function bootstrap(): Promise<void> {
@@ -199,10 +212,33 @@ async function bootstrap(): Promise<void> {
     // the same thing. The renderer's own positional memory is cleared by the epoch bump
     // `AppOrchestrator` issues for the same event; this is the main-process half, and it is here
     // rather than in the orchestrator because the pipeline is this file's to hold.
+    const monitorChanged = current.capture.monitorId !== previous.capture.monitorId;
     const moved =
-      JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) ||
-      current.capture.monitorId !== previous.capture.monitorId;
+      JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) || monitorChanged;
     if (moved) textPipeline?.pipeline.resetScene('capture region or monitor changed');
+
+    // #39, and a bug the monitor picker would have exposed the moment it shipped: nothing moved the
+    // overlay when the captured monitor changed. Frames are paired to their own display and
+    // converted to screen-global logical px, then the renderer subtracts the overlay window's
+    // origin - so capturing DISPLAY2 while the overlay covers DISPLAY1 puts every box off the side
+    // of the window, and the app looks like it stopped translating. Nothing reported it, because
+    // every stage genuinely succeeded.
+    if (monitorChanged) moveOverlayToCaptured(current.capture.monitorId);
+
+    // One apply path for hotkeys, whether the change came from the settings window or from an
+    // edited config file. `HotkeyService.register` replaces the previous set, so this is also what
+    // releases the old accelerator.
+    if (JSON.stringify(current.hotkeys) !== JSON.stringify(previous.hotkeys)) applyHotkeys();
+
+    settingsIpc?.publish();
+  });
+  // #39's "not-persisted is unreachable", decided. `ConfigService` now announces its own issues,
+  // so a write that fails *after* boot - from the region picker, or from a settings control -
+  // reaches the same alert the boot-time issues do instead of only the log. Read once at startup
+  // was the whole of the gap.
+  config?.subscribeIssues((issues) => {
+    reporter.set('config', describeConfigIssues(issues, config?.filePath ?? null));
+    settingsIpc?.publish();
   });
   windows.openSettings('settings');
   windows.openOverlay();
@@ -283,6 +319,7 @@ async function bootstrap(): Promise<void> {
 
   startTray(orchestrator);
   startHotkeys(orchestrator);
+  startSettingsIpc(orchestrator, supervision);
 
   lastStatus = orchestrator.status;
   renderStatus();
@@ -431,10 +468,24 @@ function electronTrayPlatform(): TrayPlatform {
  */
 function startHotkeys(modes: AppOrchestrator): void {
   if (logger === null) return;
-  const log = logger.child('app');
+  hotkeys = new HotkeyService({ shortcuts: globalShortcut, logger });
+  applyHotkeys();
+  void modes;
+}
 
-  const service = new HotkeyService({ shortcuts: globalShortcut, logger });
-  hotkeys = service;
+/**
+ * Bind the current config's accelerators and report the outcome.
+ *
+ * **The only place `register` is called**, and that is what #39 needed it to become. It used to run
+ * once at startup, which meant a rebind had nowhere to take effect: the settings window writes
+ * config, the config subscriber calls this, and the same path serves an edited file on disk. A
+ * second call site would be a second answer to "which keys are live".
+ */
+function applyHotkeys(): void {
+  const service = hotkeys;
+  const modes = orchestrator;
+  if (service === null || modes === null || logger === null) return;
+  const log = logger.child('app');
 
   service.register((config?.current ?? DEFAULT_CONFIG).hotkeys, {
     toggleAuto: () => {
@@ -463,7 +514,119 @@ function startHotkeys(modes: AppOrchestrator): void {
   // #41. `Control+Alt+R` conflicts on this machine and has done for the whole project; the log
   // said so every run and nothing else did. `describeHotkeyFailures` is where 'conflict' and
   // 'duplicate' get different text - see its comment on why that distinction is not cosmetic.
-  reporter.set('hotkeys', describeHotkeyFailures(service.failures, config?.filePath ?? null));
+  // Since #39 the remedy it names is reachable: the settings window rebinds from a captured
+  // keystroke, so "pick a different key" is a thing the user can do rather than advice.
+  reporter.set('hotkeys', describeHotkeyFailures(service.failures));
+  settingsIpc?.publish();
+}
+
+/**
+ * Wire the settings window (issue M9-02 / #39).
+ *
+ * Last, because it reads from everything: the config service, the mode machine, the monitor
+ * registry, the hotkey service, the supervisor and the error reporter. Built here rather than
+ * inside `SettingsIpc` for the reason this whole file exists - `ipc-handlers.ts` imports no
+ * `electron`, so the two Electron-shaped things it needs (the channel plumbing and the window's
+ * identity) are supplied from the one module that is allowed to name them.
+ */
+function startSettingsIpc(modes: AppOrchestrator, supervision: SidecarSupervisor): void {
+  if (logger === null || config === null || monitors === null) return;
+  const configService = config;
+  const monitorService = monitors;
+
+  const ipc = new SettingsIpc({
+    host: {
+      handle: (channel, handler) => {
+        ipcMain.handle(channel, async (event, payload: unknown) => await handler(event.sender.id, payload));
+      },
+      removeHandler: (channel) => {
+        ipcMain.removeHandler(channel);
+      },
+      send: (channel, message) => {
+        const target = windows?.settings;
+        if (target === undefined || target === null || target.isDestroyed()) return false;
+        target.webContents.send(channel, message);
+        return true;
+      },
+    },
+    config: configService,
+    modes,
+    hotkeys: {
+      get registrations() {
+        // A getter, not a snapshot: `applyHotkeys` replaces the array on every rebind, and a value
+        // captured here would freeze the window's view at whatever was true when it opened.
+        return hotkeys?.registrations ?? [];
+      },
+      probe: (accelerator) =>
+        hotkeys?.probe(accelerator) ?? { ok: false, reason: 'invalid', detail: 'hotkeys are unavailable' },
+    },
+    monitors: monitorService,
+    sidecar: {
+      get status() {
+        return supervision.status;
+      },
+      retry: () => {
+        supervision.retry();
+      },
+    },
+    // Read at publish time rather than cached, for the reason `renderStatus` gives: the reporter
+    // only notifies when the *top* alert changes, so a cached copy is wrong for every alert that
+    // arrives underneath an existing one.
+    alert: () => reporter.top,
+    engines: textPipeline?.translator.engineNames ?? [],
+    srcLang: DEFAULT_SRC_LANG,
+    tgtLang: DEFAULT_TGT_LANG,
+    versions: {
+      electron: process.versions.electron ?? 'unknown',
+      chrome: process.versions.chrome ?? 'unknown',
+      node: process.versions.node ?? 'unknown',
+    },
+    // Identity, re-read on every message. The window can be closed and reopened, and a captured id
+    // would keep authorising a `webContents` that no longer exists - or, worse, one whose id has
+    // been reused.
+    isTrustedSender: (senderId) => {
+      const target = windows?.settings;
+      return target !== undefined && target !== null && !target.isDestroyed() && target.webContents.id === senderId;
+    },
+    logger,
+  });
+
+  ipc.register();
+  settingsIpc = ipc;
+
+  // The supervisor's own light in the Configuration panel. Its alert already reaches `renderStatus`
+  // through the reporter; this is the raw state, which the alert deliberately does not carry for
+  // the states that are not worth interrupting anybody over.
+  supervision.subscribe(() => {
+    ipc.publish();
+  });
+  ipc.publish();
+}
+
+/**
+ * Put the overlay on the display the sidecar is capturing (#39).
+ *
+ * `null` means "whichever monitor is primary", which is resolved the same way `AppOrchestrator`
+ * resolves it - so the overlay follows the capture rather than guessing independently. A monitor
+ * that has no paired display is left alone deliberately: `MonitorService.displayFor` returning
+ * `undefined` is the case #28 exists for, and moving the overlay somewhere arbitrary would be the
+ * confident-but-wrong behaviour that issue removed.
+ */
+function moveOverlayToCaptured(monitorId: string | null): void {
+  const log = logger?.child('app');
+  if (monitorId === null) {
+    windows?.moveOverlayTo(screen.getPrimaryDisplay().id);
+    log?.info('overlay moved to the primary display', { reason: 'monitor set to automatic' });
+    return;
+  }
+
+  const display = monitors?.displayFor(monitorId);
+  if (display === undefined) {
+    log?.warn('cannot move the overlay: the chosen monitor is not paired to any display', { monitorId });
+    return;
+  }
+  windows?.moveOverlayTo(display.id);
+  log?.info('overlay moved to follow the captured monitor', { monitorId, displayId: display.id });
 }
 
 /**
@@ -669,6 +832,9 @@ async function shutdown(): Promise<void> {
   // however long the child takes to exit.
   tray?.destroy();
   orchestrator?.dispose();
+  // Before the windows go. A handler left attached to `ipcMain` outlives the window it served, and
+  // a relaunch inside one process would find the channel already taken.
+  settingsIpc?.dispose();
 
   // **Before `sidecar.stop()`**, and the order is the whole point. `stop()` closes stdin and the
   // sidecar exits 0; a supervisor still listening would see a process go away during a shutdown
