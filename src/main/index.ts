@@ -9,11 +9,12 @@
 
 import path from 'node:path';
 
-import { app } from 'electron';
+import { app, net, screen } from 'electron';
 
 import { createLogger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
+import { createTextPipeline, type ComposedTextPipeline } from './services/text-pipeline.js';
 import { WindowManager } from './services/window-manager.js';
 
 /** dist/ - this file lives at dist/main/index.js once compiled. */
@@ -25,6 +26,7 @@ const METRICS_SUMMARY_INTERVAL_MS = 60_000;
 let logger: RootLogger | null = null;
 let sidecar: SidecarClient | null = null;
 let windows: WindowManager | null = null;
+let textPipeline: ComposedTextPipeline | null = null;
 let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
 
@@ -57,7 +59,55 @@ async function bootstrap(): Promise<void> {
     app.quit();
   });
 
+  textPipeline = startTextPipeline(metrics);
+
   await startSidecar(metrics);
+}
+
+/**
+ * Compose the text pipeline, and hand it Electron's network stack.
+ *
+ * `net.fetch` is the entire point of this function existing here rather than inside
+ * `text-pipeline.ts`. The translator modules take their HTTP transport as a parameter and
+ * default it to Node's `fetch`, which does **not** honour the system proxy - a user behind a
+ * corporate proxy would get no translations and an error that reads like the endpoint being
+ * down. `createTextPipeline` makes the parameter required so this cannot be forgotten, and this
+ * is the one place in the app that is allowed to name Electron.
+ */
+function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | null {
+  if (logger === null) return null;
+  const log = logger.child('app');
+
+  const composed = createTextPipeline({
+    fetch: net.fetch,
+    cachePath: path.join(app.getPath('userData'), 'translation-cache.db'),
+    logger,
+    metrics,
+    onPayload: (payload) => {
+      // M5-01 (#23) sends this to the overlay renderer and M10-02 (#41) renders the degraded
+      // warning. Until they land, the payload's counts are the record that it existed - and
+      // they contain no screen text, so they are safe at this level (PR3).
+      log.debug('overlay payload', {
+        seq: payload.seq,
+        complete: payload.complete,
+        engine: payload.engine,
+        degraded: payload.degraded,
+        failures: payload.failures.length,
+        ...payload.stats,
+      });
+    },
+  });
+
+  log.info('translation pipeline ready', {
+    engines: composed.translator.engineNames,
+    // Evidence, not decoration: this line is how a real run proves which transport was injected.
+    // Node's global `fetch` and Electron's `net.fetch` are different functions, and only the
+    // latter reads the system proxy.
+    transport: net.fetch === globalThis.fetch ? 'node-fetch' : 'electron-net',
+    cache: composed.cache.status,
+  });
+
+  return composed;
 }
 
 async function startSidecar(metrics: MetricsRecorder): Promise<void> {
@@ -81,6 +131,13 @@ async function startSidecar(metrics: MetricsRecorder): Promise<void> {
   // sidecar's own measurements rather than anything Node guessed about them.
   client.on('frame', (frame) => {
     metrics.recordFrameTimings(frame.timings);
+
+    // Pairing `frame.monitor.id` to the right Electron `Display` is M6-01 (#28); until then the
+    // region is hardcoded to the primary display anyway. `coordinates.ts` explains at length why
+    // this cannot be derived from `frame.monitor.bounds` - it is physical px and Chromium lays
+    // displays out in DIP space, so the two disagree the moment two monitors differ in DPI.
+    // The pipeline never rejects, so this deliberately does not need a `.catch`.
+    void textPipeline?.pipeline.handleFrame(frame, screen.getPrimaryDisplay());
   });
 
   try {
@@ -103,6 +160,8 @@ async function shutdown(): Promise<void> {
 
   stopMetricsSummary?.();
   await sidecar?.stop();
+  // After the sidecar, so no frame can arrive and find the cache handle already gone.
+  textPipeline?.close();
   windows?.closeAll();
   await logger?.close();
 }

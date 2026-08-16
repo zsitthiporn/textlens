@@ -262,11 +262,21 @@ S2 วัดชั้น 1 บน Windows 11 25H2 build 26200.9168 ได้ผ�
 | sidecar ค้าง | watchdog — ไม่มี event เกิน N เท่าของ interval → kill แล้ว restart ตามกฎข้างบน |
 | sidecar เปิดไม่ได้ตั้งแต่แรก | แจ้ง error พร้อมทางแก้ ไม่ปิดแอป (settings ยังเปิดได้) |
 | OCR ไม่เจอข้อความ | ไม่ใช่ error — no-op |
-| engine ล้ม | fallback chain → ล้มหมดแสดงต้นฉบับพร้อมสัญญาณเตือน |
+| engine ล้ม | fallback chain → ล้มหมดแสดงต้นฉบับพร้อมสัญญาณเตือน (ดูหมายเหตุ degraded ใต้ตาราง) |
 | 429 / network error | exponential backoff แยกต่อ engine ไม่ให้ engine หนึ่งล้มไปกระทบอีกตัว |
 | config พัง | log + ใช้ default + แจ้งใน settings ว่า field ไหนไม่ผ่าน |
 
 หลักการ: **ไม่มีความล้มเหลวไหนที่เงียบ** — reference เงียบเมื่อ engine ล่ม ผู้ใช้เห็นแค่ overlay ว่างเปล่าโดยไม่รู้สาเหตุ
+
+### หมายเหตุ: degraded ต้องได้รับการยกเว้นจาก identical-suppression
+
+M4-05 กำหนดว่า **คำแปลที่เหมือนต้นฉบับเป๊ะ → ไม่ส่งไป render** เพราะไม่มีประโยชน์
+
+กฎสองข้อนี้ขัดกันตรงๆ เมื่อ engine ล้มหมด: fallback คืน**ต้นฉบับ** ทุกรายการจึง "เหมือนต้นฉบับเป๊ะ" → ถูก suppress ทั้งหมด → **overlay ว่างเปล่าพอดีในจังหวะที่ตารางข้างบนสั่งให้แสดงคำเตือน** ซึ่งคือพฤติกรรมของ reference ที่เราตั้งใจไม่เอา
+
+**ตัดสินแล้ว (2026-08-16, ตอนทำ M4-05)**: รายการที่มี `degraded = true` **ได้รับการยกเว้นจาก identical-suppression** และไม่ถูกเขียนลง cache ด้วย
+
+`degraded` / `engine` / `failures[]` / `cacheStatus` เดินทางไปกับ payload ทุกก้อน และแต่ละรายการมี `origin: 'cache' | 'engine' | 'degraded'` — M10-02 เป็นคนวาดสัญญาณนี้ให้ผู้ใช้เห็น
 
 ---
 
