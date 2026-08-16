@@ -85,9 +85,9 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | ID | Feature | P | Src | รายละเอียด |
 |----|---------|---|-----|-----------|
 | T1 | **Engine abstraction** | P0 | 🔵🟢 | `TranslationEngine` interface + adapter registry |
-| T2 | Google Translate | P0 | 🔵 | endpoint ฟรี — **primary ถาวร** เพราะ latency ต่ำสุด |
-| T3 | **Google Cloud API key (optional)** | P1 | 🔴 | ทางออกเมื่อ endpoint ฟรีโดน rate limit ที่ cadence ของ subtitle (ดู S3) |
-| T4 | **OpenAI-compatible adapter** | P1 | 🟢 | ตัวเดียวคุมทั้ง LM Studio + Ollama — สำหรับโหมดอ่านเอกสาร |
+| T2 | Google Translate | P0 | 🔵 | endpoint ฟรี — **primary ถาวร** · S3 วัดแล้ว: ไม่มี rate limit แต่ **p50 485ms** ซึ่งเกิน budget (~408ms เป็นเวลาที่ service ใช้คิด ไม่ใช่ RTT) — ข้อความเดิมที่ว่า "latency ต่ำสุด" เป็นข้อสันนิษฐานตอนออกแบบที่ไม่เคยเทียบกับอะไร |
+| ~~T3~~ | ~~Google Cloud API key~~ | — | 🔴 | ❌ **ตัดออกจากแผน** — เจ้าของโปรเจกต์ตัดสินว่าจะไม่เสียเงิน และเงื่อนไขที่ตั้งไว้ ("โดน rate limit") ก็ไม่เกิดตาม S3 · ดู [#48](https://github.com/zsitthiporn/textlens/issues/48) สำหรับ gap ที่ยอมรับไว้ |
+| T4 | **OpenAI-compatible adapter** | P1 | 🟢 | ตัวเดียวคุมทั้ง LM Studio + Ollama · **หลัง T3 ถูกตัด นี่คือตัวสำรองตัวเดียวที่เหลือ** — รันในเครื่อง ฟรี ไม่พึ่ง Google · ตอนนี้ `engines: ["google"]` มีตัวเดียว ถ้า endpoint unofficial ตาย แอปแปลไม่ได้เลย |
 | T5 | DeepL | P2 | 🔵 | |
 | T6 | Fallback chain | P0 | 🔵 | primary ล้ม → fallback → ล้มหมดแสดงต้นฉบับ |
 | T7 | Batch translation | P0 | 🔵 | หลายข้อความใน request เดียว |
@@ -269,6 +269,6 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 | # | ความเสี่ยง | สถานะ | ผล |
 |---|-----------|-------|-----|
-| **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี | ✅ **ผ่าน** — [รายงาน](spikes/2026-08-15-s1-ocr-engine.md) | เร็วกว่า PaddleOCR 6 เท่า (p50 99ms vs 580ms เต็มจอ / 30ms บน region) และแม่นกว่าในเนื้อหาเกม → คงสถาปัตยกรรม .NET sidecar. **เหลือช่องว่าง**: ยังไม่ได้ทดสอบ subtitle ตัวอักษรขาวลอยบนวิดีโอที่ไม่มีกล่องพื้นหลัง |
+| **S1** | Windows.Media.Ocr อ่าน subtitle เกมได้ไม่ดี | ✅ **ผ่าน** — [รายงาน](spikes/s1-ocr/README.md) | เร็วกว่า PaddleOCR 6 เท่า (p50 99ms vs 580ms **ที่ภาพ 1920×1080** / 30ms บน region — ขนาดที่วัดเป็นส่วนหนึ่งของตัวเลข เวลา OCR แปรตามพื้นที่ ดู [#49](https://github.com/zsitthiporn/textlens/issues/49)) และแม่นกว่าในเนื้อหาเกม → คงสถาปัตยกรรม .NET sidecar. **เหลือช่องว่าง**: ยังไม่ได้ทดสอบ subtitle ตัวอักษรขาวลอยบนวิดีโอที่ไม่มีกล่องพื้นหลัง |
 | **S2** | WGC capture region + exclude-from-capture ไม่ทำงานตามคาด | ✅ **ผ่าน** — [รายงาน](spikes/2026-08-16-s2-content-protection.md) | `setContentProtection` ได้ affinity `WDA_EXCLUDEFROMCAPTURE` และ WGC path ของเราเห็นหน้าต่างข้างหลัง overlay ไม่ใช่ overlay — ครบทั้ง 3 จอ ไม่ใช่การทาดำทับ → F1 ใช้ได้จริง. **เหลือช่องว่าง**: ทดสอบได้บน OS build เดียว (26200.9168) และยังไม่ได้ลองกับเกม fullscreen exclusive → **ยังคง F2/F3 ไว้ทั้งคู่** |
-| **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | ⬜ | ต้องเร่ง T3 (API key) ขึ้นมาเป็น P0 |
+| **S3** | Google free endpoint โดน rate limit ที่ cadence ของ subtitle | ✅ **ผ่าน** — [#44](https://github.com/zsitthiporn/textlens/issues/44) · [บันทึก](spikes/s3-ratelimit/results/s3-analysis-notes.md) | **ไม่มี rate limit เลย** — 1055 request ที่ 30/นาที ต่อเนื่อง 35 นาที: 0 fail, 0 429, ไม่มี soft throttle (r=0.0105, slope +0.26ms/min), batch size ไม่มีผล → **T3 ไม่ถูกเรียกใช้ และถูกตัดออก** · **เจอปัญหาคนละเรื่องแทน**: p50 485ms เกิน budget โดยที่ ~408ms เป็นเวลาที่ endpoint ใช้คิด ไม่ใช่ RTT (transport floor 77ms) → generalise ไปเครื่องผู้ใช้คนอื่นด้วย · **เหลือช่องว่าง**: ไม่เคยเจอ 429 เลย ค่า backoff/timeout ใน `rate-limiter.ts` จึงยังไม่มีหลักฐานรองรับ · endpoint เป็น unofficial และตอนนี้ไม่มีตัวสำรอง (ดู T4) |
