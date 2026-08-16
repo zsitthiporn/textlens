@@ -136,7 +136,8 @@ depends: M1-01, M1-02
 Commands (Node → sidecar): `listMonitors`, `configure`, `start`, `stop`, `snapshot`, `debugFrame`
 Events (sidecar → Node): `ready`, `frame`, `nochange`, `error`
 
-`frame` ต้องมี `seq`, `timings{capture,diff,ocr}`, `monitor{id,scale,bounds}`, `region`, `lines[{text,bbox,conf}]`
+`frame` ต้องมี `seq`, `timings{captureUs,diffUs,ocrUs}`, `monitor{id,scale,bounds}`, `region`, `lines[{text,bbox}]`
+(`conf` เป็น optional และ `Windows.Media.Ocr` ไม่เคยส่งมา — ดู #47)
 
 - TypeScript types ใน `src/shared/protocol.ts`
 - C# records ใน `sidecar/.../Protocol/`
@@ -358,7 +359,7 @@ Feature O1 — [Spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs
 ## Scope
 
 - แปลง BGRA buffer → `SoftwareBitmap` → `OcrEngine.RecognizeAsync`
-- คืนผลระดับ **บรรทัด** พร้อม bbox ที่รวมจาก word boxes และ confidence เฉลี่ย
+- คืนผลระดับ **บรรทัด** พร้อม bbox ที่รวมจาก word boxes (**ไม่มี confidence** — engine ไม่ส่งมา ดู #47)
 - bbox เป็น **physical px อ้างอิงมุมซ้ายบนของ region**
 - reuse `OcrEngine` instance ข้าม frame
 
@@ -369,7 +370,7 @@ Feature O1 — [Spike S1](https://github.com/zsitthiporn/textlens/blob/main/docs
 
 ## Acceptance criteria
 
-- [ ] คืน `lines[]` ที่มี `text`, `bbox [x,y,w,h]`, `conf`
+- [ ] คืน `lines[]` ที่มี `text`, `bbox [x,y,w,h]` (`conf` ไม่ถูกส่ง — ดู #47)
 - [ ] bbox อ้างอิงมุมซ้ายบนของ region ไม่ใช่ของจอ
 - [ ] OCR ใช้เวลา < 80ms บน region ขนาด ~1200×200 (spike วัดได้ 22-36ms)
 - [ ] region ที่ไม่มีข้อความ → `lines: []` ไม่ error (spike วัดได้ 3ms)

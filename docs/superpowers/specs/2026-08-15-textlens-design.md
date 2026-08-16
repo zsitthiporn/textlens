@@ -175,7 +175,7 @@ logicalX = (regionX + bboxX) / scale + display.bounds.x   // display = Electron 
          │
 [Node]   → แปลงพิกัด physical → logical
          → group lines เป็น text blocks (paragraph / column / sentence)
-         → กรอง noise (conf ต่ำ, สั้นเกิน, แคบเกิน, pattern ขยะ)
+         → กรอง noise (สั้นเกิน, แคบเกิน, pattern ขยะ — ไม่มี conf ดู §3)
          → กรอง feedback (recentOutputs + Thai script filter)
          → dedup (fuzzy ตามตำแหน่ง + time window)
          → ไม่เหลืออะไรใหม่? จบรอบ
