@@ -802,16 +802,50 @@ describe('AppOrchestrator: failure reporting', () => {
     expect(h.orchestrator.status.error).toBeNull();
   });
 
-  it('falls back to idle when the sidecar dies', async () => {
+  it('stops believing anything is configured or capturing when the sidecar dies', async () => {
     const h = harness();
     await h.orchestrator.initialize();
 
     h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
 
-    expect(h.orchestrator.mode).toBe('idle');
     expect(h.orchestrator.configured).toBe(false);
     expect(h.orchestrator.capturing).toBe(false);
     expect(h.orchestrator.status.error).toContain('stopped unexpectedly');
+  });
+
+  /**
+   * This replaces "falls back to idle when the sidecar dies", and the change is deliberate (#40).
+   *
+   * Dropping to `idle` was right while nothing restarted the sidecar. It is wrong now that
+   * `SidecarSupervisor` does, for two separate reasons: the supervisor refuses to restart a
+   * sidecar that died while the user had paused, and `#mode` is the only record that they had;
+   * and a restart re-runs `initialize`, which resumes whatever mode this holds - so a reset would
+   * have every crash silently promote `paused` to `auto`.
+   */
+  it('keeps the mode across a death, so a restart resumes it instead of promoting paused to auto', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.orchestrator.pause();
+    expect(h.orchestrator.mode).toBe('paused');
+
+    h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+
+    expect(h.orchestrator.mode).toBe('paused');
+  });
+
+  it('sends no command at a sidecar that is gone, whatever the mode still says', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+    const before = h.sidecar.kinds.length;
+
+    // `#configured` is what gates sending, not the mode - so a preserved `auto` must not make
+    // this reach a dead process.
+    h.orchestrator.pause();
+    h.orchestrator.resume();
+    h.orchestrator.snapshot();
+
+    expect(h.sidecar.kinds).toHaveLength(before);
   });
 
   it('does not report an expected exit as an error', async () => {

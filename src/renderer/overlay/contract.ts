@@ -114,6 +114,43 @@ export const OVERLAY_PAYLOAD_CHANNEL = 'textlens:overlay-payload';
  */
 export type OverlayPayloadChannel = typeof OVERLAY_PAYLOAD_CHANNEL;
 
+// ---------------------------------------------------------------------------
+// The status banner (issue M10-02 / #41)
+// ---------------------------------------------------------------------------
+
+/** Mirrors `AlertSeverity` in `src/main/services/error-reporter.ts`. */
+export type OverlayAlertSeverity = 'fatal' | 'error' | 'warning' | 'info';
+
+/**
+ * One condition the user needs to know about, already reduced to text.
+ *
+ * Cause and remedy stay two fields across the boundary rather than being joined in the main
+ * process, so the renderer can weight them differently - the cause is what catches the eye, the
+ * remedy is what the user acts on, and a single pre-joined string forces them to look identical.
+ */
+export interface OverlayAlert {
+  readonly severity: OverlayAlertSeverity;
+  readonly cause: string;
+  readonly remedy: string;
+}
+
+/**
+ * What the overlay is told about the app's health.
+ *
+ * `null` means all clear, and it is sent explicitly rather than by omission: a banner that is
+ * only ever *added* is a banner that outlives the problem, which is the failure mode #41 names in
+ * "error ชั่วคราว (backoff) หายเองเมื่อกลับมาปกติ".
+ */
+export interface OverlayStatusMessage {
+  readonly alert: OverlayAlert | null;
+}
+
+/** IPC channel for {@link OverlayStatusMessage}. */
+export const OVERLAY_STATUS_CHANNEL = 'textlens:overlay-status';
+
+/** Same compile-time drift guard as {@link OverlayPayloadChannel}; see its comment. */
+export type OverlayStatusChannel = typeof OVERLAY_STATUS_CHANNEL;
+
 /**
  * The overlay half of the preload bridge, exposed as `window.textlensOverlay`.
  *
@@ -125,4 +162,6 @@ export type OverlayPayloadChannel = typeof OVERLAY_PAYLOAD_CHANNEL;
 export interface OverlayBridge {
   /** Registers `listener` for every payload. Returns a function that unsubscribes. */
   onPayload(listener: (message: OverlayRenderMessage) => void): () => void;
+  /** Registers `listener` for every status change (#41). Returns a function that unsubscribes. */
+  onStatus(listener: (message: OverlayStatusMessage) => void): () => void;
 }

@@ -32,6 +32,8 @@ import type {
   OverlayPayloadChannel,
   OverlayRenderConfig,
   OverlayRenderPayload,
+  OverlayStatusChannel,
+  OverlayStatusMessage,
 } from '../../renderer/overlay/contract.js';
 import type {
   PickerInit,
@@ -49,6 +51,7 @@ import { nullLogger, type Logger } from './logger.js';
  * fails this line at compile time. See the same constant in `src/preload/index.cts`.
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
+const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
 
 /**
  * What a payload carries before {@link WindowManager.setOverlayRender} has been called.
@@ -193,6 +196,13 @@ export class WindowManager {
    * first frame after a region change, which is the hardest kind of bug to catch by looking.
    */
   #overlayEpoch = 0;
+  /**
+   * The last status published (#41), replayed once the overlay document is ready.
+   *
+   * `null` means nothing has been said yet, which is not the same as "all clear" - the latter is
+   * a message with `alert: null` and is sent like any other.
+   */
+  #overlayStatus: OverlayStatusMessage | null = null;
   #settings: BrowserWindow | null = null;
   #picker: BrowserWindow | null = null;
   #metricsListener: ((event: Electron.Event, display: Display) => void) | null = null;
@@ -296,6 +306,10 @@ export class WindowManager {
 
     overlay.webContents.on('did-finish-load', () => {
       this.#overlayReady = true;
+      // Everything the user needed to be told while the document was loading, told now. See
+      // `sendOverlayStatus` for why this one message is queued when payloads are not.
+      const pending = this.#overlayStatus;
+      if (pending !== null) overlay.webContents.send(OVERLAY_STATUS_CHANNEL, pending);
     });
 
     overlay.on('closed', () => {
@@ -504,6 +518,27 @@ export class WindowManager {
       config: this.#overlayRender ?? FALLBACK_OVERLAY_RENDER,
       epoch: this.#overlayEpoch,
     });
+    return true;
+  }
+
+  /**
+   * Show, replace or clear the overlay's status banner (issue M10-02 / #41).
+   *
+   * **Held and re-sent when the overlay becomes ready**, which is the difference between this and
+   * {@link sendOverlayPayload}. A dropped payload costs one frame out of many; the conditions that
+   * produce a banner - a sidecar that never started, a config file that would not parse - all
+   * happen during the seconds before the overlay document has run its script, so a banner that
+   * were merely dropped would be dropped exactly when it is the only thing the user has.
+   *
+   * @returns whether it reached a live renderer now. `false` means it is queued, not lost.
+   */
+  sendOverlayStatus(message: OverlayStatusMessage): boolean {
+    this.#overlayStatus = message;
+
+    const overlay = this.#overlay;
+    if (overlay === null || overlay.isDestroyed() || !this.#overlayReady) return false;
+
+    overlay.webContents.send(OVERLAY_STATUS_CHANNEL, message);
     return true;
   }
 

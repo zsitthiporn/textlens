@@ -198,6 +198,16 @@ export interface AppOrchestratorOptions {
 const DEFAULT_LIST_MONITORS_TIMEOUT_MS = 2_000;
 
 /**
+ * What {@link AppStatus.error} says when the sidecar died on its own.
+ *
+ * Exported so `index.ts` can recognise it rather than match on the text. The supervisor (#40) tells
+ * a much more useful version of the same story - "restarting, about 2s" or "gave up, here is how to
+ * retry" - and the two must not both be shown, because the one that wins on severity would be the
+ * one that says least (#41: "error หลายตัวพร้อมกัน → แสดงตัวที่ร้ายแรงที่สุด ไม่ซ้อนกันรก").
+ */
+export const SIDECAR_EXIT_ERROR = 'the capture sidecar stopped unexpectedly';
+
+/**
  * How long auto mode may run without a single frame before the user is told (#50).
  *
  * The failure this exists for: with a full-screen region and the default threshold, a subtitle
@@ -307,8 +317,21 @@ export class AppOrchestrator {
         this.#configured = false;
         this.#capturing = false;
         this.#pendingSnapshot = false;
-        this.#mode = 'idle';
-        if (!exit.expected) this.#lastError = 'the capture sidecar stopped unexpectedly';
+        this.#lastFrameAt = null;
+        this.#idleWarning = null;
+        // The **mode is kept**, and that changed with #40. It used to drop to `idle`, which was
+        // right while nothing restarted the sidecar and is wrong now that something does:
+        //
+        //   - `SidecarSupervisor` refuses to restart a sidecar that died while the user had
+        //     deliberately paused, and the only record of that intent is this field. Reset to
+        //     `idle` here, "paused" would be indistinguishable from "never started" and the
+        //     supervisor would restart a process the user asked to stop.
+        //   - A restart re-runs {@link initialize}, which resumes whatever mode this holds. A
+        //     reset would have every crash silently promote `paused` to `auto`.
+        //
+        // `#configured` is what actually gates sending, so keeping the mode cannot make anything
+        // be sent at a process that is gone.
+        if (!exit.expected) this.#lastError = SIDECAR_EXIT_ERROR;
         this.#notify();
       }),
       this.#config.subscribe((current, previous) => {
@@ -366,10 +389,18 @@ export class AppOrchestrator {
   /**
    * Discover the monitors, configure the sidecar, and enter `auto`.
    *
-   * **This is the only place capture is ever started.** Called once, after the sidecar
-   * reports `ready`. Entering `auto` rather than waiting for a keypress is feature G3's
-   * "โหมดหลัก": the app exists to translate what is on screen, and a launch that produces
-   * nothing until a shortcut is found is a launch the user reads as broken.
+   * **This is the only place capture is ever started.** Called after the sidecar reports
+   * `ready`. Entering `auto` rather than waiting for a keypress is feature G3's "โหมดหลัก": the
+   * app exists to translate what is on screen, and a launch that produces nothing until a
+   * shortcut is found is a launch the user reads as broken.
+   *
+   * **Called again after every supervised restart** (#40), which is why it is written to be
+   * re-entrant rather than once-only: `#reconfigure` chains onto `#configuring` so a restart
+   * arriving mid-config cannot interleave two `listMonitors` round trips, and the `if (mode ===
+   * 'idle')` below is what makes a restart resume the mode the user was actually in instead of
+   * promoting `paused` to `auto`. A restart that skipped this would leave a live sidecar that was
+   * never told what to capture - which looks exactly like success in the log until somebody
+   * notices no frames arrived.
    */
   async initialize(): Promise<void> {
     await this.#reconfigure(this.#config.current.capture, 'startup');

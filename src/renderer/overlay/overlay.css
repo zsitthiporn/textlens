@@ -188,3 +188,83 @@ body {
   color: #ffd9a8;
   outline: 1px solid rgb(255 168 76 / 55%);
 }
+
+/* ---------------------------------------------------------------------------
+ * The status banner (#41, feature L5)
+ *
+ * Three placement decisions, all of them requirements rather than taste:
+ *
+ *   - **Top, never bottom.** Subtitles are along the bottom edge; a banner there would cover the
+ *     thing the app exists to translate. #41: "ข้อความ error ไม่บังพื้นที่อ่าน subtitle".
+ *   - **`max-width: 70%`, centred.** A full-bleed bar would cover any text near the top of the
+ *     screen as well, and a banner is at most two lines of prose.
+ *   - **`display: none` when hidden**, not `opacity: 0`. This window is transparent and
+ *     click-through; an invisible element that still occupies space is an element that can still
+ *     be hit-tested if `setIgnoreMouseEvents` is ever relaxed.
+ * --------------------------------------------------------------------------- */
+#status {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  max-width: 70%;
+  box-sizing: border-box;
+  padding: 8px 14px;
+  border-radius: 8px;
+  pointer-events: none;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  background: rgb(8 8 12 / 88%);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 55%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 95%);
+
+  /* Same stack as `.box`, so a banner and a translation never disagree about which face Thai is
+     drawn in - the strings here are English today and need not stay that way. */
+  font-family: 'Textlens Thai', 'Leelawadee UI', 'Noto Sans Thai', sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #fff;
+}
+
+#status[hidden] {
+  display: none;
+}
+
+#status-cause {
+  font-weight: 600;
+}
+
+/* Dimmer than the cause: it is the second thing to read, not a second headline. */
+#status-remedy {
+  font-weight: 400;
+  font-size: 13px;
+  color: rgb(255 255 255 / 78%);
+}
+
+#status-remedy:empty {
+  display: none;
+}
+
+/*
+ * Severity is a left rule and a tint, not a colour swap on the text. Text colour is the one thing
+ * that has to stay legible over an arbitrary screen, and a red-on-dark warning is harder to read
+ * than a white one with a red edge.
+ */
+#status[data-severity='fatal'],
+#status[data-severity='error'] {
+  border-left: 4px solid #ff6b5e;
+  background: rgb(38 10 10 / 90%);
+}
+
+#status[data-severity='warning'] {
+  border-left: 4px solid #ffb84d;
+  background: rgb(38 26 8 / 90%);
+}
+
+#status[data-severity='info'] {
+  border-left: 4px solid #63b3ff;
+}

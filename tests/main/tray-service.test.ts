@@ -161,6 +161,7 @@ function recordingActions(): { actions: TrayActions; fired: string[] } {
       onToggleOverlay: push('toggleOverlay'),
       onOpenSettings: push('openSettings'),
       onQuit: push('quit'),
+      onRestartSidecar: push('restartSidecar'),
     },
   };
 }
@@ -327,9 +328,40 @@ describe('TrayService menu', () => {
       'Auto',
       'Pause',
       'Show overlay',
+      // #40/#41. The way back out of the supervisor's give-up state, and the only one: the alert
+      // that reports it names this item as the remedy.
+      'Restart capture engine',
       'Settings…',
       'Quit',
     ]);
+  });
+
+  it('leaves the restart item out when nothing supervises the sidecar', () => {
+    const platform = fakeTray();
+    const { actions } = recordingActions();
+    const { onRestartSidecar: _omitted, ...withoutSupervisor } = actions;
+    const service = new TrayService({ platform, iconDir: 'C:\\icons', actions: withoutSupervisor });
+    service.create();
+
+    expect(latest(platform).map((entry) => entry.label)).not.toContain('Restart capture engine');
+  });
+
+  /**
+   * The three standing conditions - #30's edge report, #31's stale region, #50's idle detection -
+   * all published onto `AppStatus.warning` and reached the tooltip only, which needs the user to
+   * already suspect something and go hovering. This is the menu they open when they do.
+   */
+  it('shows a standing warning in the menu, one rank below an error', () => {
+    const { platform, service } = build();
+    service.create();
+
+    service.update(state({ warning: 'text is touching the left edge of the region; widen it' }));
+    expect(latest(platform)[0]?.label).toContain('text is touching');
+    expect(latest(platform)[0]?.enabled).toBe(false);
+
+    // An error outranks it: a broken engine matters more than a result that is merely wrong.
+    service.update(state({ warning: 'text is touching the left edge', error: 'the engine is down' }));
+    expect(latest(platform)[0]?.label).toContain('the engine is down');
   });
 
   it('fires the matching action for every item', () => {

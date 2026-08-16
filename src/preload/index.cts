@@ -7,6 +7,8 @@ import type {
   OverlayBridge,
   OverlayPayloadChannel,
   OverlayRenderMessage,
+  OverlayStatusChannel,
+  OverlayStatusMessage,
 } from '../renderer/overlay/contract.js';
 import type {
   PickerInit,
@@ -37,6 +39,7 @@ contextBridge.exposeInMainWorld('textlens', bridge);
  * possible form.
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
+const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
 
 /**
  * The overlay half of the bridge, on its own key.
@@ -58,6 +61,19 @@ const overlayBridge: OverlayBridge = {
     ipcRenderer.on(OVERLAY_PAYLOAD_CHANNEL, wrapped);
     return () => {
       ipcRenderer.removeListener(OVERLAY_PAYLOAD_CHANNEL, wrapped);
+    };
+  },
+  // A channel of its own rather than a field on the payload (#41). A payload only exists when
+  // there is text to draw, and every condition worth a banner - no sidecar, no engine, no region -
+  // is a condition in which no payload is being produced at all. Riding along on one would be a
+  // warning that can only appear when it is least needed.
+  onStatus(listener: (message: OverlayStatusMessage) => void): () => void {
+    const wrapped = (_event: IpcRendererEvent, message: OverlayStatusMessage): void => {
+      listener(message);
+    };
+    ipcRenderer.on(OVERLAY_STATUS_CHANNEL, wrapped);
+    return () => {
+      ipcRenderer.removeListener(OVERLAY_STATUS_CHANNEL, wrapped);
     };
   },
 };

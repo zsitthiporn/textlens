@@ -157,6 +157,16 @@ export interface TrayActions {
   readonly onToggleOverlay: () => void;
   readonly onOpenSettings: () => void;
   readonly onQuit: () => void;
+  /**
+   * Start the capture sidecar again, clearing the restart quota (#40/#41).
+   *
+   * Optional so that a caller with no supervisor - every existing test - need not invent one, and
+   * the item simply does not appear. It exists because {@link SidecarSupervisor} deliberately
+   * stops trying: an automatic restarter with no give-up point is a restart storm, and a give-up
+   * point with no way back is an app the user has to relaunch. This is the way back, and it is in
+   * the tray because the tray is the only surface this app is guaranteed to have.
+   */
+  readonly onRestartSidecar?: () => void;
 }
 
 export interface TrayServiceOptions {
@@ -258,7 +268,10 @@ export class TrayService {
     if (
       previous.mode !== state.mode ||
       previous.overlayVisible !== state.overlayVisible ||
-      previous.error !== state.error
+      previous.error !== state.error ||
+      // `warning` joined this list when the menu started showing it (#41). Left out, a warning
+      // would reach the tooltip - which is rebuilt from the same call - and never the menu.
+      (previous.warning ?? null) !== (state.warning ?? null)
     ) {
       this.#applyTooltip();
       this.#applyMenu();
@@ -328,17 +341,23 @@ export class TrayService {
     const { mode, overlayVisible, error } = this.#state;
     const items: TrayMenuItem[] = [];
 
-    if (error !== null) {
-      // Not clickable, and first: the tray icon says "something is wrong" and this is the
-      // only place the user can find out what (invariant 4).
-      items.push({ label: truncate(`! ${error}`, 60), enabled: false }, { type: 'separator' });
-    }
-
     const guard =
       (name: string, action: () => void) =>
       (): void => {
         this.#run(name, action);
       };
+
+    if (error !== null) {
+      // Not clickable, and first: the tray icon says "something is wrong" and this is the
+      // only place the user can find out what (invariant 4).
+      items.push({ label: truncate(`! ${error}`, 60), enabled: false }, { type: 'separator' });
+    } else if (this.#state.warning !== null && this.#state.warning !== undefined) {
+      // The same treatment, one rank down. #30's edge report, #31's stale region and #50's idle
+      // detection all published onto `AppStatus.warning` and reached the tooltip only - and a
+      // tooltip requires the user to already suspect something and go hovering. This is the
+      // menu they open when they do.
+      items.push({ label: truncate(`· ${this.#state.warning}`, 60), enabled: false }, { type: 'separator' });
+    }
 
     items.push(
       { label: 'Select Region…', click: guard('selectRegion', this.#actions.onSelectRegion) },
@@ -359,6 +378,17 @@ export class TrayService {
         click: guard('toggleOverlay', this.#actions.onToggleOverlay),
       },
       { type: 'separator' },
+    );
+
+    const restart = this.#actions.onRestartSidecar;
+    if (restart !== undefined) {
+      items.push(
+        { label: 'Restart capture engine', click: guard('restartSidecar', restart) },
+        { type: 'separator' },
+      );
+    }
+
+    items.push(
       { label: 'Settings…', click: guard('openSettings', this.#actions.onOpenSettings) },
       { label: 'Quit', click: guard('quit', this.#actions.onQuit) },
     );

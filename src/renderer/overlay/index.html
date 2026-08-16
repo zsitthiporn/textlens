@@ -28,6 +28,20 @@
     -->
     <div id="boxes"></div>
 
+    <!--
+      The status banner (#41). Empty and `hidden` until the main process says otherwise, so a
+      healthy session paints nothing here at all.
+
+      Pinned to the **top** of the screen by the stylesheet, which is a requirement and not a
+      preference: the primary use case is subtitles, subtitles live along the bottom edge, and
+      #41 asks that the error text never cover the area being read. `aria-live` because this is
+      the one thing in this window that changes without the user doing anything.
+    -->
+    <div id="status" role="status" aria-live="polite" hidden>
+      <span id="status-cause"></span>
+      <span id="status-remedy"></span>
+    </div>
+
     <script type="module" src="./overlay.ts"></script>
   </body>
 </html>

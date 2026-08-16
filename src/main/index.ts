@@ -22,14 +22,25 @@ import {
 } from 'electron';
 
 import { DEFAULT_CONFIG } from '../shared/config-schema.js';
-import { AppOrchestrator } from './services/app-orchestrator.js';
+import { AppOrchestrator, SIDECAR_EXIT_ERROR, type AppStatus } from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
+import {
+  ErrorReporter,
+  describeAlert,
+  describeConfigIssues,
+  describeHotkeyFailures,
+  describeMissingRecognizer,
+  describeSupervisor,
+  judgeTranslation,
+  type Alert,
+} from './services/error-reporter.js';
 import { HotkeyService } from './services/hotkey-service.js';
 import { createLogger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
 import { MonitorService } from './services/monitor-service.js';
 import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
+import { SidecarSupervisor } from './services/sidecar-supervisor.js';
 import {
   createTextPipeline,
   type ComposedTextPipeline,
@@ -58,6 +69,7 @@ let logger: RootLogger | null = null;
 let config: ConfigService | null = null;
 let hotkeys: HotkeyService | null = null;
 let sidecar: SidecarClient | null = null;
+let supervisor: SidecarSupervisor | null = null;
 let windows: WindowManager | null = null;
 let textPipeline: ComposedTextPipeline | null = null;
 let orchestrator: AppOrchestrator | null = null;
@@ -67,6 +79,51 @@ let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
 /** Frames dropped because their monitor is unpaired. Counted so the log can be rate-limited. */
 let framesWithoutDisplay = 0;
+
+/**
+ * The user-facing error surface (issue M10-02 / #41).
+ *
+ * Created before anything that can fail, and at module scope rather than inside `bootstrap`,
+ * because the earliest thing worth reporting - a config file that would not parse - happens on the
+ * first `await` in there.
+ */
+const reporter = new ErrorReporter();
+/** The mode machine's last status, held so the tray can be written from one place. */
+let lastStatus: AppStatus = { mode: 'idle', overlayVisible: true, error: null, warning: null };
+
+/**
+ * Push the current state to every surface the user can actually see.
+ *
+ * **One writer.** The mode machine and the reporter both change what the tray should say, and two
+ * subscribers each calling `tray.update` with their own half would race - whichever fired last
+ * would win, and a status change would erase an alert that is still true. Both of them write into
+ * a variable and call this instead.
+ *
+ * The tray gets the alert in its `error` slot when it is `fatal` or `error`, because that slot is
+ * what turns the icon red; a `warning` or `info` alert lands in `warning`, which is the tooltip
+ * and a disabled menu row. That mapping is the whole of "tray icon เปลี่ยนเป็นสถานะ error".
+ */
+function renderStatus(): void {
+  // Pulled from the reporter rather than from a variable a subscriber keeps up to date. A real run
+  // caught the difference: `ErrorReporter` only notifies when the *top* alert changes, so a second
+  // condition arriving underneath an existing one is correctly silent - and a cached copy that is
+  // only ever written by that notification was therefore still `null` for the whole session when
+  // the very first alert was published before anything had subscribed. Reading the source of truth
+  // at render time removes the ordering question entirely.
+  const alert: Alert | null = reporter.top;
+  const severe = alert !== null && (alert.severity === 'fatal' || alert.severity === 'error');
+
+  tray?.update({
+    mode: lastStatus.mode,
+    overlayVisible: lastStatus.overlayVisible,
+    error: severe && alert !== null ? describeAlert(alert) : null,
+    warning: !severe && alert !== null ? describeAlert(alert) : null,
+  });
+
+  windows?.sendOverlayStatus({
+    alert: alert === null ? null : { severity: alert.severity, cause: alert.cause, remedy: alert.remedy },
+  });
+}
 
 async function bootstrap(): Promise<void> {
   logger = await createLogger({
@@ -96,6 +153,13 @@ async function bootstrap(): Promise<void> {
     // running on defaults you did not choose" is a fact about the session, not about a file.
     log.warn('config was not fully applied', { kind: issue.kind, fields: issue.fields });
   }
+  // #41, and the gap recorded when #38 was closed: until now this reached the log and the
+  // `issues` getter and stopped, so a user whose `intervalActive` was rejected got the default
+  // silently and no way to find out.
+  reporter.subscribe(() => {
+    renderStatus();
+  });
+  reporter.set('config', describeConfigIssues(config.issues, config.filePath));
 
   const metrics = new MetricsRecorder();
   stopMetricsSummary = startMetricsSummary(metrics, logger.child('metrics'), METRICS_SUMMARY_INTERVAL_MS);
@@ -165,12 +229,52 @@ async function bootstrap(): Promise<void> {
     picker: windows,
   });
 
+  const modes = orchestrator;
+
+  // Supervision (#40). Constructed before the tray so the tray's "Restart capture engine" item
+  // has something to call, and before the first start so that start failure gets the same backoff
+  // and the same quota as a crash - which is what moves `index.ts`'s old "capture is unavailable,
+  // give up" branch into something the app can recover from.
+  supervisor = new SidecarSupervisor({
+    client,
+    logger,
+    onStarted: async () => {
+      // The whole reason a supervisor exists rather than a bare restart loop. A sidecar that came
+      // back but was never reconfigured produces no frames and logs nothing about it.
+      await modes.initialize();
+    },
+    // #40: a sidecar that dies while the user has paused stays dead until they return to auto.
+    // `idle` counts as wanting one because that is the state the app boots in, before
+    // `initialize` has run.
+    wantsSidecar: () => modes.mode !== 'paused',
+    // The watchdog's arming condition. `capturing` is the mode machine's own belief about the
+    // loop, so a paused or snapshot-held sidecar is silent legitimately and is left alone.
+    expectsEvents: () => modes.capturing,
+    watchdogSilenceMs: () => (config?.current ?? DEFAULT_CONFIG).capture.intervalIdle * 6,
+  });
+  const supervision = supervisor;
+
+  supervision.subscribe((status) => {
+    reporter.set(
+      'sidecar',
+      describeSupervisor(status, { nowMs: Date.now(), logDirectory: logger?.directory ?? null }),
+    );
+  });
+
   // #36's other reset trigger. A pause, a snapshot or an overlay toggle all change what the user
   // is looking at without changing the region, and a baseline held across one of them would
   // suppress the first frame after the app starts capturing again - the one frame that most needs
   // to be drawn, because the screen has been unattended since.
   let lastMode = orchestrator.mode;
   orchestrator.subscribe((status) => {
+    lastStatus = status;
+    publishOrchestratorAlerts(status);
+    renderStatus();
+
+    // Returning to auto is the deliberate retry for a sidecar that died while paused, and the one
+    // moment at which restarting it is unambiguously what the user wants.
+    if (status.mode === 'auto') supervision.ensureRunning();
+
     if (status.mode === lastMode) return;
     lastMode = status.mode;
     textPipeline?.pipeline.resetStability(`mode changed to ${status.mode}`);
@@ -179,7 +283,38 @@ async function bootstrap(): Promise<void> {
   startTray(orchestrator);
   startHotkeys(orchestrator);
 
-  await startSidecar(client, orchestrator);
+  lastStatus = orchestrator.status;
+  renderStatus();
+
+  await supervision.start();
+  log.info('mode machine ready', { mode: modes.mode, capturing: modes.capturing });
+}
+
+/**
+ * Route the mode machine's own two report channels into the error surface (#41).
+ *
+ * `error` and `warning` are kept on separate sources rather than merged, because they clear on
+ * opposite events - an error is wiped by the next frame, a warning is *produced* by frames
+ * arriving - and one slot would have the two overwriting each other.
+ */
+function publishOrchestratorAlerts(status: AppStatus): void {
+  reporter.set(
+    'capture',
+    // The supervisor tells this story better and is already telling it; see `SIDECAR_EXIT_ERROR`.
+    status.error === null || status.error === SIDECAR_EXIT_ERROR
+      ? null
+      : { severity: 'error', cause: status.error, remedy: 'see the log for detail; capture retries on its own' },
+  );
+  reporter.set(
+    'region',
+    status.warning === null
+      ? null
+      : {
+          severity: 'warning',
+          cause: status.warning,
+          remedy: 'use the tray menu → "Select Region…" to change what is being captured',
+        },
+  );
 }
 
 /**
@@ -219,6 +354,12 @@ function startTray(modes: AppOrchestrator): void {
       onOpenSettings: () => {
         modes.openSettings();
       },
+      // The way back out of the supervisor's give-up state (#40/#41). The alert tells the user
+      // this item exists; without it, "Textlens has stopped restarting the capture engine" would
+      // be a message whose only remedy is relaunching the app.
+      onRestartSidecar: () => {
+        supervisor?.retry();
+      },
       // Nothing but `app.quit()`. The shutdown sequence lives in `before-quit` and this is
       // deliberately not a second copy of it - see `shutdown` below.
       onQuit: () => {
@@ -229,10 +370,12 @@ function startTray(modes: AppOrchestrator): void {
   tray = service;
 
   service.create();
-  service.update(modes.status);
-  modes.subscribe((status) => {
-    service.update(status);
-  });
+  // Deliberately **not** `modes.subscribe(service.update)`. The mode machine and the error
+  // reporter both decide what the tray says, and two subscribers each writing their own half
+  // would race: whichever fired last would win, and a mode change would erase an alert that is
+  // still true. `renderStatus` is the single writer; see its comment.
+  lastStatus = modes.status;
+  renderStatus();
 }
 
 /**
@@ -316,6 +459,10 @@ function startHotkeys(modes: AppOrchestrator): void {
       reason: failure.reason,
     });
   }
+  // #41. `Control+Alt+R` conflicts on this machine and has done for the whole project; the log
+  // said so every run and nothing else did. `describeHotkeyFailures` is where 'conflict' and
+  // 'duplicate' get different text - see its comment on why that distinction is not cosmetic.
+  reporter.set('hotkeys', describeHotkeyFailures(service.failures, config?.filePath ?? null));
 }
 
 /**
@@ -348,9 +495,16 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
     // the reset paths below already cover the events that actually invalidate it.
     stability: (config?.current ?? DEFAULT_CONFIG).stability,
     onPayload: (payload) => {
-      // M10-02 (#41) still owns rendering the degraded warning; this only draws the boxes.
       const sent = windows?.sendOverlayPayload(payload) ?? false;
       if (sent) rememberDisplayed(payload, recentOutputs);
+
+      // #41 row 3, and the reason design doc section 7 exempts `degraded` from
+      // identical-suppression in the first place: the user is looking at English, on purpose, and
+      // until now nothing told them why. `judgeTranslation` owns which payloads count - notably
+      // that a cache-only frame is not evidence the engine came back.
+      const verdict = judgeTranslation(payload);
+      if (verdict.kind === 'set') reporter.set('translation', verdict.alert);
+      else if (verdict.kind === 'clear') reporter.set('translation', null);
 
       // Counts only - every field here is a number or a boolean, never screen text (PR3).
       // Returned, not just logged. The pipeline treats `false` as "nobody saw this", which is
@@ -431,6 +585,17 @@ function createSidecarClient(metrics: MetricsRecorder): SidecarClient | null {
   const client = new SidecarClient({ exePath, logger });
   sidecar = client;
 
+  // Feature O8 / #41 row 1, and spike S1's headline finding: without an OCR recognizer for the
+  // source language this app cannot produce a single word, and Windows reports that fact exactly
+  // once, here. Checked on every `ready` rather than only the first, so a restart onto a machine
+  // where the pack was just installed clears it.
+  client.on('ready', (ready) => {
+    reporter.set(
+      'ocr',
+      describeMissingRecognizer((config?.current ?? DEFAULT_CONFIG).capture.ocrLanguage, ready.ocrLanguages),
+    );
+  });
+
   // Timings arrive with every frame; feeding them here means the summary reflects the
   // sidecar's own measurements rather than anything Node guessed about them.
   client.on('frame', (frame) => {
@@ -453,7 +618,20 @@ function createSidecarClient(metrics: MetricsRecorder): SidecarClient | null {
           dropped: framesWithoutDisplay,
         });
       }
+      // #41. This branch drops every frame it sees, so the symptom is an overlay that has simply
+      // stopped - the single most confusing failure in the app, and previously a rate-limited log
+      // line and nothing else. Set on the first one; cleared by the first frame that does pair.
+      reporter.set('monitor', {
+        severity: 'error',
+        cause: 'the screen being captured is not one Windows is reporting to Textlens, so nothing can be drawn',
+        remedy: 'reconnect or re-select the monitor, then use the tray menu → "Select Region…" again',
+      });
       return;
+    }
+
+    if (framesWithoutDisplay > 0) {
+      framesWithoutDisplay = 0;
+      reporter.set('monitor', null);
     }
 
     // The pipeline never rejects, so this deliberately does not need a `.catch`.
@@ -461,36 +639,6 @@ function createSidecarClient(metrics: MetricsRecorder): SidecarClient | null {
   });
 
   return client;
-}
-
-/**
- * Spawn the sidecar, then let the mode machine take it from `idle` to capturing.
- *
- * `orchestrator.initialize()` is now **the only path that starts capture** in this app. The
- * temporary bootstrap that used to live here - `listMonitors` then `configure` then `start`,
- * fired straight from this file - is gone, which is part of #34's definition of done: two
- * independent things sending `start` is the bug the milestone ordering exists to prevent,
- * because the mode machine would report `idle` while a loop it does not know about ticked
- * away underneath it.
- */
-async function startSidecar(client: SidecarClient, modes: AppOrchestrator): Promise<void> {
-  if (logger === null) return;
-  const log = logger.child('app');
-
-  try {
-    const ready = await client.start();
-    log.info('sidecar is up', { version: ready.version, ocrLanguages: ready.ocrLanguages });
-  } catch (error) {
-    // Design doc section 7: a sidecar that will not start is reported, and the app stays
-    // up so settings remain reachable. Restarting it is M10-01, not this issue.
-    log.error('sidecar failed to start; capture is unavailable', {
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return;
-  }
-
-  await modes.initialize();
-  log.info('mode machine ready', { mode: modes.mode, capturing: modes.capturing });
 }
 
 /**
@@ -525,6 +673,14 @@ async function shutdown(): Promise<void> {
   // however long the child takes to exit.
   tray?.destroy();
   orchestrator?.dispose();
+
+  // **Before `sidecar.stop()`**, and the order is the whole point. `stop()` closes stdin and the
+  // sidecar exits 0; a supervisor still listening would see a process go away during a shutdown
+  // that had not finished, and the `expected` flag is the only thing standing between that and a
+  // restart racing the quit. Disposing first removes the listener entirely rather than relying on
+  // the flag.
+  supervisor?.dispose();
+  log?.info('sidecar supervision stopped');
 
   await sidecar?.stop();
   log?.info('sidecar stopped', { running: sidecar?.isRunning ?? false });

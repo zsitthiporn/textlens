@@ -37,10 +37,16 @@
  * introduced.
  */
 
-import type { OverlayBridge, OverlayRenderConfig, OverlayRenderMessage } from './contract.js';
+import type {
+  OverlayBridge,
+  OverlayRenderConfig,
+  OverlayRenderMessage,
+  OverlayStatusMessage,
+} from './contract.js';
 import { createFrameScheduler } from './frame-scheduler.js';
 import { renderEntries, RenderSession, toLayoutEntries, type RenderStats } from './layout.js';
 import { BoxPool, DEFAULT_POOL_CAPACITY, type PooledBox } from './node-pool.js';
+import { toBannerView, type BannerView } from './status.js';
 import { MinDisplayGate } from './transitions.js';
 
 const CONTAINER_ID = 'boxes';
@@ -50,6 +56,23 @@ if (container === null) {
   throw new Error(`overlay document is missing #${CONTAINER_ID}`);
 }
 const boxContainer = container;
+
+/**
+ * The status banner's elements (#41).
+ *
+ * Looked up once and asserted, like `#boxes` above: a renderer that silently fails to find the
+ * element it warns through is the exact failure invariant 4 forbids, wearing the costume of a
+ * healthy session.
+ */
+const statusElement = requireElement('status');
+const statusCause = requireElement('status-cause');
+const statusRemedy = requireElement('status-remedy');
+
+function requireElement(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (element === null) throw new Error(`overlay document is missing #${id}`);
+  return element;
+}
 
 /**
  * The fallback tuning, used only until the first payload arrives.
@@ -288,6 +311,36 @@ window.textlensOverlay?.onPayload((message) => {
 });
 
 /**
+ * The status banner (#41).
+ *
+ * Deliberately outside both gates. `MinDisplayGate` and `FrameScheduler` exist to stop *boxes*
+ * from flickering as text is replaced; a banner changes when the app's health changes, which is
+ * measured in seconds, and holding "the capture engine died" behind a 400ms minimum-display timer
+ * intended for subtitles would be delay bought for nothing.
+ */
+function applyStatus(message: OverlayStatusMessage | null): void {
+  const view: BannerView = toBannerView(message);
+
+  if (!view.visible) {
+    statusElement.hidden = true;
+    statusElement.removeAttribute('data-severity');
+    // Cleared as well as hidden. A hidden element that still holds last hour's failure is a
+    // string an accessibility tree will happily read out, and it would reappear intact the moment
+    // anything set `hidden = false`.
+    statusCause.textContent = '';
+    statusRemedy.textContent = '';
+    return;
+  }
+
+  statusCause.textContent = view.cause;
+  statusRemedy.textContent = view.remedy;
+  if (view.severity !== null) statusElement.setAttribute('data-severity', view.severity);
+  statusElement.hidden = false;
+}
+
+window.textlensOverlay?.onStatus(applyStatus);
+
+/**
  * Redraw once the bundled face has actually loaded.
  *
  * M5-03 measures each box's real height, and a height is only real if it was measured in the
@@ -330,6 +383,16 @@ declare global {
     readonly __textlensOverlay?: {
       readonly render: (message: OverlayRenderMessage) => void;
       readonly submit: (message: OverlayRenderMessage) => void;
+      /** Push a status message in without a main process, for the CDP driver (#41). */
+      readonly status: (message: OverlayStatusMessage | null) => void;
+      /** What the banner is showing, read back off the live DOM rather than off `banner`. */
+      readonly banner: () => {
+        visible: boolean;
+        severity: string | null;
+        cause: string;
+        remedy: string;
+        top: number;
+      };
       readonly stats: () => RenderStats | null;
       readonly seq: () => number | null;
       readonly renders: () => number;
@@ -354,6 +417,17 @@ Object.defineProperty(window, '__textlensOverlay', {
     submit: (message: OverlayRenderMessage) => {
       gate.submit(message);
     },
+    status: applyStatus,
+    // Read off the document, not off `banner`. A driver asserting the value the module computed
+    // would pass even if nothing had been written to the DOM - which is the only claim worth
+    // making here, since #41's requirement is that the user sees it.
+    banner: () => ({
+      visible: !statusElement.hidden,
+      severity: statusElement.getAttribute('data-severity'),
+      cause: statusCause.textContent ?? '',
+      remedy: statusRemedy.textContent ?? '',
+      top: statusElement.getBoundingClientRect().top,
+    }),
     stats: () => lastStats,
     seq: () => lastSeq,
     renders: () => scheduler.renders,
