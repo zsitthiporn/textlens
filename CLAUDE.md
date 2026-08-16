@@ -112,6 +112,7 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 | **bounds ของ BrowserWindow บนจอรอง** | ขนาดที่ส่งใน constructor **เชื่อไม่ได้บนจอที่ไม่ใช่ primary** — ขอ 1080×1920 บน `DISPLAY2` ได้กลับมา 1080×**1872** (เท่ากับ workArea พอดี) จอ primary ไม่เป็น → บั๊กแบบนี้หลุดไปได้ง่าย **ต้อง `setBounds` ซ้ำหลังสร้าง แล้วตรวจผล** |
 | **winston ใช้ไม่ได้กับงานนี้** | วัดจริงแล้ว: File transport + `maxsize` เขียนได้ **0 byte** เมื่อ burst ใน tick เดียว (ข้อมูลหายหมด) · `winston-daily-rotate-file` ไม่เคารพ `maxFiles` เหลือ 28 ไฟล์ทั้งที่ขอ 3 → ใช้ `pino` + `pino-roll` แบบ direct destination stream (ไม่ใช่ `pino.transport()` เพราะ worker thread หา path ใน asar ไม่เจอ) |
 | **TypeScript** | pin ไว้ที่ 5.9.3 · `latest` บน npm ตอนนี้คือ 7.0.2 (native port) — `npm i -D typescript` เปล่าๆ จะดึง TS 7 มาทั้งโปรเจกต์ |
+| **UTF-8 BOM จาก PowerShell/Notepad** | `Out-File -Encoding utf8` บน Windows PowerShell 5.1 ใส่ **BOM** มาให้ และ Notepad ก็ทำเหมือนกัน · `fs.readFile(...,'utf8')` decode BOM เป็นตัวอักษร `U+FEFF` จริงๆ แล้ว `JSON.parse` ก็ปฏิเสธ → ไฟล์ JSON ที่เปิดดูในโปรแกรมไหนก็ถูกต้องทุกอย่าง กลับรายงานว่า "ไม่ใช่ JSON ที่ถูกต้อง" ซึ่งโทษผู้ใช้ทั้งที่เป็นความผิดของ default ใน tooling · **ทุกที่ที่อ่านไฟล์ที่ผู้ใช้แก้เองได้ ต้องตัด BOM ทิ้งก่อน** (`config.ts` ทำแล้ว มี test ยึดไว้) |
 
 ## Commands
 
