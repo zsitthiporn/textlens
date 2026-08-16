@@ -63,24 +63,45 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 
 ## สถานะปัจจุบัน
 
-**Phase 0–2 เสร็จแล้ว (2026-08-16) — ฝั่ง pixel ครบเส้น ฝั่ง text ยังไม่เริ่ม**
+**Phase 0–4 เสร็จแล้ว (2026-08-16) — text pipeline ครบเส้นจนถึงคำแปล ยังไม่มีอะไรขึ้นจอ**
 
-sidecar รันเดี่ยวได้จริง: พิมพ์ `configure` แล้ว `start` ใส่ stdin → ได้ `frame` พร้อม text + bbox + timings ออกมาต่อเนื่อง
-(ดู [docs/sidecar-protocol.md](docs/sidecar-protocol.md) มีตัวอย่าง copy ไปวางได้เลย)
+**26/47 issues ปิดแล้ว · 397 vitest + 210 xunit เขียว · ทุกอย่างอยู่บน main**
 
-ฝั่ง Node มี SidecarClient, logging, overlay ที่ click-through แล้ว **แต่ยังไม่มีอะไรเชื่อมสองฝั่งเข้าด้วยกัน**
-ยังไม่มี: coordinate converter · text grouping · filter · dedup · แปล · render — คือ Phase 3 เป็นต้นไป
+ที่ทำงานได้จริงแล้ว:
+- sidecar รันเดี่ยวได้ — พิมพ์ `configure` แล้ว `start` ใส่ stdin ได้ `frame` ต่อเนื่อง (ดู [docs/sidecar-protocol.md](docs/sidecar-protocol.md))
+- ฝั่ง Node: `TextPipeline` ต่อครบ frame → พิกัด → จัดกลุ่ม → กรอง noise/ไทย/feedback → dedup → cache → แปล → payload
+- **ยังไม่มี renderer** — payload ถูกสร้างแล้วแต่ไม่มีอะไรวาดมันขึ้นจอ นั่นคือ Phase 5
 
-ลำดับงานที่ใช้อยู่คือหัวข้อ **Execution order** ใน [backlog](docs/backlog/mvp-issues.md) ไม่ใช่การไล่ตามกลุ่ม M1→M10
+**ลำดับงานที่ใช้คือหัวข้อ Execution order ใน [backlog](docs/backlog/mvp-issues.md)** ไม่ใช่การไล่ตามกลุ่ม M1→M10
 
-**Spike ผ่านแล้วทั้งสอง**
-- **S1** ([รายงาน](docs/spikes/2026-08-15-s1-ocr-engine.md)) — Windows.Media.Ocr เร็วกว่า PaddleOCR ~6 เท่าและแม่นกว่าในเนื้อหาเกม
-- **S2** ([รายงาน](docs/spikes/2026-08-16-s2-content-protection.md)) — WGC เคารพ content protection จริง ครบ 3 จอ **ชั้นที่ 1 ของ feedback-loop defence มีอยู่จริง** (แต่ F2/F3 ยังต้องมี — flag ต้องการ Win10 2004+ และทดสอบบน build เดียว)
-- **S3** (Google rate limit) ยังไม่ทำ → [#44](https://github.com/zsitthiporn/textlens/issues/44) ทำตอน Phase 4
+### เหลืออะไร (21 issues)
 
-**สองเรื่องที่รอคุณตัดสินก่อนไปต่อ**
-- [#47](https://github.com/zsitthiporn/textlens/issues/47) — **`Windows.Media.Ocr` ไม่มี confidence เลย** (ยืนยันด้วย reflection) → O4 (#14) และ U4 (#27) อ้างถึง field ที่ไม่มีวันถูกส่งมา
-- [#46](https://github.com/zsitthiporn/textlens/issues/46) — `setContentProtection` ล้มเงียบบน Windows เก่ากว่า 2004 ผิด invariant #4
+| Phase | Issues | ได้อะไร |
+|---|---|---|
+| **5 · render** | #23 #24 #25 #26 | **เห็นคำแปลบนจอครั้งแรก** |
+| **6 · control** | #32 #33 #34 | hotkey · tray · auto/snapshot/pause |
+| **7 · region** | #38 #28 #29 #30 #31 | 🎯 **เลือกจอ+ลากกรอบเองได้ = ใช้งานจริงได้** |
+| **8 · anti-flicker** | #35 #36 #37 | 🎯 **subtitle ไม่กระพริบ = use case หลักใช้ได้** |
+| **9 · robustness** | #40 #41 | watchdog · error ถึงผู้ใช้ |
+| **10 · ที่เหลือ** | #27 #39 #45 | area budget · settings UI · installer |
+| **ค้าง** | #44 | spike S3 ยิงไม่ครบ (ดูด้านล่าง) |
+
+### [#44](https://github.com/zsitthiporn/textlens/issues/44) spike S3 — ยิงไป 1055 requests แล้วหยุดกลางคัน
+
+ข้อมูลอยู่ใน `spikes/s3-ratelimit/results/` แล้ว (commit `2604264`) **รันใหม่ไม่ต้องเริ่มจากศูนย์**
+
+**0 failures แต่ p50 596ms / p95 1108ms — เกิน budget 300-500ms** และช้ากว่าที่ [#19](https://github.com/zsitthiporn/textlens/issues/19) วัดตอนยิง 6 ครั้ง (139-176ms) ราว 3-4 เท่า
+รูปแบบนี้เหมือน **soft throttling** มากกว่าการตัดแบบแข็ง — "zero failures" กลบเรื่องนี้ไว้ **ยังไม่สรุปจนกว่าจะแยก cold-start และรู้ขนาด batch**
+
+ถ้าสรุปว่าไม่ผ่าน → ต้องเปิดงาน **T3 (Google Cloud API key) และดันเป็น P0**
+
+### สิ่งที่ตัดสินไปแล้วและห้ามย้อนโดยไม่คุย
+
+- **`conf` ไม่มีและจะไม่มี** — `Windows.Media.Ocr` ไม่ส่ง confidence เลย ([#47](https://github.com/zsitthiporn/textlens/issues/47) ปิดแล้ว) O4/U4 ตัดเกณฑ์นั้นออก **ห้ามประดิษฐ์ค่าขึ้นมาแทน**
+- **`monitor.bounds` บน wire เป็น physical px** — logical origin มาจาก Electron `Display` เท่านั้น (design doc §3)
+- **capture loop เป็น interval-driven** ห้ามเปลี่ยนเป็น frame-driven (spike S2)
+- **`degraded` ได้รับการยกเว้นจาก identical-suppression** ไม่งั้น engine ล่ม = จอว่าง (design doc §7)
+- **endpoint ของ Google ต้องเป็น `translate_a/t?client=dict-chrome-ex`** — `translate_a/single?client=gtx` คืนผลไม่ตรงจำนวนแบบเงียบๆ
 
 ข้อควรรู้จาก S1 ที่กระทบการเขียนโค้ด:
 - ต้องมี **en-US OCR recognizer** ติดตั้งบนเครื่องผู้ใช้ ไม่งั้นใช้งานไม่ได้เลย → feature `O8` preflight check
