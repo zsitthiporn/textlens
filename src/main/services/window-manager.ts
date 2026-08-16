@@ -21,12 +21,53 @@
  * unchanged. Conversion has exactly one owner and it is not this file (invariant 3).
  */
 
+import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { BrowserWindow, screen, type Display, type Rectangle } from 'electron';
 
 import { windowKindQuery, type WindowKind } from '../../shared/types.js';
 import { nullLogger, type Logger } from './logger.js';
+
+/**
+ * `WDA_EXCLUDEFROMCAPTURE` - the only `GetWindowDisplayAffinity` value that means "this
+ * window is actually invisible to Windows Graphics Capture". Requires Windows 10 2004+
+ * (build 19041); older builds accept `setContentProtection(true)` without error and
+ * simply do not honour it (spike S2, docs/spikes/2026-08-16-s2-content-protection.md
+ * section 6) - which is exactly the silent failure invariant 4 forbids.
+ */
+const WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+/**
+ * `setContentProtection` returns `void`, so this is how S2 told "Electron never set the
+ * flag" apart from "set it, but this Windows build ignores it": read
+ * `GetWindowDisplayAffinity` straight back off the HWND rather than trust Electron's
+ * return value. A `.ps1` file on disk, not an inline `-Command` string - the P/Invoke
+ * signature is full of quotes that Win32 argv quoting mangles, and a temp file sidesteps
+ * that instead of fighting it (this is the same shape S2's harness used and proved out).
+ */
+const AFFINITY_SCRIPT = `param([long]$Hwnd)
+Add-Type -Namespace Textlens -Name DisplayAffinity -MemberDefinition @'
+[DllImport("user32.dll", SetLastError=true)]
+public static extern bool GetWindowDisplayAffinity(IntPtr hWnd, out uint dwAffinity);
+'@
+$value = [uint32]0
+$ok = [Textlens.DisplayAffinity]::GetWindowDisplayAffinity([IntPtr]$Hwnd, [ref]$value)
+if (-not $ok) { Write-Output 'ERROR' } else { Write-Output $value }
+`;
+
+let affinityScriptPath: string | null = null;
+
+/** Writes the P/Invoke script once per process and reuses the path after that. */
+function getAffinityScriptPath(): string {
+  if (affinityScriptPath !== null) return affinityScriptPath;
+  const file = path.join(os.tmpdir(), 'textlens-display-affinity.ps1');
+  fs.writeFileSync(file, AFFINITY_SCRIPT, 'utf8');
+  affinityScriptPath = file;
+  return file;
+}
 
 /**
  * Security baseline for every BrowserWindow in this app. Spread this into
@@ -142,6 +183,8 @@ export class WindowManager {
       // "never steals focus from the game" forbids.
       overlay.showInactive();
       this.#log.info('overlay shown', { displayId: display.id, bounds: overlay.getBounds() });
+      // Read the flag back now that it has had a real window to attach to (issue #46).
+      this.#verifyContentProtection(overlay, display);
     });
 
     overlay.webContents.setWindowOpenHandler(({ url }) => {
@@ -270,6 +313,66 @@ export class WindowManager {
     };
 
     screen.on('display-metrics-changed', this.#metricsListener);
+  }
+
+  /**
+   * Feature F1's other half (issue #46). `setContentProtection(true)` cannot fail loudly
+   * - it returns `void` - so this reads `GetWindowDisplayAffinity` back off the real HWND
+   * and warns if it is not `WDA_EXCLUDEFROMCAPTURE`. Deliberately does nothing else: no
+   * retry, no fallback flag, no attempt to compensate. F3 (the Thai-script output filter)
+   * is the backstop by design; the entire job here is making a silent layer-1 failure
+   * loud, per invariant 4.
+   *
+   * Fire-and-forget: the check runs once, off the capture hot path, and has nothing
+   * useful to block on.
+   */
+  #verifyContentProtection(overlay: BrowserWindow, display: Display): void {
+    let hwnd: string;
+    try {
+      hwnd = overlay.getNativeWindowHandle().readBigUInt64LE(0).toString();
+    } catch (error) {
+      this.#log.warn('could not read the overlay window handle to verify content protection', {
+        displayId: display.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', getAffinityScriptPath(), '-Hwnd', hwnd],
+      { timeout: 5000, encoding: 'utf8', windowsHide: true },
+      (error, stdout) => {
+        // The overlay may have been closed while the readback was in flight; nothing to
+        // warn the user about at that point.
+        if (overlay.isDestroyed()) return;
+
+        if (error !== null) {
+          this.#log.warn('could not verify content protection took effect', {
+            displayId: display.id,
+            error: error.message,
+          });
+          return;
+        }
+
+        const raw = stdout.trim();
+        const affinity = raw === 'ERROR' ? NaN : Number(raw);
+        if (affinity === WDA_EXCLUDEFROMCAPTURE) return; // the happy path stays silent
+
+        this.#log.warn(
+          'content protection did not take effect on the overlay; it is not excluded from '
+            + 'screen capture, so layer 1 of the feedback-loop defence (design doc section 6) '
+            + 'is unavailable on this machine and the app is relying on layers 2/3 instead. '
+            + 'WDA_EXCLUDEFROMCAPTURE requires Windows 10 build 19041 (2004) or newer',
+          {
+            displayId: display.id,
+            expectedAffinity: `0x${WDA_EXCLUDEFROMCAPTURE.toString(16)}`,
+            actualAffinity: Number.isNaN(affinity) ? `unexpected readback: "${raw}"` : `0x${affinity.toString(16)}`,
+            windowsBuild: os.release(),
+          },
+        );
+      },
+    );
   }
 
   /**
