@@ -1,0 +1,82 @@
+# electron-builder configuration (issue #45 / features B1 + B2).
+#
+# Two paths in this file are contracts with code that already exists and is already tested.
+# They are not free choices, and changing either of them here breaks the app silently -
+# the sidecar simply never spawns, or the tray draws blank:
+#
+#   resources/sidecar/Textlens.Capture.exe   <- resolveSidecarPath()   (sidecar-client.ts)
+#   resources/icons/*.png                    <- resolveTrayIconDir()   (tray-service.ts)
+#
+# Note the icons land at `resources/icons`, *not* `resources/build/icons`: `to:` names the
+# destination directory, and the source directory's own name is not part of it.
+
+appId: dev.zsitthiporn.textlens
+productName: Textlens
+copyright: Copyright (c) 2026 Sitthiporn Thanomsuk
+
+directories:
+  # NOT the default `dist`. `dist/` is already the compiled app - tsc writes dist/main and
+  # dist/preload there, vite writes dist/renderer - so leaving the default in place would
+  # have electron-builder writing its installers into its own input.
+  output: release
+  # Left at the default `build`, which electron-builder only ever *reads* from. It looks
+  # there for an app icon and finds none (the PNGs in build/icons are 16x16 tray icons, well
+  # under the 256x256 an .ico needs), so the installer carries the stock Electron icon and
+  # the build log says so. Deliberate: supplying an app icon is design work, not packaging.
+  buildResources: build
+
+# Explicit, because the default is `**/*` and this repo's root holds sidecar/bin, spikes/,
+# docs/ and tests/ - hundreds of MB that would otherwise be sealed into app.asar.
+# Production `dependencies` (pino, pino-roll, zod) are added by electron-builder itself and
+# must not be listed here; listing node_modules would drag the devDependencies in too.
+files:
+  - dist/**/*
+  - package.json
+
+# Everything here lands under `resources/` in the installed tree, outside app.asar.
+extraResources:
+  # The sidecar. Outside the archive of necessity: this is a native exe that gets spawned by
+  # path, and a path inside app.asar is not something CreateProcess can execute.
+  #
+  # Produced by scripts/build-sidecar.ps1, which `npm run package` runs first. It is always
+  # rebuilt rather than reused - a stale sidecar is the one failure here that looks exactly
+  # like success, because an old exe still starts, still speaks JSON lines, and still reports
+  # itself up.
+  - from: sidecar/Textlens.Capture/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/Textlens.Capture.exe
+    to: sidecar/Textlens.Capture.exe
+
+  # Tray icons. `nativeImage` reads these from disk at runtime, so unlike the renderer's
+  # assets they are not something the asar can serve.
+  - from: build/icons
+    to: icons
+    filter:
+      - '**/*.png'
+
+  # The SIL Open Font License for the bundled Noto Sans Thai. The font itself travels inside
+  # app.asar as a Vite asset; its licence has no build pipeline that would carry it along, so
+  # it is copied explicitly. OFL 1.1 requires the licence to accompany the font in any
+  # distribution - "it is in the repo" is not that.
+  - from: src/renderer/overlay/fonts/OFL.txt
+    to: licenses/NotoSansThai-OFL.txt
+  - from: LICENSE
+    to: licenses/Textlens-Apache-2.0.txt
+
+win:
+  target:
+    # The installer, and the no-install copy. `zip` and not electron-builder's `portable`
+    # target: `portable` is a self-extracting NSIS exe, which is not what "portable zip" in
+    # the issue means and would put a second installer-shaped file in front of the user.
+    - nsis
+    - zip
+
+nsis:
+  # All three are electron-builder defaults, restated because each one is an acceptance
+  # criterion on #45 rather than an incidental preference.
+  #
+  # Per-user (`perMachine: false`) is what keeps the install off the UAC prompt and out of
+  # Program Files, which matters for a tray app someone was handed rather than deployed.
+  perMachine: false
+  oneClick: true
+  # The user's config, translation cache and logs all live in %APPDATA%\textlens. An
+  # uninstall removes the program, not the user's data.
+  deleteAppDataOnUninstall: false
