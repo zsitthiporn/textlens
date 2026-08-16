@@ -310,6 +310,36 @@ export class WindowManager {
     return true;
   }
 
+  /**
+   * Show or hide the overlay window (issue #34, feature G5's other half).
+   *
+   * `showInactive`, never `show`: `show()` raises and focuses, which is precisely what the
+   * overlay must never do - it was created `focusable: false` so it cannot take the keyboard
+   * away from the game underneath, and unhiding it must not either.
+   *
+   * Nothing here touches the pipeline. #34 is emphatic that hiding the overlay is not
+   * pausing, and this method is where that distinction is made real: the sidecar keeps
+   * capturing and payloads keep arriving, they simply land in a window nobody can see.
+   *
+   * @returns whether the overlay is now in the requested state. `false` means there is no
+   *          overlay window, which the caller needs to know before recording it as hidden.
+   */
+  setOverlayVisible(visible: boolean): boolean {
+    const overlay = this.#overlay;
+    if (overlay === null || overlay.isDestroyed()) return false;
+
+    if (visible) {
+      overlay.showInactive();
+      // Hiding drops a window out of the topmost band on Windows; reassert on the way back.
+      overlay.setAlwaysOnTop(true, 'screen-saver');
+    } else {
+      overlay.hide();
+    }
+
+    this.#log.info('overlay visibility changed', { visible });
+    return true;
+  }
+
   /** Move the overlay to a different display, keeping it full-bleed on the new one. */
   moveOverlayTo(displayId: number): void {
     const overlay = this.#overlay;

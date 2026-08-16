@@ -7,8 +7,25 @@
 node_modules/
 dist/
 out/
-build/
 release/
+# Four lines where one used to do, because `build/icons/` holds the tray icons (issue #33)
+# and those are sources, not output. Git will not re-include a path whose *parent directory*
+# is excluded, so a plain `build/` makes any negation under it unreachable - the icons would
+# exist on the machine that generated them and nowhere else, and a fresh clone would draw a
+# blank tray and log five "icon is missing" errors. Survivable by design, but not the intent.
+#
+# Order matters (last match wins), and the comments are on their own lines because gitignore
+# has no trailing-comment syntax - `**/build/  # note` is a pattern that literally contains
+# "# note" and silently matches nothing.
+#
+# every build directory, at any depth - spikes/*/build/ included, as before
+**/build/
+# ...except the one at the repo root,
+!/build/
+# whose contents are still output and still ignored,
+/build/*
+# ...except the icons.
+!/build/icons/
 *.tsbuildinfo
 .npm/
 .eslintcache

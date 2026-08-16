@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Main process entry point: wiring, and only wiring.
  *
  * Everything electron-specific is resolved here - `userData`, `isPackaged`,
@@ -9,12 +9,23 @@
 
 import path from 'node:path';
 
-import { app, globalShortcut, net, screen } from 'electron';
+import {
+  Menu,
+  Tray,
+  app,
+  globalShortcut,
+  nativeImage,
+  net,
+  screen,
+  type MenuItemConstructorOptions,
+  type NativeImage,
+} from 'electron';
 
-import { DEFAULT_CONFIG, type CaptureConfig } from '../shared/config-schema.js';
+import { DEFAULT_CONFIG } from '../shared/config-schema.js';
+import { AppOrchestrator } from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
 import { HotkeyService } from './services/hotkey-service.js';
-import { createLogger, type Logger, type RootLogger } from './services/logger.js';
+import { createLogger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
 import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
@@ -23,6 +34,14 @@ import {
   type ComposedTextPipeline,
   type OverlayPayload,
 } from './services/text-pipeline.js';
+import {
+  TrayService,
+  resolveTrayIconDir,
+  type TrayHandle,
+  type TrayImage,
+  type TrayMenuItem,
+  type TrayPlatform,
+} from './services/tray-service.js';
 import { WindowManager } from './services/window-manager.js';
 
 /** dist/ - this file lives at dist/main/index.js once compiled. */
@@ -40,6 +59,8 @@ let hotkeys: HotkeyService | null = null;
 let sidecar: SidecarClient | null = null;
 let windows: WindowManager | null = null;
 let textPipeline: ComposedTextPipeline | null = null;
+let orchestrator: AppOrchestrator | null = null;
+let tray: TrayService | null = null;
 let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
 
@@ -87,40 +108,148 @@ async function bootstrap(): Promise<void> {
 
   textPipeline = startTextPipeline(metrics);
 
-  startHotkeys();
+  // The client is constructed before the mode machine because the machine drives it, and
+  // spawned after, because `initialize` is what turns a live sidecar into a capturing one.
+  // Constructing does not spawn anything.
+  const client = createSidecarClient(metrics);
+  if (client === null) return;
 
-  await startSidecar(metrics);
+  orchestrator = new AppOrchestrator({
+    sidecar: client,
+    config,
+    windows,
+    logger,
+  });
+
+  startTray(orchestrator);
+  startHotkeys(orchestrator);
+
+  await startSidecar(client, orchestrator);
 }
 
 /**
- * Bind the global hotkeys (issue #32).
+ * Build the tray (issue #33), and give it the mode machine to drive.
  *
- * The handlers are placeholders that log and nothing more, and that is the honest state of
- * things: every action they name is owned by the mode machine in #34, which does not exist
- * yet. Wiring the keys to real behaviour before there is a state machine to hold it would put
- * mode logic in the entry point, which is the one thing this file is not for.
- *
- * What is real now, and testable now, is registration: whether each key was taken by another
- * program, and whether it is released on quit.
+ * Before the sidecar, so the app has a visible quit path even when capture never starts -
+ * a session that failed to spawn the sidecar is exactly the session a user most needs to be
+ * able to end cleanly.
  */
-function startHotkeys(): void {
+function startTray(modes: AppOrchestrator): void {
+  if (logger === null) return;
+
+  const service = new TrayService({
+    platform: electronTrayPlatform(),
+    iconDir: resolveTrayIconDir({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+    }),
+    logger,
+    actions: {
+      onSelectRegion: () => {
+        modes.selectRegion();
+      },
+      onSnapshot: () => {
+        modes.snapshot();
+      },
+      onToggleAuto: () => {
+        modes.toggleAuto();
+      },
+      onPause: () => {
+        modes.pause();
+      },
+      onToggleOverlay: () => {
+        modes.toggleOverlay();
+      },
+      onOpenSettings: () => {
+        modes.openSettings();
+      },
+      // Nothing but `app.quit()`. The shutdown sequence lives in `before-quit` and this is
+      // deliberately not a second copy of it - see `shutdown` below.
+      onQuit: () => {
+        app.quit();
+      },
+    },
+  });
+  tray = service;
+
+  service.create();
+  service.update(modes.status);
+  modes.subscribe((status) => {
+    service.update(status);
+  });
+}
+
+/**
+ * Electron's `Tray`, `Menu` and `nativeImage`, adapted to the structural interface
+ * `tray-service.ts` declares.
+ *
+ * The casts are the price of that service not importing Electron, and they are sound in one
+ * direction only: every `TrayImage` and `TrayMenu` that comes back here was produced by
+ * `createImage`, `createEmptyImage` or `buildMenu` a few lines above, so it is always the
+ * real Electron object. This function is the whole of the Electron-specific tray code, which
+ * is the point of it existing.
+ */
+function electronTrayPlatform(): TrayPlatform {
+  return {
+    // Returns an *empty* image for a file it cannot read rather than throwing; the service
+    // checks `isEmpty()` for exactly that reason.
+    createImage: (filePath) => nativeImage.createFromPath(filePath),
+    createEmptyImage: () => nativeImage.createEmpty(),
+    buildMenu: (template: readonly TrayMenuItem[]) =>
+      Menu.buildFromTemplate([...template] as MenuItemConstructorOptions[]),
+    createTray: (image: TrayImage): TrayHandle => {
+      const instance = new Tray(image as NativeImage);
+      return {
+        setToolTip: (tooltip) => {
+          instance.setToolTip(tooltip);
+        },
+        setContextMenu: (menu) => {
+          instance.setContextMenu(menu as Menu | null);
+        },
+        setImage: (next) => {
+          instance.setImage(next as NativeImage);
+        },
+        on: (event, listener) => {
+          instance.on(event, listener);
+        },
+        destroy: () => {
+          instance.destroy();
+        },
+        isDestroyed: () => instance.isDestroyed(),
+      };
+    },
+  };
+}
+
+/**
+ * Bind the global hotkeys (issue #32) to the mode machine (issue #34).
+ *
+ * The four handlers were logging placeholders until now, on purpose: every action they name
+ * belongs to the mode machine, and binding them before it existed would have put mode logic
+ * in the entry point - the one thing this file is not for. This is the wiring they were
+ * waiting for, and it is four lines because the machine holds all of the behaviour.
+ */
+function startHotkeys(modes: AppOrchestrator): void {
   if (logger === null) return;
   const log = logger.child('app');
 
   const service = new HotkeyService({ shortcuts: globalShortcut, logger });
   hotkeys = service;
 
-  const announce = (action: string) => (): void => {
-    // #34 replaces every one of these. Until then a press proves the key reached us, which is
-    // the only thing that can be proved before there is something for it to do.
-    log.info('hotkey pressed; no handler until the mode machine lands (#34)', { action });
-  };
-
   service.register((config?.current ?? DEFAULT_CONFIG).hotkeys, {
-    toggleAuto: announce('toggleAuto'),
-    snapshot: announce('snapshot'),
-    selectRegion: announce('selectRegion'),
-    toggleOverlay: announce('toggleOverlay'),
+    toggleAuto: () => {
+      modes.toggleAuto();
+    },
+    snapshot: () => {
+      modes.snapshot();
+    },
+    selectRegion: () => {
+      modes.selectRegion();
+    },
+    toggleOverlay: () => {
+      modes.toggleOverlay();
+    },
   });
 
   for (const failure of service.failures) {
@@ -217,8 +346,14 @@ function rememberDisplayed(payload: OverlayPayload, recentOutputs: RecentOutputs
   }
 }
 
-async function startSidecar(metrics: MetricsRecorder): Promise<void> {
-  if (logger === null) return;
+/**
+ * Construct the sidecar client and hand every frame to the pipeline.
+ *
+ * Constructing does not spawn: {@link SidecarClient.start} does, and it is called from
+ * {@link startSidecar} once the mode machine exists to drive the result.
+ */
+function createSidecarClient(metrics: MetricsRecorder): SidecarClient | null {
+  if (logger === null) return null;
   const log = logger.child('app');
 
   const { exePath, source } = resolveSidecarPath({
@@ -247,159 +382,81 @@ async function startSidecar(metrics: MetricsRecorder): Promise<void> {
     void textPipeline?.pipeline.handleFrame(frame, screen.getPrimaryDisplay());
   });
 
+  return client;
+}
+
+/**
+ * Spawn the sidecar, then let the mode machine take it from `idle` to capturing.
+ *
+ * `orchestrator.initialize()` is now **the only path that starts capture** in this app. The
+ * temporary bootstrap that used to live here - `listMonitors` then `configure` then `start`,
+ * fired straight from this file - is gone, which is part of #34's definition of done: two
+ * independent things sending `start` is the bug the milestone ordering exists to prevent,
+ * because the mode machine would report `idle` while a loop it does not know about ticked
+ * away underneath it.
+ */
+async function startSidecar(client: SidecarClient, modes: AppOrchestrator): Promise<void> {
+  if (logger === null) return;
+  const log = logger.child('app');
+
   try {
     const ready = await client.start();
     log.info('sidecar is up', { version: ready.version, ocrLanguages: ready.ocrLanguages });
-    startSmokeCapture(client, (config?.current ?? DEFAULT_CONFIG).capture, log);
   } catch (error) {
     // Design doc section 7: a sidecar that will not start is reported, and the app stays
     // up so settings remain reachable. Restarting it is M10-01, not this issue.
     log.error('sidecar failed to start; capture is unavailable', {
-      exePath,
       message: error instanceof Error ? error.message : String(error),
     });
+    return;
   }
+
+  await modes.initialize();
+  log.info('mode machine ready', { mode: modes.mode, capturing: modes.capturing });
 }
-
-// ---------------------------------------------------------------------------
-// TEMPORARY BOOTSTRAP - issue #34 (M6-04, mode orchestration) MUST DELETE ALL OF THIS.
-// ---------------------------------------------------------------------------
-/*
- * Everything from here to the end of `startSmokeCapture` is scaffolding, and #34's
- * definition of done includes removing it.
- *
- * Why it exists: every stage of the pipeline was built and wired, but nothing in `src/`
- * ever called `SidecarClient.send`, so the sidecar sat in `idle` forever and no frame was
- * ever produced. The app booted cleanly and did nothing, which is the worst shape a bug
- * can take. This is the smallest honest thing that makes the whole path run once.
- *
- * Why it must not survive: #34 owns `idle -> auto -> paused -> snapshot`, and *it* is what
- * decides when capture starts. Two independent things sending `start` is precisely the bug
- * the milestone ordering exists to avoid - the mode machine would report `idle` while a
- * capture loop it does not know about ticks away underneath it.
- *
- * The *settings* it sends are no longer hardcoded - they come from `ConfigService` (#38), so
- * a run can be retuned by editing `config.json` rather than by rebuilding. What remains
- * temporary is the decision to start at all, which is the part #34 takes over.
- *
- * It deliberately does **not** subscribe to config changes. Re-sending `configure` when a
- * setting changes is a real requirement, but it belongs to the mode machine that owns the
- * sidecar's state - adding it here would build the second start path this comment exists to
- * warn about, and then delete it a step later.
- */
-
-/** How long to wait for the `listMonitors` reply before giving up loudly (invariant 4). */
-const SMOKE_LIST_MONITORS_TIMEOUT_MS = 2_000;
 
 /**
- * Ask which monitors exist, then configure and start capture.
+ * Stop the child, flush the log, in that order. Idempotent.
  *
- * `capture.monitorId` selects the monitor and `null` means "whichever is primary"; likewise
- * `capture.region` is `null` for the whole display. Both defaults are deliberate. Issue #30
- * (R7) records that a region whose edge cuts through a letter breaks OCR outright, so until
- * the region picker exists the uncropped display is the only honest choice - a hardcoded
- * rectangle would be a guess that fails that way on some machines and not others.
+ * Every step logs, and that is not decoration. Until the tray (#33) shipped there was no
+ * graceful way out of this app at all - `taskkill` never runs `before-quit`, so none of this
+ * had ever executed in a real session and #32's "quit แล้ว hotkey ถูกปลดหมด" was being
+ * satisfied by Windows reclaiming process-wide shortcuts on kill rather than by this code.
+ * These lines are how a real run proves otherwise.
  */
-function startSmokeCapture(client: SidecarClient, capture: CaptureConfig, log: Logger): void {
-  // Subscribed before the command is sent. The reply is a line on a pipe that is already
-  // flowing, so a listener attached afterwards is a race that only ever loses on a machine
-  // faster than this one.
-  let timer: NodeJS.Timeout | undefined;
-  const off = client.on('ack', (ack) => {
-    if (ack.cmd !== 'listMonitors') return;
-    clearTimeout(timer);
-    off();
-
-    // `monitors` is present only on this reply; an empty list is a real answer on a machine
-    // with no attached display, and is not the same thing as a malformed one.
-    const monitors = ack.monitors ?? [];
-    // Win32 defines the primary monitor as the one at physical origin (0,0), which is the
-    // same monitor Electron reports as primary - and matching on it needs no scale
-    // arithmetic, so invariant 3 is untouched.
-    const primary = monitors.find((entry) => entry.bounds[0] === 0 && entry.bounds[1] === 0);
-    const configured =
-      capture.monitorId === null ? undefined : monitors.find((entry) => entry.id === capture.monitorId);
-
-    if (capture.monitorId !== null && configured === undefined) {
-      // Issue #35 (R2) is explicit that a monitor that has been unplugged since the config was
-      // written must never be substituted for silently. Falling back is still better than not
-      // capturing, but it is said out loud.
-      log.warn('the configured monitor is not attached; falling back to the primary display', {
-        monitorId: capture.monitorId,
-        attached: monitors.map((entry) => entry.id),
-      });
-    }
-
-    const monitor = configured ?? primary ?? monitors[0];
-    if (monitor === undefined) {
-      log.error('listMonitors returned no monitors; capture cannot start');
-      return;
-    }
-    if (monitor !== primary) {
-      // Frames are paired to `screen.getPrimaryDisplay()` above until M6-01 (#28), so any
-      // monitor other than the primary means the boxes are placed against the wrong origin.
-      log.warn('capturing a non-primary monitor; box positions will be wrong until #28 lands', {
-        monitorId: monitor.id,
-      });
-    }
-
-    // `null` means the whole display. The size comes straight from the sidecar's own reply, so
-    // no conversion happens in Node; the region is physical px relative to the monitor's
-    // top-left, which for a full display starts at (0,0).
-    const region = capture.region ?? ([0, 0, monitor.bounds[2], monitor.bounds[3]] as const);
-
-    client.send({
-      cmd: 'configure',
-      region,
-      monitorId: monitor.id,
-      intervalActive: capture.intervalActive,
-      intervalIdle: capture.intervalIdle,
-      diffThreshold: capture.diffThreshold,
-      ocrLanguage: capture.ocrLanguage,
-      debugFrameEnabled: capture.debugFrameEnabled,
-    });
-    client.send({ cmd: 'start' });
-
-    log.info('smoke capture started', {
-      monitorId: monitor.id,
-      scale: monitor.scale,
-      region,
-      intervalActive: capture.intervalActive,
-      intervalIdle: capture.intervalIdle,
-      diffThreshold: capture.diffThreshold,
-      ocrLanguage: capture.ocrLanguage,
-      debugFrameEnabled: capture.debugFrameEnabled,
-    });
-  });
-
-  timer = setTimeout(() => {
-    off();
-    log.error('no listMonitors reply; capture never started', { timeoutMs: SMOKE_LIST_MONITORS_TIMEOUT_MS });
-  }, SMOKE_LIST_MONITORS_TIMEOUT_MS);
-  timer.unref?.();
-
-  if (!client.send({ cmd: 'listMonitors' })) {
-    clearTimeout(timer);
-    off();
-  }
-}
-
-// --------------------------- end of temporary bootstrap ---------------------------
-
-/** Stop the child, flush the log, in that order. Idempotent. */
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+
+  const log = logger?.child('app');
+  log?.info('shutting down');
 
   stopMetricsSummary?.();
   // First: a global shortcut is registered process-wide, and #32's criterion is that quitting
   // leaves nothing stuck in the system. Releasing before the slow work means a shutdown that
   // stalls on the sidecar still cannot leave a key held.
+  // Counted *before* the call. `unregisterAll` clears `registrations`, so reading it
+  // afterwards reports zero whether or not a single key was actually released - a log line
+  // that cannot fail is not evidence of anything. The failures, if any, are logged per-key
+  // by the service itself; this says how many there were to release in the first place.
+  const held = hotkeys?.registrations.filter((result) => result.ok).length ?? 0;
   hotkeys?.unregisterAll();
+  log?.info('hotkeys released', { released: held });
+
+  // Before the sidecar, so the icon disappears the moment the user asks rather than after
+  // however long the child takes to exit.
+  tray?.destroy();
+  orchestrator?.dispose();
+
   await sidecar?.stop();
+  log?.info('sidecar stopped', { running: sidecar?.isRunning ?? false });
+
   // After the sidecar, so no frame can arrive and find the cache handle already gone.
   textPipeline?.close();
+  log?.info('translation cache closed');
+
   windows?.closeAll();
+  log?.info('shutdown complete');
   await logger?.close();
 }
 
