@@ -89,6 +89,7 @@ const FALLBACK_CONFIG: OverlayRenderConfig = {
   fadeMs: 120,
   fontSize: 17,
   opacity: 0.82,
+  maxAreaRatio: 0.25,
 };
 
 /**
@@ -227,7 +228,50 @@ function adopt(message: OverlayRenderMessage): void {
  *
  * @returns whether the positional memory has to be rebuilt.
  */
-function adoptConfig(next: OverlayRenderConfig): boolean {
+/**
+ * Fill in any numeric field the incoming config did not actually carry, and say so.
+ *
+ * `OverlayRenderConfig` declares every field required, so no typed caller in this repo can omit
+ * one. But this message crosses IPC and arrives as data, and a producer that is not the typed one
+ * - a test fake, a CDP driver, a main process one version out of step with this renderer - can
+ * hand over an object with a hole in it. Until now that hole was **silent and looked like a font
+ * bug**: `${String(undefined)}px` is `"undefinedpx"`, which is invalid at computed-value time, so
+ * `var(--textlens-font-size, 17px)` does not fall back to 17 either - the whole declaration is
+ * dropped and every box renders at the browser's inherited 16px. Nothing anywhere reports it, and
+ * the only way to discover it is to measure rendered pixels. Found exactly that way, while
+ * building `scripts/overlay-layout-check.mjs`.
+ *
+ * Invariant 4: a value the user did not choose may be used, but it may not be used quietly.
+ */
+function fillConfigGaps(next: OverlayRenderConfig): OverlayRenderConfig {
+  const missing: string[] = [];
+  const fallback = FALLBACK_CONFIG as unknown as Record<string, unknown>;
+  // **Inspected on the incoming object, not on a merged one.** Spreading the fallback first and
+  // then testing the result fills every gap before it can be seen, so the report never fires and
+  // the substitution is exactly as silent as the bug it replaced. Caught by the check in
+  // `scripts/overlay-layout-check.mjs`, which is the whole reason that check asserts on the
+  // reported message and not only on the resulting pixels.
+  const incoming = next as unknown as Record<string, unknown>;
+  const filled: Record<string, unknown> = { ...incoming };
+  for (const key of Object.keys(FALLBACK_CONFIG)) {
+    const value = incoming[key];
+    if (typeof value === 'number' && Number.isFinite(value)) continue;
+    missing.push(key);
+    filled[key] = fallback[key];
+  }
+  if (missing.length > 0) {
+    // Not a banner: the banner is for conditions the *user* can act on, and this one is a defect
+    // in whatever produced the message. The console is where the person who can fix it is looking.
+    console.error(
+      `[textlens] render config arrived without usable ${missing.join(', ')}; `
+        + 'falling back to defaults. The overlay is not showing the configured values.',
+    );
+  }
+  return filled as unknown as OverlayRenderConfig;
+}
+
+function adoptConfig(incoming: OverlayRenderConfig): boolean {
+  const next = fillConfigGaps(incoming);
   const rebuilt =
     next.anchorGrid !== config.anchorGrid ||
     next.anchorTolerance !== config.anchorTolerance ||
@@ -272,11 +316,26 @@ function draw(message: OverlayRenderMessage): void {
       screen: { width: window.innerWidth, height: window.innerHeight },
       marks: performance,
       fadeMs: config.fadeMs,
+      maxAreaRatio: config.maxAreaRatio,
       now: () => performance.now(),
     },
     session,
   );
   lastStats = stats;
+
+  // #27: "มีการตัดทิ้ง → log ว่าตัดไปกี่อัน (ห้ามตัดเงียบ)". Counts and areas only - never the
+  // text, which would put screen content in a log (PR3). The areas are what make this
+  // actionable: they say the dropped blocks were the small ones, which is the whole claim.
+  if (stats.budgetDrops.length > 0) {
+    console.info(
+      `[textlens] area budget dropped ${String(stats.budgetDrops.length)} of `
+        + `${String(stats.requested)} blocks `
+        + `(${String(stats.overCapacity)} over pool capacity, ${String(stats.budgetDropped)} over quota); `
+        + `kept ${String(Math.round(stats.budgetKeptArea))}px² of a `
+        + `${String(Math.round(stats.budgetArea))}px² quota; `
+        + `dropped areas ${JSON.stringify(stats.budgetDrops.map((drop) => Math.round(drop.area)))}`,
+    );
+  }
 
   if (!stats.unchanged) {
     repaints += 1;

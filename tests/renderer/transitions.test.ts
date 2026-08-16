@@ -551,10 +551,57 @@ describe('renderEntries - the parts M5 already guaranteed', () => {
     const h = renderHarness({ capacity: 3 });
     const stats = h.render([0, 1, 2, 3, 4].map((index) => entry(`ก${String(index)}`, index * 150, `t${String(index)}`)));
 
-    expect(stats.truncated).toBe(2);
+    // Since #27 the overflow is decided before slot assignment, by priority rather than by
+    // arrival, so it is reported as `overCapacity` and the slot allocator never runs short -
+    // `truncated` now means only "the pool had nothing left", which on this render is nothing.
+    // The count is unchanged, and so is the guarantee #23 asked for.
+    expect(stats.overCapacity).toBe(2);
+    expect(stats.truncated).toBe(0);
     expect(stats.claimed).toBe(3);
     // The three that were drawn must be three different boxes, not one box written five times.
     expect(new Set(h.boxes.filter((box) => box.text !== '').map((box) => box.text)).size).toBe(3);
+  });
+
+  it('treats a payload that changed only in a dropped block as unchanged (#27 x A6)', () => {
+    // The budget runs *before* the signature is computed, so "the same picture" means the same
+    // drawn picture. Get that order wrong and every frame in which some tiny block the user
+    // cannot see flickers between two readings forces a full repaint of everything they can -
+    // which is A6 dying quietly, with no test failing and no symptom but CPU.
+    //
+    // Found by a mutation check: moving the signature back onto the full entry list broke nothing
+    // in the suite, because every other unchanged-payload test sends a payload that is identical
+    // all the way through. This is the case that separates the two.
+    const h = renderHarness({ capacity: 2 });
+    const big = {
+      text: 'บรรทัดใหญ่',
+      sourceText: 'the big one',
+      anchor: { x: 0, y: 900, width: 800, height: 40 },
+      degraded: false,
+    };
+    const medium = {
+      text: 'บรรทัดกลาง',
+      sourceText: 'the medium one',
+      anchor: { x: 0, y: 500, width: 400, height: 40 },
+      degraded: false,
+    };
+    const tiny = {
+      text: 'เล็ก',
+      sourceText: 'the tiny one',
+      anchor: { x: 0, y: 100, width: 40, height: 16 },
+      degraded: false,
+    };
+
+    const first = h.render([tiny, medium, big]);
+    expect(first.overCapacity).toBe(1);
+    // Evidence the tiny one is the block that lost, so the rest of this test is about the case
+    // it claims to be about.
+    expect(first.budgetDrops.map((drop) => drop.index)).toEqual([0]);
+
+    // Only the dropped block differs. Nothing on screen can change.
+    const second = h.render([{ ...tiny, text: 'เล็กมาก', sourceText: 'a different tiny one' }, medium, big]);
+
+    expect(second.unchanged).toBe(true);
+    expect(second.phaseLog).toEqual([]);
   });
 
   it('gives two entries that stabilize onto one point two different boxes', () => {

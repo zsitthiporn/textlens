@@ -69,6 +69,8 @@ export interface OverlayRenderConfig {
   readonly fontSize: number;
   /** Opacity of a box's background plate, 0..1 (#39). Never the element's own `opacity` - A9. */
   readonly opacity: number;
+  /** Fraction of the screen translations may cover in total, 0..1 (#27, feature U4). */
+  readonly maxAreaRatio: number;
 }
 
 /**

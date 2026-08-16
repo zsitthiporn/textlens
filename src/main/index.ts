@@ -243,11 +243,20 @@ async function bootstrap(): Promise<void> {
   windows.openSettings('settings');
   windows.openOverlay();
 
-  // Closing the settings window ends the session: the overlay is frameless, has no
-  // taskbar entry and cannot be focused, so it can never be the window the user closes.
-  windows.settings?.on('closed', () => {
-    app.quit();
-  });
+  // **Closing the settings window used to quit the app** (#56). The reasoning was sound when it
+  // was written and expired when the tray shipped: back then the overlay was frameless, had no
+  // taskbar entry and could not be focused, so the settings window was the only thing a user
+  // could close - and therefore the only way out of the app at all.
+  //
+  // #33 gave the app a tray with a Quit item and #32 gave it hotkeys, so that is no longer true,
+  // and the old behaviour became a trap: the user opens settings to rebind a key, presses the
+  // close button by reflex, and the whole session ends - gracefully, silently, and with capture
+  // stopped. Nothing warned them, because from the app's point of view nothing went wrong.
+  //
+  // Nothing replaces it here. `WindowManager.openSettings` already clears its own reference on
+  // `closed` and builds a fresh window on the next call, and `SettingsIpc` resolves both the
+  // target window and the trusted sender id at message time rather than capturing them - so
+  // closing and reopening from the tray is a path that already worked and had no way to be used.
 
   textPipeline = startTextPipeline(metrics);
 
@@ -861,8 +870,32 @@ async function shutdown(): Promise<void> {
   await logger?.close();
 }
 
+/**
+ * Deliberately does not quit (#56).
+ *
+ * Electron's default with no listener at all is to quit on Windows, so this handler has to exist
+ * in order to do nothing - deleting it would put the bug back by a different route than the one
+ * #56 describes, which is exactly the trap that issue warns about.
+ *
+ * **The tray is the only way out of this app**, and that is now a load-bearing statement rather
+ * than a design preference. The overlay window lives for the whole session - toggling it hides
+ * and shows, never closes - so in practice this fires only during shutdown, after `closeAll`. But
+ * "in practice" is not a guarantee: a renderer crash or a future window taking its own exit would
+ * reach here, and quitting the user's session because a window went away is not a decision this
+ * app gets to make quietly.
+ *
+ * The risk this accepts is recorded on #56 and is real: Windows 11 hides new tray icons in the
+ * overflow by default, so a user who never opens that overflow now has an app with no visible
+ * exit. That is a discoverability problem to solve in the tray, not a reason to keep a quit path
+ * that fires on a misclick.
+ */
 app.on('window-all-closed', () => {
-  app.quit();
+  // Silent during shutdown. `shutdown()` calls `closeAll()`, so a graceful quit reaches here as a
+  // matter of course, and announcing "staying alive" in the middle of a quit is a log line that
+  // contradicts the three around it - the kind of thing that makes someone reading a shutdown
+  // trace doubt the trace rather than the message.
+  if (shuttingDown) return;
+  logger?.child('app').info('all windows closed; staying alive - quit from the tray (#56)');
 });
 
 // `before-quit` is the last point at which async work can still be awaited. Cancel the

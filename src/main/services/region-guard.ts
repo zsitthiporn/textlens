@@ -82,9 +82,9 @@ export function clampRegion(region: Rect, monitorSize: readonly [number, number]
 }
 
 /**
- * The `diffThreshold` to actually send for a given region (#50).
+ * Which of the two change-detection knobs actually governs a given region (#50, #54).
  *
- * ## The root cause the issue names
+ * ## The root cause #50 names
  *
  * `configure.diffThreshold` is a *fraction* of the region's pixels, so one number means wildly
  * different things at different region sizes. Measured on this machine (3440x1440, 40px white
@@ -105,34 +105,95 @@ export function clampRegion(region: Rect, monitorSize: readonly [number, number]
  * contains the rest of the desktop, which is why it registers changes at 0.02 that have nothing
  * to do with the subtitle.)
  *
- * ## What this does about it
+ * ## What this does about it, stated the way it actually behaves
  *
- * A floor in **absolute pixels**, converted to whatever fraction that is for this region:
+ *     effective = min(fraction, maxRequiredPx / regionArea)
  *
- *     effective = min(fraction, minChangedPx / regionArea)
+ * **`min` picks the more *sensitive* of the two, not the stricter one.** A smaller threshold
+ * fires on a smaller change, so the lower number is the one that wakes up more easily. #54 was
+ * filed because this was described as a "floor" in #50's commit and closing comment, and a floor
+ * is what `max` would have given - the opposite behaviour. The word was wrong; the code was not,
+ * and it must stay `min`: `max` restores #50 immediately, and three regression tests in
+ * `tests/main/region-guard.test.ts` exist to make that failure loud.
+ *
+ * Read `maxRequiredPx` as a **ceiling on the demand**: "however large the region, never require
+ * more than this many changed pixels before calling it a change." Multiplying the effective
+ * fraction back out gives `min(fraction * area, maxRequiredPx)`, which is that sentence exactly.
  *
  * The two clauses protect opposite ends and neither alone is enough:
  *
- *   - The **absolute floor** stops a large region from being deaf. A subtitle is the same
- *     number of pixels whether the box around it is tight or covers the screen, so the thing
- *     that should stay constant is a pixel count, not a ratio.
- *   - The **fraction** stops a tiny region from being hair-trigger. On a 100x50 box the floor
+ *   - The **pixel ceiling** stops a large region from going deaf. A subtitle is the same number
+ *     of pixels whether the box around it is tight or covers the screen, so the thing that
+ *     should stay constant is a pixel count, not a ratio.
+ *   - The **fraction** stops a tiny region from being hair-trigger. On a 100x50 box the ceiling
  *     alone would demand 80% of the region change, which is nonsense in the other direction, so
  *     the user's fraction wins there.
+ *
+ * ## And the consequence #54 is really about
+ *
+ * Whichever term is smaller wins outright, so on a large region the user's `diffThreshold` has
+ * **no effect at all**:
+ *
+ * | region             | pixels | `fraction` 0.005 | `4000/area` | in force        |
+ * |--------------------|--------|------------------|-------------|-----------------|
+ * | 1200x220           | 264k   | 0.005            | 0.0152      | **fraction**    |
+ * | 3440x1440          | 4.95M  | 0.005            | 0.000807    | **maxRequiredPx** |
+ *
+ * A user on a full-screen region who finds the app too twitchy and raises `diffThreshold` from
+ * 0.005 to 0.05 sees nothing change, and until #54 nothing said why. That is what
+ * {@link DiffThresholdDecision.governedBy} is for, and why the caller logs it.
  *
  * Deliberately computed here in Node rather than in the sidecar's `ChangeDetector`: it needs no
  * pixels, only the region's dimensions, and the C# side has its own test suite and its own
  * language. Nothing about the wire changes - the sidecar still receives one fraction and still
  * compares it the way it always has.
  */
-export function effectiveDiffThreshold(region: Rect, fraction: number, minChangedPx: number): number {
+export interface DiffThresholdDecision {
+  /** The fraction to put on the wire. */
+  readonly effective: number;
+  /**
+   * Which term produced {@link effective}.
+   *
+   * `'fraction'` means the user's `diffThreshold` is live. `'maxRequiredPx'` means it is inert
+   * and the region's size decided instead - the case invariant 4 says cannot be silent.
+   */
+  readonly governedBy: 'fraction' | 'maxRequiredPx';
+  /** Changed physical px this threshold actually demands. The number a human can picture. */
+  readonly requiredPx: number;
+}
+
+/**
+ * @param fraction the user's `capture.diffThreshold`.
+ * @param maxRequiredPx the user's `capture.diffMaxRequiredPx`.
+ */
+export function decideDiffThreshold(
+  region: Rect,
+  fraction: number,
+  maxRequiredPx: number,
+): DiffThresholdDecision {
   const area = region[2] * region[3];
   // A degenerate region cannot produce a meaningful ratio, and dividing by it would send
   // Infinity or NaN as a threshold - which the sidecar would compare against and never satisfy.
-  if (!Number.isFinite(area) || area <= 0) return fraction;
+  if (!Number.isFinite(area) || area <= 0) {
+    return { effective: fraction, governedBy: 'fraction', requiredPx: 0 };
+  }
 
-  const floor = minChangedPx / area;
-  return Math.min(fraction, floor);
+  const ceilingAsFraction = maxRequiredPx / area;
+  // Ties go to `'fraction'`: when both terms give the same number the user's knob is not being
+  // overridden by anything, and reporting it as overridden would be a warning about nothing.
+  const governedBy = ceilingAsFraction < fraction ? 'maxRequiredPx' : 'fraction';
+  const effective = Math.min(fraction, ceilingAsFraction);
+  return { effective, governedBy, requiredPx: effective * area };
+}
+
+/**
+ * The `diffThreshold` to actually send for a given region (#50).
+ *
+ * The number only. {@link decideDiffThreshold} is the same computation with the reason attached;
+ * this wrapper exists because most callers want the wire value and nothing else.
+ */
+export function effectiveDiffThreshold(region: Rect, fraction: number, maxRequiredPx: number): number {
+  return decideDiffThreshold(region, fraction, maxRequiredPx).effective;
 }
 
 /** Why a saved region could not be used as-is. */

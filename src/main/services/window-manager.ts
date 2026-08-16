@@ -76,6 +76,7 @@ const FALLBACK_OVERLAY_RENDER: OverlayRenderConfig = {
   fadeMs: 120,
   fontSize: 17,
   opacity: 0.82,
+  maxAreaRatio: 0.25,
 };
 
 /** Same arrangement as the overlay channel above, and the same compile-time drift guard. */

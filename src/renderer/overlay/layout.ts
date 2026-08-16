@@ -26,9 +26,15 @@
  *
  * The phase boundaries are recorded in {@link RenderStats.phaseLog}, so a future edit that
  * interleaves a read back into phase 1 fails a test rather than quietly costing 30x. That log is
- * self-reported, which is why it is not the only evidence: `tests/main/overlay/` reads Chromium's
- * own `LayoutCount` across a render through the CDP performance domain, and the marks emitted
- * here (`textlens:measure`, `textlens:render`) are readable with `performance.getEntriesByName`.
+ * self-reported, which is why it is not the only evidence: `scripts/overlay-layout-check.mjs`
+ * drives a real Electron window and reads Chromium's own `LayoutCount` across a render through
+ * the CDP performance domain - measured at 1 for a 30-box render, not 30. The marks emitted here
+ * (`textlens:measure`, `textlens:render`) are readable with `performance.getEntriesByName`.
+ *
+ * That check deliberately does not live in `npm test`. vitest runs under Node with no layout
+ * engine at all, and the two things worth proving here - that Thai breaks on word boundaries and
+ * that the measured height is the rendered height - are exactly what a DOM emulation cannot
+ * answer. A test of either under jsdom passes without breaking a line or measuring a pixel.
  *
  * ## Why the user never sees the hidden pass
  *
@@ -39,6 +45,7 @@
  */
 
 import { StickyAnchors } from './anchor.js';
+import { selectWithinBudget, type BudgetDrop } from './budget.js';
 import type { OverlayRenderMessage } from './contract.js';
 import { BoxPool, type PooledBox } from './node-pool.js';
 import {
@@ -107,6 +114,8 @@ export interface LayoutOptions {
   readonly maxBoxWidthRatio?: number;
   readonly gap?: number;
   readonly maxDisplacement?: number;
+  /** Fraction of the viewport translations may cover in total (#27). Omitted means no quota. */
+  readonly maxAreaRatio?: number;
   readonly marks?: MarkRecorder;
   /** Crossfade duration in ms (#37). 0 swaps instantly and frees a departing box at once. */
   readonly fadeMs?: number;
@@ -123,6 +132,24 @@ export interface RenderStats {
   readonly claimed: number;
   /** Entries dropped because the pool was full. */
   readonly truncated: number;
+  /**
+   * Entries the area budget declined to draw (#27).
+   *
+   * Kept apart from {@link truncated} and from {@link skipped} on purpose: three different things
+   * stop a box reaching the screen - the screen is too full of translation (this), the pool has no
+   * node left (`truncated`), and anti-overlap found nowhere to put it (`skipped`) - and only the
+   * first is a decision. Collapsing them into one number is how "the overlay dropped six" becomes
+   * a fact nobody can act on.
+   */
+  readonly budgetDropped: number;
+  /** Entries beyond what the pool could ever hold, dropped by priority rather than arrival (#27). */
+  readonly overCapacity: number;
+  /** Every entry the budget declined, with its area. Invariant 4's evidence for *which*. */
+  readonly budgetDrops: readonly BudgetDrop[];
+  /** Total anchor area actually drawn, CSS px². */
+  readonly budgetKeptArea: number;
+  /** The quota in force this frame, CSS px². */
+  readonly budgetArea: number;
   /** Boxes actually visible after placement. */
   readonly drawn: number;
   /** Claimed boxes that anti-overlap could not place, by reason. Invariant 4's evidence. */
@@ -230,7 +257,21 @@ export function renderEntries<E extends PooledBox>(
     return { ...entry, anchor: resolved.anchor };
   });
 
-  const signature = renderSignature(stabilized, screen);
+  // #27, and it runs here for two reasons. Before slot assignment, because culling afterwards
+  // would leave the pool handing out its last boxes in arrival order - the exact bug. And before
+  // the signature, so that "the same picture" means the same *drawn* picture: a payload that
+  // differs only in a block the budget threw away paints nothing new and must still count as
+  // unchanged.
+  const budget = selectWithinBudget(stabilized, {
+    capacity: pool.capacity,
+    maxAreaRatio: options.maxAreaRatio ?? 1,
+    screen,
+  });
+  const visible = budget.kept.map((index) => stabilized[index]).filter((entry) => entry !== undefined);
+  const overCapacity = budget.dropped.filter((drop) => drop.reason === 'over-capacity').length;
+  const budgetDropped = budget.dropped.length - overCapacity;
+
+  const signature = renderSignature(visible, screen);
   if (signature === session.signature) {
     // A6. No writes, no reads, no placement - and an empty `phaseLog`, which is how a test tells
     // this apart from a render that did all the work and then wrote the same values back.
@@ -240,6 +281,13 @@ export function renderEntries<E extends PooledBox>(
       requested: entries.length,
       claimed: 0,
       truncated: 0,
+      // Reported even on a skip: the payload really did carry blocks that are not being drawn,
+      // and a caller logging "0 dropped" for a frame that dropped six would be worse than silent.
+      budgetDropped,
+      overCapacity,
+      budgetDrops: budget.dropped,
+      budgetKeptArea: budget.keptArea,
+      budgetArea: budget.budgetArea,
       drawn: 0,
       skipped: [],
       comparisons: 0,
@@ -263,12 +311,12 @@ export function renderEntries<E extends PooledBox>(
     box.setText('', false);
   }
 
-  const assignment = session.slots.assign(uniqueKeys(stabilized), now);
+  const assignment = session.slots.assign(uniqueKeys(visible), now);
   // Everything still on screen keeps its box, including the ones on their way out. `take(n)`
   // cannot express that set; see `BoxPool.retain`.
   pool.retain(session.slots.retained);
 
-  const claimed = stabilized.length - assignment.exhausted;
+  const claimed = visible.length - assignment.exhausted;
   const widths: number[] = [];
   const boxes: (E | undefined)[] = [];
   const states: (SlotState | null)[] = [];
@@ -277,8 +325,8 @@ export function renderEntries<E extends PooledBox>(
 
   // ---- phase 1: writes only -------------------------------------------------------------
   note('write');
-  for (let index = 0; index < stabilized.length; index += 1) {
-    const entry = stabilized[index];
+  for (let index = 0; index < visible.length; index += 1) {
+    const entry = visible[index];
     const slotIndex = assignment.indices[index] ?? null;
     const state = assignment.states[index] ?? null;
     const box = slotIndex === null ? undefined : pool.boxes[slotIndex];
@@ -301,11 +349,26 @@ export function renderEntries<E extends PooledBox>(
     if (fade) crossfaded += 1;
     box.setText(entry.text, fade);
 
-    // H3: this attribute is the whole reason this project runs on Chromium. It is what selects
-    // ICU's Thai dictionary line breaker; without it the text is broken as if it were Latin,
-    // which for a script with no inter-word spaces means "not broken at all" until the box
-    // overflows. A degraded entry is untranslated English and is tagged as such - marking
-    // English `th` would ask the Thai breaker to segment Latin words.
+    // H3. Chromium does break Thai on real word boundaries, and that is the reason this project
+    // runs on it: measured with `scripts/overlay-layout-check.mjs`, a 180-character Thai string in
+    // a 240px box breaks five times and every break lands on an `Intl.Segmenter('th')` word
+    // boundary.
+    //
+    // **This attribute is not what makes that happen.** It used to say so here, and that was
+    // wrong: on Electron 43 the break offsets are byte-identical with `lang="th"`, with
+    // `lang="en"`, and with no `lang` attribute at all - Blink detects Thai script and selects the
+    // dictionary breaker itself. What actually has to survive is `word-break: normal` in
+    // `overlay.css`; setting `break-all` moves all five breaks off word boundaries, which is the
+    // measurement that identifies the load-bearing property.
+    //
+    // It is still set, and should stay set - font selection, shaping and accessibility all read
+    // it, and it is simply correct HTML. It is recorded as not load-bearing for line breaking so
+    // that nobody keeps some other thing on the strength of believing it is. A degraded entry is
+    // untranslated English and is tagged as such for the same reasons.
+    //
+    // Measured on Electron 43 / Chromium 43. Engine behaviour here is not contractual and a
+    // future version could reintroduce a dependence on `lang`; the check script is what would
+    // catch that.
     box.setAttribute('lang', entry.degraded ? 'en' : 'th');
     box.setAttribute('data-origin', entry.degraded ? 'degraded' : 'translated');
     box.style.width = `${String(width)}px`;
@@ -347,8 +410,8 @@ export function renderEntries<E extends PooledBox>(
 
   // ---- phase 3: pure computation, no DOM at all ------------------------------------------
   const requests: PlacementRequest[] = [];
-  for (let index = 0; index < stabilized.length; index += 1) {
-    const entry = stabilized[index];
+  for (let index = 0; index < visible.length; index += 1) {
+    const entry = visible[index];
     if (entry === undefined) continue;
     requests.push({
       anchor: entry.anchor,
@@ -401,6 +464,11 @@ export function renderEntries<E extends PooledBox>(
     requested: entries.length,
     claimed,
     truncated: assignment.exhausted,
+    budgetDropped,
+    overCapacity,
+    budgetDrops: budget.dropped,
+    budgetKeptArea: budget.keptArea,
+    budgetArea: budget.budgetArea,
     drawn,
     skipped,
     comparisons: outcome.comparisons,

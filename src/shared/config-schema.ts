@@ -162,29 +162,43 @@ const captureShape = {
    * test text was large, high-contrast and full-width. Real subtitles are smaller.
    *
    * The full-screen row does not behave and no value here fixes it - see
-   * {@link diffMinChangedPx}.
+   * {@link diffMaxRequiredPx}.
+   *
+   * **This knob is inert on a large region, by design** (#54). It is only in force while it is
+   * the *smaller* of the two rules; past roughly 800k px the pixel ceiling below is smaller and
+   * decides instead, and raising this number has no effect whatsoever. `app-orchestrator.ts` logs
+   * which of the two is governing on every `configure` so that is visible rather than mystifying.
    */
   diffThreshold: z.number().min(0).max(1),
 
   /**
-   * Changed physical px that must always be enough to count as a change, whatever the region's
-   * size (issue #50).
+   * Ceiling on how many changed physical px may ever be *required* before a frame counts as
+   * changed, whatever the region's size (issues #50, #54).
    *
-   * The issue identifies a pure fraction as the root cause, and the measurements agree: the
+   * Read it as a promise: "however large the region, a change of this many pixels is always
+   * enough." #50 identifies a pure fraction as the root cause and the measurements agree: the
    * *same* text change was detected on a 1200x220 region and discarded on a 1600x460 one at the
    * same threshold. Nothing about the content differed - only the denominator. A subtitle is the
    * same number of pixels however big a box the user drew around it, so the quantity that should
    * stay fixed is a pixel count.
    *
-   * `region-guard.ts`'s `effectiveDiffThreshold` combines the two as
-   * `min(diffThreshold, diffMinChangedPx / area)`, so the fraction governs small regions and this
-   * floor governs large ones.
+   * `region-guard.ts`'s `decideDiffThreshold` combines the two as
+   * `min(diffThreshold, diffMaxRequiredPx / area)`. **`min` picks the more sensitive rule**, so
+   * multiplied back out the demand is `min(diffThreshold * area, diffMaxRequiredPx)` - this value
+   * caps it. That is why the field is named for a maximum and not, as #50's commit message and
+   * closing comment both said, for a floor (#54). The name was wrong, the arithmetic was right,
+   * and `min` must not become `max`: that reintroduces #50 on the first large region.
+   *
+   * | region    | pixels | `diffThreshold` 0.005 | `4000/area` | in force              |
+   * |-----------|--------|-----------------------|-------------|-----------------------|
+   * | 1200x220  | 264k   | 0.005                 | 0.0152      | **diffThreshold**     |
+   * | 3440x1440 | 4.95M  | 0.005                 | 0.000807    | **diffMaxRequiredPx** |
    *
    * 4000 comes from the same run. On the 1600x460 region 0.01 detected and 0.02 did not, which
    * brackets one line of that text between ~7,400 and ~14,700 changed px; 4000 sits below that
    * with room for text smaller and lower-contrast than the test's.
    */
-  diffMinChangedPx: z.number().int().nonnegative(),
+  diffMaxRequiredPx: z.number().int().nonnegative(),
   /** BCP-47 tag of the OCR recognizer. The sidecar reports which are installed (feature O8). */
   ocrLanguage: z.string().min(1),
   /**
@@ -345,6 +359,26 @@ const renderShape = {
    * boxes has `toggleOverlay`, which is a mode rather than a setting that looks like a fault.
    */
   opacity: z.number().min(0.2).max(1),
+
+  /**
+   * Fraction of the screen the translations may cover in total, 0..1 (#27, feature U4).
+   *
+   * Measured on the **source blocks' rectangles**, not the drawn boxes: the drawn height is not
+   * known until the renderer's measurement pass, which happens after the decision has to be made.
+   * The anchor area is also the more meaningful quantity - it is how much of the screen the text
+   * being translated occupies.
+   *
+   * 0.25 rather than something tighter because the failure modes are wildly asymmetric. Too high
+   * and a busy screen is cluttered, which the user can see and can fix by drawing a smaller
+   * region. Too low and translations silently vanish, which looks exactly like the app being
+   * broken - and #27's whole subject is that dropping the wrong things quietly is the bug. A
+   * subtitle region occupies a few percent of a screen, so ordinary use never approaches this;
+   * it exists for the full-screen capture that produced `requested: 54` in the run that filed
+   * the issue.
+   *
+   * 1 disables the quota, leaving only the pool's capacity as a limit.
+   */
+  maxAreaRatio: z.number().min(0.01).max(1),
 } as const;
 
 export const renderConfigSchema = z.strictObject(renderShape).readonly();
@@ -470,7 +504,7 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     intervalActive: 800,
     intervalIdle: 2_000,
     diffThreshold: 0.005,
-    diffMinChangedPx: 4_000,
+    diffMaxRequiredPx: 4_000,
     ocrLanguage: 'en-US',
     debugFrameEnabled: false,
   },
@@ -493,6 +527,7 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     // nothing about how the app looks until somebody moves a slider.
     fontSize: 17,
     opacity: 0.82,
+    maxAreaRatio: 0.25,
   },
   stability: {
     enabled: true,

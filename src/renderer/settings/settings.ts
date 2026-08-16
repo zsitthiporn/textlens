@@ -658,7 +658,7 @@ export function mountSettings(root: HTMLElement): void {
 
     // Monitors. Rebuilt only when the list actually differs, so re-rendering does not throw away a
     // selection the user is in the middle of making.
-    const wanted = next.monitors.map((monitor) => monitor.id).join(' ');
+    const wanted = next.monitors.map((monitor) => monitor.id).join('\0');
     if (monitorSelect.dataset['ids'] !== wanted) {
       monitorSelect.dataset['ids'] = wanted;
       monitorSelect.replaceChildren();

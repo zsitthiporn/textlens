@@ -72,7 +72,7 @@ import {
   checkRegionSize,
   checkSavedRegion,
   clampRegion,
-  effectiveDiffThreshold,
+  decideDiffThreshold,
   findEdgeContact,
   padRegion,
 } from './region-guard.js';
@@ -228,8 +228,8 @@ const DEFAULT_IDLE_WARNING_MS = 25_000;
  * What the user is told while no capture region has been chosen (#51).
  *
  * The condition it names is a real one and it is not a matter of taste. With `region: null` the
- * region is the whole display, and `effectiveDiffThreshold` turns the default 0.005 fraction into
- * 0.0008 on a 3440x1440 screen because `diffMinChangedPx` is the smaller of the two there (#54).
+ * region is the whole display, and `decideDiffThreshold` turns the default 0.005 fraction into
+ * 0.0008 on a 3440x1440 screen because `diffMaxRequiredPx` is the smaller of the two there (#54).
  * A live desktop is never still - a clock, a caret, a notification - so a fresh install pressing
  * auto captures, OCRs and translates on nearly every tick, on content nobody asked about.
  *
@@ -267,6 +267,15 @@ export class AppOrchestrator {
   readonly #edgeThrottle = new EdgeWarningThrottle();
   /** Standing "auto mode is finding nothing at all" condition (#50). */
   #idleWarning: string | null = null;
+  /**
+   * Which change-detection rule was in force at the last `configure` (#54).
+   *
+   * Held rather than recomputed because {@link #checkIdle} runs off `nochange` events and has no
+   * region to hand. It exists so the idle warning can stop recommending a knob that cannot move:
+   * on a large region `diffThreshold` is inert, and that is precisely the region a user staring at
+   * a dry spell is most likely to have drawn.
+   */
+  #diffGovernedBy: 'fraction' | 'maxRequiredPx' = 'fraction';
   /**
    * Standing "your saved region no longer applies" condition (#31).
    *
@@ -821,6 +830,31 @@ export class AppOrchestrator {
     const region = this.#resolveRegion(capture, monitor, monitors);
     const bindingWarningChanged = this.#regionBindingWarning !== bindingWarningBefore;
 
+    const decision = decideDiffThreshold(region, capture.diffThreshold, capture.diffMaxRequiredPx);
+    this.#diffGovernedBy = decision.governedBy;
+    // #54, invariant 4. A `diffThreshold` that is not in force is a knob the user can turn all
+    // day for no effect, and the only thing worse than a setting that does nothing is one that
+    // does nothing quietly. Logged on every configure rather than only when it changes: the
+    // region is what decides this, so the same configured number flips between live and inert as
+    // the user redraws their box, and the line has to be findable next to the region that caused
+    // it. Both numbers are named because the point is the comparison between them.
+    if (decision.governedBy === 'maxRequiredPx') {
+      this.#log.warn(
+        'the configured diffThreshold has no effect on a region this large; '
+          + 'capture.diffMaxRequiredPx is the smaller of the two rules and decides instead (#54)',
+        {
+          region,
+          regionPx: region[2] * region[3],
+          configuredDiffThreshold: capture.diffThreshold,
+          diffMaxRequiredPx: capture.diffMaxRequiredPx,
+          effectiveDiffThreshold: decision.effective,
+          // What the two settings mean in the unit a human can picture, side by side.
+          requiredPx: Math.round(decision.requiredPx),
+          requiredPxIfFractionGoverned: Math.round(capture.diffThreshold * region[2] * region[3]),
+        },
+      );
+    }
+
     const acked = await this.#send(
       {
         cmd: 'configure',
@@ -830,9 +864,9 @@ export class AppOrchestrator {
         intervalIdle: capture.intervalIdle,
         // Not `capture.diffThreshold` directly (#50). The wire carries a fraction, and a
         // fraction means different things at different region sizes - which is the root cause
-        // the issue names. This is where the configured fraction and the absolute floor are
+        // the issue names. This is where the configured fraction and the pixel ceiling are
         // reconciled, because it is the first point at which the region's size is known.
-        diffThreshold: effectiveDiffThreshold(region, capture.diffThreshold, capture.diffMinChangedPx),
+        diffThreshold: decision.effective,
         ocrLanguage: capture.ocrLanguage,
         debugFrameEnabled: capture.debugFrameEnabled,
       },
@@ -853,9 +887,13 @@ export class AppOrchestrator {
       intervalActive: capture.intervalActive,
       intervalIdle: capture.intervalIdle,
       // Both numbers, because the difference between them is the whole of #50 and a log that
-      // showed only the configured fraction would not explain the loop's actual behaviour.
+      // showed only the configured fraction would not explain the loop's actual behaviour. Since
+      // #54, which of the two rules produced it as well - the pair alone leaves the reader to
+      // work out which one won, and that is the fact they came for.
       diffThreshold: capture.diffThreshold,
-      effectiveDiffThreshold: effectiveDiffThreshold(region, capture.diffThreshold, capture.diffMinChangedPx),
+      effectiveDiffThreshold: decision.effective,
+      diffGovernedBy: decision.governedBy,
+      diffRequiredPx: Math.round(decision.requiredPx),
       ocrLanguage: capture.ocrLanguage,
       debugFrameEnabled: capture.debugFrameEnabled,
     });
@@ -1121,9 +1159,16 @@ export class AppOrchestrator {
     // and that is exactly the noise that trains a user to ignore warnings - the same reason
     // #30's edge report is throttled.
     const seconds = Math.round(this.#idleWarningMs / 1000);
-    const message =
-      `no change detected in the capture region for over ${seconds}s - `
-      + 'try a smaller region, or lower diffThreshold';
+    // #54. This used to say "lower diffThreshold" unconditionally, which is advice that does
+    // nothing on exactly the regions that produce this warning: past ~800k px the pixel ceiling
+    // is the smaller rule and the fraction is inert, so the user would turn that knob, see no
+    // change, and reasonably conclude the app is broken. Name the knob that is actually in force.
+    const remedy =
+      this.#diffGovernedBy === 'maxRequiredPx'
+        ? 'try a smaller region, or lower diffMaxRequiredPx - on a region this large '
+          + 'diffThreshold has no effect'
+        : 'try a smaller region, or lower diffThreshold';
+    const message = `no change detected in the capture region for over ${seconds}s - ${remedy}`;
     if (this.#idleWarning === message) return false;
 
     this.#idleWarning = message;
@@ -1134,6 +1179,9 @@ export class AppOrchestrator {
       {
         idleForMs: now - this.#lastFrameAt,
         diffThreshold: this.#config.current.capture.diffThreshold,
+        diffMaxRequiredPx: this.#config.current.capture.diffMaxRequiredPx,
+        // Which of the two the message just told them to reach for (#54).
+        diffGovernedBy: this.#diffGovernedBy,
       },
     );
     return true;

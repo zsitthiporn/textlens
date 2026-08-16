@@ -17,6 +17,7 @@ import {
   checkRegionSize,
   checkSavedRegion,
   clampRegion,
+  decideDiffThreshold,
   effectiveDiffThreshold,
   findEdgeContact,
   padRegion,
@@ -115,7 +116,7 @@ describe('effectiveDiffThreshold (#50)', () => {
       const threshold = effectiveDiffThreshold(
         region,
         DEFAULT_CONFIG.capture.diffThreshold,
-        DEFAULT_CONFIG.capture.diffMinChangedPx,
+        DEFAULT_CONFIG.capture.diffMaxRequiredPx,
       );
       const changedFraction = SUBTITLE_CHANGE_PX / (region[2] * region[3]);
 
@@ -126,23 +127,23 @@ describe('effectiveDiffThreshold (#50)', () => {
   });
 
   it('is the plain fraction on a region small enough for the fraction to be the stricter rule', () => {
-    // 1200x220 = 264,000 px. The floor would be 4000/264000 = 0.0152, far looser than 0.005, so
-    // the configured fraction governs - which is what keeps a small region from being woken by
-    // noise.
+    // 1200x220 = 264,000 px. The pixel ceiling would be 4000/264000 = 0.0152, far looser than
+    // 0.005, so the configured fraction governs - which is what keeps a small region from being
+    // woken by noise.
     expect(effectiveDiffThreshold([0, 0, 1200, 220], 0.005, 4_000)).toBeCloseTo(0.005, 9);
   });
 
-  it('falls back to the absolute floor once the region is large enough for the fraction to go deaf', () => {
+  it('falls back to the pixel ceiling once the region is large enough for the fraction to go deaf', () => {
     // 3440x1440 = 4,953,600 px. 0.005 of that is 24,768 px - roughly three subtitle lines, which
-    // is exactly the deafness #50 reported. The floor brings it back to 4,000.
+    // is exactly the deafness #50 reported. The ceiling brings the demand back down to 4,000.
     const threshold = effectiveDiffThreshold([0, 0, 3440, 1440], 0.005, 4_000);
 
     expect(threshold * 3440 * 1440).toBeCloseTo(4_000, 6);
     expect(threshold).toBeLessThan(0.005);
   });
 
-  it('never lets the floor make a tiny region hair-trigger', () => {
-    // On a 100x50 box the floor alone would demand 80% of the region change. The fraction wins,
+  it('never lets the pixel ceiling make a tiny region hair-trigger', () => {
+    // On a 100x50 box the ceiling alone would demand 80% of the region change. The fraction wins,
     // which is the other half of why this is a `min` of two rules rather than one rule.
     expect(effectiveDiffThreshold([0, 0, 100, 50], 0.005, 4_000)).toBeCloseTo(0.005, 9);
   });
@@ -158,7 +159,7 @@ describe('effectiveDiffThreshold (#50)', () => {
     const now = effectiveDiffThreshold(
       [0, 0, 3440, 1440],
       DEFAULT_CONFIG.capture.diffThreshold,
-      DEFAULT_CONFIG.capture.diffMinChangedPx,
+      DEFAULT_CONFIG.capture.diffMaxRequiredPx,
     );
     expect(changedFraction).toBeGreaterThan(now);
   });
@@ -167,6 +168,88 @@ describe('effectiveDiffThreshold (#50)', () => {
     // Dividing by a zero area would send Infinity or NaN as a threshold, and the sidecar would
     // compare against it and never once report a change - silently.
     expect(effectiveDiffThreshold([0, 0, 0, 0], 0.005, 4_000)).toBe(0.005);
+  });
+});
+
+/**
+ * #54: the arithmetic was right and the *word* was wrong, so what needed a test was the word.
+ *
+ * `min` picks the more sensitive rule, which means whichever term is smaller silences the other
+ * one outright. On a large region that silenced term is the user's own `diffThreshold`, and until
+ * now nothing anywhere said so. These pin the reason, not just the number - a value with no reason
+ * attached is what let "floor" survive three regression tests and two review passes.
+ */
+describe('decideDiffThreshold (#54)', () => {
+  it('reports the fraction as governing on a region where the fraction is smaller', () => {
+    // 1200x220 = 264k px: 4000/264000 = 0.0152 > 0.005, so the user's knob is live.
+    const decision = decideDiffThreshold([0, 0, 1200, 220], 0.005, 4_000);
+
+    expect(decision.governedBy).toBe('fraction');
+    expect(decision.effective).toBeCloseTo(0.005, 9);
+    // 0.005 of 264,000 px. The number the log prints, in the unit a human can picture.
+    expect(decision.requiredPx).toBeCloseTo(1_320, 6);
+  });
+
+  it('reports the pixel ceiling as governing on a region where the fraction has gone inert', () => {
+    // The row from the issue: 3440x1440 = 4.95M px, 4000/area = 0.000807 < 0.005.
+    const decision = decideDiffThreshold([0, 0, 3440, 1440], 0.005, 4_000);
+
+    expect(decision.governedBy).toBe('maxRequiredPx');
+    expect(decision.effective).toBeCloseTo(0.000_807, 6);
+    expect(decision.requiredPx).toBeCloseTo(4_000, 6);
+  });
+
+  it('holds the exact complaint #54 was filed about: raising diffThreshold on a big region does nothing', () => {
+    // The user's actual experience. Not an assertion about a name - about the wire value.
+    const full: Rect = [0, 0, 3440, 1440];
+    const before = decideDiffThreshold(full, 0.005, 4_000);
+    const afterTenfoldRaise = decideDiffThreshold(full, 0.05, 4_000);
+
+    expect(afterTenfoldRaise.effective).toBe(before.effective);
+    expect(afterTenfoldRaise.governedBy).toBe('maxRequiredPx');
+
+    // And the same tenfold raise on a small region *does* move it, which is what makes the
+    // assertion above a statement about region size rather than about the knob being dead.
+    const cropped: Rect = [0, 0, 1200, 220];
+    expect(decideDiffThreshold(cropped, 0.05, 4_000).effective).toBeGreaterThan(
+      decideDiffThreshold(cropped, 0.005, 4_000).effective,
+    );
+  });
+
+  it('calls a tie "fraction", because nothing is overriding anything at the crossover', () => {
+    // 4000 / (2000 * 400 = 800k) = exactly 0.005. Reporting this as an override would warn a user
+    // that their setting is being ignored at the one point where the two rules agree.
+    const decision = decideDiffThreshold([0, 0, 2_000, 400], 0.005, 4_000);
+
+    expect(decision.effective).toBeCloseTo(0.005, 9);
+    expect(decision.governedBy).toBe('fraction');
+  });
+
+  it('does not claim an override on a degenerate region, where there is no ratio to compare', () => {
+    const decision = decideDiffThreshold([0, 0, 0, 0], 0.005, 4_000);
+
+    expect(decision.governedBy).toBe('fraction');
+    expect(decision.effective).toBe(0.005);
+  });
+
+  it('agrees with effectiveDiffThreshold everywhere, so the wrapper cannot drift from it', () => {
+    // The wrapper is what #50's three regression tests call. If the two ever disagreed those
+    // tests would be guarding an expression nothing in the app evaluates.
+    const regions: readonly Rect[] = [
+      [400, 900, 1200, 220],
+      [200, 780, 1600, 460],
+      [0, 0, 1720, 1440],
+      [0, 0, 1920, 1080],
+      [0, 0, 3440, 1440],
+      [0, 0, 0, 0],
+    ];
+    for (const region of regions) {
+      for (const fraction of [0.002, 0.005, 0.02, 0.05]) {
+        expect(effectiveDiffThreshold(region, fraction, 4_000)).toBe(
+          decideDiffThreshold(region, fraction, 4_000).effective,
+        );
+      }
+    }
   });
 });
 

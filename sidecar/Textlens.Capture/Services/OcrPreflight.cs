@@ -60,13 +60,54 @@ public static class OcrPreflight
     /// <summary>
     /// Whether any installed recognizer can serve <paramref name="requiredLanguage"/>.
     ///
-    /// Matching is case-insensitive on the full tag, and falls back to the primary
-    /// subtag: <c>en-GB</c> satisfies a request for <c>en-US</c>. That is looser than
-    /// string equality on purpose. The failure modes are not symmetric — telling a user
-    /// with a working English recognizer to go install an English recognizer is a dead
-    /// end, whereas an over-optimistic match surfaces later as a concrete engine
-    /// creation failure from <c>OcrEngine.TryCreateFromLanguage</c> (M2-04), which is
-    /// both actionable and correctly attributed.
+    /// <para>Matching is case-insensitive on the full tag, and falls back to the primary
+    /// subtag: <c>en-GB</c> satisfies a request for <c>en-US</c>. That is looser than string
+    /// equality, and #55 asked whether it is <i>too</i> loose — if the engine wanted an exact
+    /// tag, this check would pass a machine the engine then refuses, and the fatal alert would
+    /// go silent on the machine that needs it most.</para>
+    ///
+    /// <para><b>It is not too loose: the engine does the same thing.</b> Measured directly
+    /// against WinRT on a machine whose <c>AvailableRecognizerLanguages</c> is exactly
+    /// <c>["en-US"]</c> (Windows 10.0.26200; the probe is re-runnable from Windows PowerShell
+    /// 5.1, which is the only host with a WinRT projection):</para>
+    ///
+    /// <code>
+    /// requested   IsLanguageSupported   TryCreateFromLanguage   RecognizerLanguage
+    /// en-US       True                  engine                  en-US
+    /// en-GB       True                  engine                  en-US
+    /// en-AU       True                  engine                  en-US
+    /// en-CA       True                  engine                  en-US
+    /// en-IN       True                  engine                  en-US
+    /// en          True                  engine                  en-US
+    /// en-ZZ       True                  engine                  en-US
+    /// th-TH       False                 null
+    /// fr-FR       False                 null
+    /// ja          False                 null
+    /// </code>
+    ///
+    /// <para>Three things follow. <c>AvailableRecognizerLanguages</c> reports a
+    /// <i>region-specific</i> tag rather than a neutral <c>en</c>, so string equality would
+    /// have been wrong on every non-US English machine — the loose direction is the safe one.
+    /// <c>en-ZZ</c>, a region that does not exist, also resolves, which rules out a curated
+    /// table of regional aliases and shows the resolution is generic within the primary
+    /// subtag. And <c>fr-FR</c> is refused despite being <c>Latn</c> like <c>en-US</c>, so the
+    /// engine matches on the language subtag rather than on script. On this data the engine's
+    /// behaviour <i>is</i> primary-subtag matching — precisely what this method does.</para>
+    ///
+    /// <para><b>What the measurement does not cover.</b> It is the mirror of #55's case: an
+    /// en-US machine asked for en-GB, not an en-GB machine asked for en-US. This machine has
+    /// en-US, so the failing configuration cannot be produced here at all — the same blind
+    /// spot as a 1.0 scale factor hiding a DPI bug. The <c>en-ZZ</c> row is what makes the
+    /// symmetric reading the reasonable one, but it stays an inference. Untested for the same
+    /// reason: whether <c>zh-Hans</c> satisfies <c>zh-Hant</c>, which shares a primary subtag
+    /// and would be the one place this really could over-match. Out of MVP scope (en→th), and
+    /// if a script-bearing language is ever added this is the paragraph to revisit.</para>
+    ///
+    /// <para>Deliberately <i>not</i> replaced by <c>OcrEngine.IsLanguageSupported</c>, which
+    /// would answer this authoritatively and remove the inference: it would move the WinRT
+    /// call into the decision, and keeping the decision a pure function over a list of tags is
+    /// what makes the interesting case — the machine this code is not running on — testable at
+    /// all. See the type-level comment.</para>
     /// </summary>
     private static bool IsSatisfied(IReadOnlyList<string> installedLanguages, string requiredLanguage)
     {

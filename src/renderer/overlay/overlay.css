@@ -117,17 +117,29 @@ body {
   line-height: 1.7;
 
   /*
-   * H3 — line breaking. `lang="th"` on the element (set in layout.ts) is what selects ICU's
-   * Thai dictionary breaker; these two properties are what stop CSS from overriding it.
+   * H3 — line breaking. **`word-break: normal` is the load-bearing declaration in this file.**
    *
-   * `word-break: break-all` would break at any character, which for a script with no
-   * inter-word spaces means breaking mid-word on essentially every line. `normal` keeps the
-   * breaker's own opportunities.
+   * Chromium selects ICU's Thai dictionary breaker on its own, from the script of the text. It
+   * does not need `lang="th"` to do it: measured on Electron 43 with
+   * `scripts/overlay-layout-check.mjs`, a 180-character Thai string breaks at identical offsets
+   * with `lang="th"`, with `lang="en"`, and with no `lang` attribute at all. layout.ts used to
+   * claim the attribute selected the breaker, and this comment used to repeat it; both were
+   * wrong. The attribute stays for font selection, shaping and accessibility, but removing it
+   * would not change a single break.
+   *
+   * What *would* change them is this property. `word-break: break-all` breaks at any character,
+   * and for a script with no inter-word spaces that means mid-word on essentially every line -
+   * measured, it moved all five breaks in that fixture off their word boundaries. `normal` keeps
+   * the breaker's own opportunities. Anyone tidying this rule set should treat this one line as
+   * the thing they may not touch.
    *
    * `overflow-wrap: break-word` only applies to a run that has no break opportunity at all and
    * still does not fit - a bare URL, not Thai text, which ICU has segmented by the time this
    * would matter. Without it such a run overflows the box and is clipped, which is a silent
    * loss of text.
+   *
+   * Measured on Electron 43 / Chromium 43. None of this is contractual engine behaviour; a
+   * future version could change it, and the check script is what would catch that.
    */
   word-break: normal;
   overflow-wrap: break-word;

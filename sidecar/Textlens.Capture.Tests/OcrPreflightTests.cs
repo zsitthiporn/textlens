@@ -57,6 +57,32 @@ public class OcrPreflightTests
     }
 
     [Fact]
+    public void AnUnknownRegionInAKnownLanguageIsSatisfied()
+    {
+        // #55, and the row that decided it. Asked for "en-ZZ" — a region code that does not
+        // exist — WinRT's own OcrEngine.TryCreateFromLanguage still hands back the installed
+        // en-US recognizer on this machine. So the engine is not consulting a table of real
+        // regional aliases; it resolves anything sharing the primary subtag. Matching that
+        // here is what keeps the preflight from rejecting a machine the engine would serve.
+        //
+        // Pinned as a test rather than only as a comment because it is the fact the whole
+        // prefix-match rests on: if someone later "tightens" this to a list of known regions,
+        // the preflight starts disagreeing with the engine and this fails.
+        Assert.Null(OcrPreflight.Check(["en-US"], "en-ZZ"));
+        Assert.Null(OcrPreflight.Check(["en-ZZ"], "en-US"));
+    }
+
+    [Fact]
+    public void ADifferentLanguageInTheSameScriptIsNotSatisfied()
+    {
+        // The other half of the same measurement: fr-FR is Latn exactly as en-US is, and WinRT
+        // refuses it. Matching on script rather than on language would be the over-loose
+        // version of this method, and it would report a French machine as ready to read English.
+        Assert.NotNull(OcrPreflight.Check(["en-US"], "fr-FR"));
+        Assert.NotNull(OcrPreflight.Check(["fr-FR"], "en-US"));
+    }
+
+    [Fact]
     public void BlankRequiredTag_ReportsMissing()
     {
         // A blank tag is a misconfiguration upstream. It must not silently match the

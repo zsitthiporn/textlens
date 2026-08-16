@@ -904,6 +904,101 @@ describe('AppOrchestrator: failure reporting', () => {
  * alive and looking, where a timer fires identically for a sidecar that has died - a different
  * problem, already reported on the `exit` arm.
  */
+/**
+ * #54: a setting that does nothing must not do nothing quietly (invariant 4).
+ *
+ * `effectiveDiffThreshold` takes the smaller of the configured fraction and the pixel ceiling, so
+ * on any region past ~800k px the fraction is discarded entirely. That is correct - #50 comes
+ * straight back without it - but it means `diffThreshold` is a knob a user can turn all day for no
+ * result. `configure` is the one moment where the region's size is known, so it is where this has
+ * to be said.
+ */
+describe('AppOrchestrator: reporting an inert diffThreshold (#54)', () => {
+  function harness(region: readonly [number, number, number, number]) {
+    const sidecar = fakeSidecar({});
+    const { logger, lines } = collectingLogger();
+    const config = fakeConfig({
+      ...DEFAULT_CONFIG,
+      capture: {
+        ...DEFAULT_CONFIG.capture,
+        region: { rect: [...region], monitorId: PRIMARY.id, monitorSize: [1920, 1080] },
+        regionPadding: 0,
+      },
+    });
+    const orchestrator = new AppOrchestrator({
+      sidecar,
+      config,
+      windows: fakeWindows(),
+      logger,
+      listMonitorsTimeoutMs: 20,
+    });
+    return { orchestrator, sidecar, lines };
+  }
+
+  const inertLine = (lines: Array<{ level: string; message: string; fields?: LogFields }>) =>
+    lines.find((line) => line.message.includes('has no effect on a region this large'));
+
+  it('says so when the region is large enough for the ceiling to take over', async () => {
+    // 1920x1080 = 2,073,600 px. 4000/area = 0.00193, below the configured 0.005.
+    const h = harness([0, 0, 1920, 1080]);
+    await h.orchestrator.initialize();
+
+    const line = inertLine(h.lines);
+    expect(line?.level).toBe('warn');
+    // Both numbers, in both units. A warning that says "your setting is being overridden" without
+    // saying by how much leaves the user with no way to choose a value that would work.
+    expect(line?.fields).toMatchObject({
+      configuredDiffThreshold: 0.005,
+      diffMaxRequiredPx: 4_000,
+      requiredPx: 4_000,
+      requiredPxIfFractionGoverned: 10_368,
+    });
+    h.orchestrator.dispose();
+  });
+
+  it('stays silent when the configured fraction is the one in force', async () => {
+    // 1200x220 = 264,000 px. 4000/area = 0.0152, above 0.005, so nothing is being overridden.
+    // This is the half that makes the test above discriminating rather than a message that is
+    // always emitted.
+    const h = harness([400, 800, 1200, 220]);
+    await h.orchestrator.initialize();
+
+    expect(inertLine(h.lines)).toBeUndefined();
+    h.orchestrator.dispose();
+  });
+
+  it('records which rule won on the configure line itself, either way', async () => {
+    const big = harness([0, 0, 1920, 1080]);
+    await big.orchestrator.initialize();
+    const small = harness([400, 800, 1200, 220]);
+    await small.orchestrator.initialize();
+
+    const governedBy = (lines: Array<{ message: string; fields?: LogFields }>) =>
+      lines.find((line) => line.message === 'capture configured')?.fields?.['diffGovernedBy'];
+
+    // The pair of numbers was already logged; #54 is that the pair alone does not say which one
+    // the sidecar is actually using, and working it out requires the reader to know the rule.
+    expect(governedBy(big.lines)).toBe('maxRequiredPx');
+    expect(governedBy(small.lines)).toBe('fraction');
+
+    big.orchestrator.dispose();
+    small.orchestrator.dispose();
+  });
+
+  it('puts the value it reported on the wire, so the log cannot describe a different run', async () => {
+    const h = harness([0, 0, 1920, 1080]);
+    await h.orchestrator.initialize();
+
+    const configure = h.sidecar.sent.find((command) => command.cmd === 'configure');
+    const line = h.lines.find((entry) => entry.message === 'capture configured');
+    expect(configure?.cmd === 'configure' ? configure.diffThreshold : null).toBeCloseTo(0.001_929, 6);
+    expect(line?.fields?.['effectiveDiffThreshold']).toBe(
+      configure?.cmd === 'configure' ? configure.diffThreshold : null,
+    );
+    h.orchestrator.dispose();
+  });
+});
+
 describe('AppOrchestrator: idle detection (#50)', () => {
   function idleHarness(nowRef: { value: number }) {
     const sidecar = fakeSidecar({});
@@ -965,6 +1060,70 @@ describe('AppOrchestrator: idle detection (#50)', () => {
     expect(warnings).toHaveLength(1);
     // And exactly one status notification, rather than one per tick.
     expect(statuses.filter((warning) => warning !== null)).toHaveLength(1);
+  });
+
+  /**
+   * #54: the idle warning used to recommend a knob that cannot move.
+   *
+   * The remedy said "lower diffThreshold" whatever the region was, and on a region large enough
+   * to produce this warning in the first place that fraction is inert - the pixel ceiling is the
+   * smaller rule and decides alone. A user following the advice turns the knob, sees nothing
+   * change, and has been sent down a dead end by the app's own error message.
+   *
+   * Both directions are asserted, because a message that named `diffMaxRequiredPx` unconditionally
+   * would pass a one-sided test while being just as wrong on a cropped region.
+   */
+  it('names the knob that is actually in force on a large region, not the inert one', async () => {
+    const now = { value: 0 };
+    // The shared 1920x1080 region: 2,073,600 px, so 4000/area = 0.00193 is below the configured
+    // 0.005 and the ceiling governs.
+    const h = idleHarness(now);
+    await h.orchestrator.initialize();
+    h.sidecar.emit('nochange', { ev: 'nochange', seq: 1 });
+    now.value = 25_000;
+    h.sidecar.emit('nochange', { ev: 'nochange', seq: 2 });
+
+    const warning = h.orchestrator.status.warning;
+    expect(warning).toContain('diffMaxRequiredPx');
+    // And it says why the other knob is not the answer, rather than silently omitting it.
+    expect(warning).toContain('diffThreshold has no effect');
+  });
+
+  it('still names diffThreshold on a region small enough for it to be live', async () => {
+    const now = { value: 0 };
+    const sidecar = fakeSidecar({});
+    const { logger, lines } = collectingLogger();
+    // 1200x220 = 264,000 px: 4000/area = 0.0152, comfortably above 0.005, so the user's fraction
+    // is the smaller rule and the one worth reaching for.
+    const config = fakeConfig({
+      ...DEFAULT_CONFIG,
+      capture: {
+        ...DEFAULT_CONFIG.capture,
+        region: { rect: [400, 800, 1200, 220], monitorId: PRIMARY.id, monitorSize: [1920, 1080] },
+        // Padding would grow the rect and is not what this test is about.
+        regionPadding: 0,
+      },
+    });
+    const orchestrator = new AppOrchestrator({
+      sidecar,
+      config,
+      windows: fakeWindows(),
+      logger,
+      listMonitorsTimeoutMs: 20,
+      idleWarningMs: 25_000,
+      now: () => now.value,
+    });
+    await orchestrator.initialize();
+
+    sidecar.emit('nochange', { ev: 'nochange', seq: 1 });
+    now.value = 25_000;
+    sidecar.emit('nochange', { ev: 'nochange', seq: 2 });
+
+    expect(orchestrator.status.warning).toContain('lower diffThreshold');
+    expect(orchestrator.status.warning).not.toContain('diffMaxRequiredPx');
+    // The configure path agrees with the message: nothing was overridden, so nothing was warned.
+    expect(lines.filter((line) => line.message.includes('has no effect on a region this large'))).toHaveLength(0);
+    orchestrator.dispose();
   });
 
   it('stays quiet during an ordinary gap between subtitles', async () => {
@@ -1379,7 +1538,7 @@ describe('AppOrchestrator: subscribers', () => {
  * The first run (issue #51).
  *
  * With no region chosen the region is the whole display, and `effectiveDiffThreshold` turns the
- * default 0.005 fraction into 0.0008 on a 3440x1440 screen because `diffMinChangedPx` is the
+ * default 0.005 fraction into 0.0008 on a 3440x1440 screen because `diffMaxRequiredPx` is the
  * smaller of the two there (#54). A live desktop is never still - measured at 3 frames in 8 seconds
  * even at the old 0.02 - so a fresh install pressing auto captures, OCRs and translates on nearly
  * every tick, on content nobody asked about.
@@ -1387,7 +1546,7 @@ describe('AppOrchestrator: subscribers', () => {
  * #51 is explicit that this is a **flow** problem: the numbers that make a subtitle detectable and
  * the numbers that make a desktop quiet are on opposite sides of each other, and three regression
  * tests in `region-guard.test.ts` hold the current ones shut so that #50 cannot come back. So
- * nothing below touches `diffThreshold` or `diffMinChangedPx`; what changes is where the app rests
+ * nothing below touches `diffThreshold` or `diffMaxRequiredPx`; what changes is where the app rests
  * and where it sends the user.
  */
 describe('AppOrchestrator: the first run has no region (#51)', () => {
