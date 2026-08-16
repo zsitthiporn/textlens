@@ -153,7 +153,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 > **🟢 U6 Block-level rendering สำคัญกับภาษาไทยเป็นพิเศษ**
 > Reference หั่นคำแปลกลับไปวางรายบรรทัดด้วยการนับสัดส่วน + ตัดที่ `。！？，`
 > ไทยไม่มีเครื่องหมายจบประโยคและไม่เว้นวรรคระหว่างคำ → จะตัดกลางคำแน่นอน
-> แก้โดยไม่หั่นเลย แล้วให้ Chromium ตัดบรรทัดไทยเอง (ICU Thai line breaking, แค่ใส่ `lang="th"`)
+> แก้โดยไม่หั่นเลย แล้วให้ Chromium ตัดบรรทัดไทยเอง (ICU Thai line breaking) — **วัดแล้วมันตัดตรงขอบคำจริง แต่ไม่ได้เกิดจาก `lang="th"`** Blink ตรวจ Thai script เอง ดูรายละเอียดที่ H3
 
 ### 1.9 Thai Language Support
 
@@ -161,7 +161,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 |----|---------|---|-----|-----------|
 | H1 | **Thai font stack** | P0 | 🟢 | bundle Noto Sans Thai / Sarabun ไม่พึ่ง font ระบบ |
 | H2 | **Thai line-height** | P0 | 🟢 | ≥1.6 เพราะสระบน + วรรณยุกต์ + สระล่าง ซ้อน 3 ชั้น |
-| H3 | **Thai line breaking** | P0 | 🟢 | `lang="th"` ให้ engine ตัดคำเอง |
+| H3 | **Thai line breaking** | P0 | 🟢 | Chromium ตัดคำไทยเอง — วัดบน Electron 43: จุดตัด 5 จุดตรงกับ `Intl.Segmenter('th')` ทั้งหมด · **`lang="th"` ไม่ใช่ตัวที่ทำให้เกิด** (จุดตัดเหมือนกันทั้งใส่ `th` / ใส่ `en` / ไม่ใส่เลย — Blink ตรวจ script เอง) ยังควรใส่เพื่อ font + shaping + a11y แต่ตัวที่**ห้ามถอด**คือ `word-break: normal` — `break-all` ทำให้จุดตัดหลุดขอบคำทั้ง 5 จุด |
 | H4 | Thai text normalization | P1 | 🟢 | ตัดช่องว่างซ้ำ, normalize สระ/วรรณยุกต์ซ้ำจากการแปล |
 | H5 | ไม่ทำ punctuation conversion | P0 | 🟢 | ไทยใช้ `,.?!` ปกติ — ตัด logic full-width ของจีนทิ้ง |
 | H6 | UI ภาษาไทย | P1 | 🔴 | |
