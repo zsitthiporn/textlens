@@ -86,6 +86,36 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 
 ---
 
+## Hotkeys
+
+hotkey เป็น **global** — ทำงานขณะโฟกัสอยู่ที่โปรแกรมอื่น ซึ่งเป็นเหตุผลที่ต้องมี:
+use case หลักคือเกม borderless fullscreen ที่สลับหน้าต่างไปกดปุ่มไม่ได้
+
+| ค่าเริ่มต้น | ทำอะไร |
+|---|---|
+| `Control+Alt+A` | เปิด/ปิด auto mode |
+| `Control+Alt+S` | snapshot — แปลครั้งเดียวแล้วค้างไว้ |
+| `Control+Alt+R` | เลือก region ใหม่ |
+| `Control+Alt+H` | ซ่อน/แสดง overlay (**ไม่ใช่** การหยุดจับภาพ) |
+
+เปลี่ยนได้ที่ `%APPDATA%\textlens\config.json` ใต้คีย์ `hotkeys` — ใส่ `null` เพื่อปิด hotkey นั้น
+เช่นเมื่อชนกับโปรแกรมอื่น:
+
+```json
+{ "hotkeys": { "snapshot": "Control+Shift+F9", "selectRegion": null } }
+```
+
+> **modifier ต้องสะกดให้ถูก** — `Command` `Cmd` `Control` `Ctrl` `CommandOrControl` `CmdOrCtrl`
+> `Alt` `Option` `AltGr` `Shift` `Super` `Meta` เท่านั้น
+> Electron **ไม่ฟ้อง** ถ้าสะกด modifier ผิด มันจะทิ้ง token นั้นแล้ว bind ปุ่มที่เหลือแทนเงียบๆ
+> (วัดจริงแล้ว: `Contrl+Alt+A` → ได้ `Alt+A` · `Foo+Bar+A` → ได้ปุ่ม `A` เปล่าๆ ทั้งเครื่อง)
+> Textlens จึงตรวจเองก่อนส่งให้ Electron และรายงานเป็น error แทนที่จะ bind ผิดตัว
+
+ลงทะเบียนไม่สำเร็จ (โปรแกรมอื่นจองไว้ / สะกดผิด / ผูกซ้ำสองปุ่ม) จะขึ้นใน log พร้อมบอกว่า
+**ตัวไหน**และ**เพราะอะไร** — hotkey ตัวที่เหลือยังทำงานปกติ
+
+---
+
 ## Development
 
 ```bash
