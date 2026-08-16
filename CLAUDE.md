@@ -61,41 +61,23 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 
 ---
 
-## สถานะปัจจุบัน
+## งานค้างอยู่ที่ไหน
 
-**Phase 0–4 เสร็จแล้ว (2026-08-16) — text pipeline ครบเส้นจนถึงคำแปล ยังไม่มีอะไรขึ้นจอ**
+> **ไฟล์นี้ไม่ใช่ที่เก็บสถานะงาน** — จำนวน issue ที่ปิดแล้ว จำนวน test อะไรกำลังทำอยู่ **ห้ามเขียนไว้ที่นี่**
+> มันเก่าทุกครั้งที่มีงานเสร็จ และไฟล์นี้ถูกโหลดเข้า context ทุก session จึงถูกอ่านแบบเชื่อโดยไม่ตรวจ **board ที่โกหกแย่กว่าไม่มี board**
 
-**26/47 issues ปิดแล้ว · 397 vitest + 210 xunit เขียว · ทุกอย่างอยู่บน main**
+| อยากรู้อะไร | ดูที่ไหน |
+|---|---|
+| เหลืออะไรบ้าง / อะไรปิดแล้ว | `gh issue list` — สดเสมอ ไม่มีวันเก่า |
+| ลำดับที่ควรทำ | หัวข้อ **Execution order** ใน [backlog](docs/backlog/mvp-issues.md) ไม่ใช่การไล่ตามกลุ่ม M1→M10 |
+| รายละเอียด/ผลของงานที่ปิดไปแล้ว | comment ในแต่ละ issue — มีหลักฐานการ verify แนบไว้ |
+| ทำไมถึงตัดสินใจแบบนั้น | commit message และหัวข้อด้านล่าง |
 
-ที่ทำงานได้จริงแล้ว:
-- sidecar รันเดี่ยวได้ — พิมพ์ `configure` แล้ว `start` ใส่ stdin ได้ `frame` ต่อเนื่อง (ดู [docs/sidecar-protocol.md](docs/sidecar-protocol.md))
-- ฝั่ง Node: `TextPipeline` ต่อครบ frame → พิกัด → จัดกลุ่ม → กรอง noise/ไทย/feedback → dedup → cache → แปล → payload
-- **ยังไม่มี renderer** — payload ถูกสร้างแล้วแต่ไม่มีอะไรวาดมันขึ้นจอ นั่นคือ Phase 5
+ที่นี่เก็บเฉพาะ **ความรู้ที่หาใหม่แล้วแพง** — กับดัก toolchain ข้อจำกัดภาษาไทย และการตัดสินใจที่เผลอย้อนได้ง่าย
 
-**ลำดับงานที่ใช้คือหัวข้อ Execution order ใน [backlog](docs/backlog/mvp-issues.md)** ไม่ใช่การไล่ตามกลุ่ม M1→M10
+---
 
-### เหลืออะไร (21 issues)
-
-| Phase | Issues | ได้อะไร |
-|---|---|---|
-| **5 · render** | #23 #24 #25 #26 | **เห็นคำแปลบนจอครั้งแรก** |
-| **6 · control** | #32 #33 #34 | hotkey · tray · auto/snapshot/pause |
-| **7 · region** | #38 #28 #29 #30 #31 | 🎯 **เลือกจอ+ลากกรอบเองได้ = ใช้งานจริงได้** |
-| **8 · anti-flicker** | #35 #36 #37 | 🎯 **subtitle ไม่กระพริบ = use case หลักใช้ได้** |
-| **9 · robustness** | #40 #41 | watchdog · error ถึงผู้ใช้ |
-| **10 · ที่เหลือ** | #27 #39 #45 | area budget · settings UI · installer |
-| **ค้าง** | #44 | spike S3 ยิงไม่ครบ (ดูด้านล่าง) |
-
-### [#44](https://github.com/zsitthiporn/textlens/issues/44) spike S3 — ยิงไป 1055 requests แล้วหยุดกลางคัน
-
-ข้อมูลอยู่ใน `spikes/s3-ratelimit/results/` แล้ว (commit `2604264`) **รันใหม่ไม่ต้องเริ่มจากศูนย์**
-
-**0 failures แต่ p50 596ms / p95 1108ms — เกิน budget 300-500ms** และช้ากว่าที่ [#19](https://github.com/zsitthiporn/textlens/issues/19) วัดตอนยิง 6 ครั้ง (139-176ms) ราว 3-4 เท่า
-รูปแบบนี้เหมือน **soft throttling** มากกว่าการตัดแบบแข็ง — "zero failures" กลบเรื่องนี้ไว้ **ยังไม่สรุปจนกว่าจะแยก cold-start และรู้ขนาด batch**
-
-ถ้าสรุปว่าไม่ผ่าน → ต้องเปิดงาน **T3 (Google Cloud API key) และดันเป็น P0**
-
-### สิ่งที่ตัดสินไปแล้วและห้ามย้อนโดยไม่คุย
+## สิ่งที่ตัดสินไปแล้วและห้ามย้อนโดยไม่คุย
 
 - **`conf` ไม่มีและจะไม่มี** — `Windows.Media.Ocr` ไม่ส่ง confidence เลย ([#47](https://github.com/zsitthiporn/textlens/issues/47) ปิดแล้ว) O4/U4 ตัดเกณฑ์นั้นออก **ห้ามประดิษฐ์ค่าขึ้นมาแทน**
 - **`monitor.bounds` บน wire เป็น physical px** — logical origin มาจาก Electron `Display` เท่านั้น (design doc §3)
