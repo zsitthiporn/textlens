@@ -202,11 +202,23 @@ describe('ConfigService.set', () => {
   it('round-trips through a second load', async () => {
     const filePath = tempConfigPath();
     const first = await ConfigService.load({ filePath });
-    await first.set({ capture: { region: [10, 20, 640, 480], monitorId: '\\\\.\\DISPLAY2' } });
+    await first.set({
+      capture: {
+        // Since #31 a region carries the monitor it was drawn on and that monitor's size, so
+        // that a region restored onto a different layout can be recognised as stale rather
+        // than applied to whatever is attached now.
+        region: { rect: [10, 20, 640, 480], monitorId: '\\\\.\\DISPLAY2', monitorSize: [1920, 1080] },
+        monitorId: '\\\\.\\DISPLAY2',
+      },
+    });
 
     const second = await ConfigService.load({ filePath });
 
-    expect(second.current.capture.region).toEqual([10, 20, 640, 480]);
+    expect(second.current.capture.region).toEqual({
+      rect: [10, 20, 640, 480],
+      monitorId: '\\\\.\\DISPLAY2',
+      monitorSize: [1920, 1080],
+    });
     expect(second.current.capture.monitorId).toBe('\\\\.\\DISPLAY2');
     expect(second.current.capture.intervalActive).toBe(DEFAULT_CONFIG.capture.intervalActive);
     expect(second.issues).toEqual([]);
@@ -228,14 +240,18 @@ describe('ConfigService.set', () => {
 
   it('replaces a region wholesale instead of merging it element by element', async () => {
     const service = await ConfigService.load({ filePath: tempConfigPath() });
-    await service.set({ capture: { region: [0, 0, 1920, 1080] } });
+    await service.set({
+      capture: { region: { rect: [0, 0, 1920, 1080], monitorId: '\\\\.\\DISPLAY1', monitorSize: [1920, 1080] } },
+    });
 
-    await service.set({ capture: { region: [100, 200, 640, 480] } });
+    await service.set({
+      capture: { region: { rect: [100, 200, 640, 480], monitorId: '\\\\.\\DISPLAY1', monitorSize: [1920, 1080] } },
+    });
 
     // A naive deep merge over arrays would leave [100, 200, 640, 480] here by luck, so the
     // shrinking case is the one that discriminates: a 4-element tuple must not inherit
     // trailing elements from the one it replaces.
-    expect(service.current.capture.region).toEqual([100, 200, 640, 480]);
+    expect(service.current.capture.region?.rect).toEqual([100, 200, 640, 480]);
   });
 
   it('changes nothing at all when one field of the change is invalid', async () => {

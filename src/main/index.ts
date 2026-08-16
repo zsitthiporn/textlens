@@ -27,6 +27,7 @@ import { ConfigService } from './services/config.js';
 import { HotkeyService } from './services/hotkey-service.js';
 import { createLogger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
+import { MonitorService } from './services/monitor-service.js';
 import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
 import {
@@ -61,8 +62,11 @@ let windows: WindowManager | null = null;
 let textPipeline: ComposedTextPipeline | null = null;
 let orchestrator: AppOrchestrator | null = null;
 let tray: TrayService | null = null;
+let monitors: MonitorService | null = null;
 let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
+/** Frames dropped because their monitor is unpaired. Counted so the log can be rate-limited. */
+let framesWithoutDisplay = 0;
 
 async function bootstrap(): Promise<void> {
   logger = await createLogger({
@@ -96,6 +100,30 @@ async function bootstrap(): Promise<void> {
   const metrics = new MetricsRecorder();
   stopMetricsSummary = startMetricsSummary(metrics, logger.child('metrics'), METRICS_SUMMARY_INTERVAL_MS);
 
+  // M6-01 (#28). Constructed before the sidecar client, because the frame handler asks it which
+  // display each frame belongs to. Electron's `Display` satisfies `PairableDisplay` structurally,
+  // which is what lets `monitor-service.ts` stay Electron-free and testable against mixed-DPI
+  // hardware that is not attached to this machine.
+  monitors = new MonitorService({
+    screen: { getAllDisplays: () => screen.getAllDisplays(), getPrimaryDisplay: () => screen.getPrimaryDisplay() },
+    logger,
+  });
+  // #28: "เสียบ/ถอดจอระหว่างใช้งาน → รายการอัปเดต ไม่ crash". Only the display half can be
+  // refreshed here - the monitor half needs a `listMonitors` round trip, and this process has
+  // exactly one caller of that for a reason (see `AppOrchestrator.#listMonitors`). A monitor
+  // whose display has gone simply comes back unpaired, which is reported rather than guessed at.
+  // Spelled out one by one rather than looped: Electron's overloads pair each event name with
+  // its own listener signature, so a loop over a union of names matches none of them.
+  screen.on('display-added', () => {
+    monitors?.refreshDisplays('display-added');
+  });
+  screen.on('display-removed', () => {
+    monitors?.refreshDisplays('display-removed');
+  });
+  screen.on('display-metrics-changed', () => {
+    monitors?.refreshDisplays('display-metrics-changed');
+  });
+
   windows = new WindowManager({ distDir, logger });
   windows.openSettings('settings');
   windows.openOverlay();
@@ -119,6 +147,8 @@ async function bootstrap(): Promise<void> {
     config,
     windows,
     logger,
+    monitors,
+    picker: windows,
   });
 
   startTray(orchestrator);
@@ -374,12 +404,28 @@ function createSidecarClient(metrics: MetricsRecorder): SidecarClient | null {
   client.on('frame', (frame) => {
     metrics.recordFrameTimings(frame.timings);
 
-    // Pairing `frame.monitor.id` to the right Electron `Display` is M6-01 (#28); until then the
-    // region is hardcoded to the primary display anyway. `coordinates.ts` explains at length why
-    // this cannot be derived from `frame.monitor.bounds` - it is physical px and Chromium lays
-    // displays out in DIP space, so the two disagree the moment two monitors differ in DPI.
+    // M6-01 (#28). This used to be `screen.getPrimaryDisplay()` regardless of which monitor the
+    // frame came from, which put every box on the wrong screen whenever a secondary display was
+    // captured. `coordinates.ts` explains why the display cannot be derived from
+    // `frame.monitor.bounds`: it is physical px and Chromium lays displays out in DIP space, so
+    // the two disagree the moment two monitors differ in DPI.
+    const display = monitors?.displayFor(frame.monitor.id);
+    if (display === undefined) {
+      // Deliberately no fallback to the primary display. Drawing this frame's boxes against
+      // some other display's origin is the bug #28 removed, and it fails the way invariant 4
+      // forbids - confidently, on the wrong screen, with nothing to see in the log.
+      framesWithoutDisplay += 1;
+      if (framesWithoutDisplay === 1 || framesWithoutDisplay % 100 === 0) {
+        log.warn('dropping a frame from a monitor that is not paired to any display', {
+          monitorId: frame.monitor.id,
+          dropped: framesWithoutDisplay,
+        });
+      }
+      return;
+    }
+
     // The pipeline never rejects, so this deliberately does not need a `.catch`.
-    void textPipeline?.pipeline.handleFrame(frame, screen.getPrimaryDisplay());
+    void textPipeline?.pipeline.handleFrame(frame, display);
   });
 
   return client;

@@ -17,7 +17,9 @@ import { describe, expect, it } from 'vitest';
 import type { Rect } from '../../src/shared/protocol.js';
 import {
   toLogicalRect,
+  toPhysicalRegion,
   unionRects,
+  type CssRect,
   type DisplayGeometry,
   type LogicalRect,
 } from '../../src/main/utils/coordinates.js';
@@ -267,5 +269,103 @@ describe('unionRects', () => {
 
   it('is undefined for an empty list rather than a zero rect at the origin', () => {
     expect(unionRects([])).toBeUndefined();
+  });
+});
+
+/**
+ * M6-02 (#29). Same blindness as the forward converter, same remedy: every meaningful case
+ * here is at a scale factor no display on this machine can produce.
+ *
+ * The extra thing this suite has to pin down is the **rounding direction**. Rounding to
+ * nearest passes any "is the region about right?" check a human could make, and loses up to
+ * half a physical pixel off an edge - which spike S1 measured as the difference between
+ * `Logician` and `ogician`.
+ */
+describe('toPhysicalRegion', () => {
+  const css = (x: number, y: number, width: number, height: number): CssRect => ({ x, y, width, height });
+
+  it('is the identity at scale 1.0 on the primary display, which proves nothing', () => {
+    // Included for completeness. This assertion also holds for an implementation that ignores
+    // the scale factor entirely, and every display on this machine is 1.0.
+    const result = toPhysicalRegion(css(400, 900, 1200, 150), { x: 0, y: 0 }, display(0, 0, 1.0));
+
+    expect(result).toEqual([400, 900, 1200, 150]);
+  });
+
+  it('scales a selection on a 150% display', () => {
+    const result = toPhysicalRegion(css(400, 900, 1200, 150), { x: 0, y: 0 }, display(0, 0, 1.5));
+
+    expect(result).toEqual([600, 1350, 1800, 225]);
+  });
+
+  it('subtracts the display origin before scaling, not after', () => {
+    // Display at DIP x=1920 running at 200%: a selection 100 DIP into it is 200 physical px
+    // into it, *not* (1920 + 100) * 2. Scaling before subtracting puts the region 3840px away
+    // - off the monitor entirely - and the sidecar would clamp or fail rather than show the
+    // user where the mistake was.
+    const result = toPhysicalRegion(css(100, 50, 300, 200), { x: 1920, y: 0 }, display(1920, 0, 2.0));
+
+    expect(result).toEqual([200, 100, 600, 400]);
+  });
+
+  it('handles a display to the left of primary, whose origin is negative', () => {
+    const result = toPhysicalRegion(css(40, 60, 200, 100), { x: -1080, y: 6 }, display(-1080, 6, 1.0));
+
+    expect(result).toEqual([40, 60, 200, 100]);
+  });
+
+  it('uses the window origin rather than assuming the picker covers the display', () => {
+    // The ground truth records a real case: a picker asked for the display's full bounds on a
+    // secondary monitor and got back a window 48px shorter, sitting at the work area's origin.
+    // If the conversion assumed the window started at the display origin, every region picked
+    // on that monitor would be offset by the difference.
+    const insetWindow = toPhysicalRegion(css(0, 0, 100, 100), { x: 1920, y: 48 }, display(1920, 0, 2.0));
+
+    expect(insetWindow).toEqual([0, 96, 200, 200]);
+  });
+
+  it('rounds outward so the region always contains what the user drew', () => {
+    // At 125% a selection on a half-pixel boundary lands between physical pixels. 10.5 -> 10
+    // (floor) and the far edge 110.5 -> 111 (ceil), so the region grows by a pixel rather than
+    // shaving one off a glyph the user deliberately included.
+    const result = toPhysicalRegion(css(8.4, 8.4, 80, 80), { x: 0, y: 0 }, display(0, 0, 1.25));
+
+    // Origin 10, far edge 111, so the *width* is 101 - one physical px wider than the 100 the
+    // selection covers exactly. Writing 111 here would be confusing a far edge with a size.
+    expect(result).toEqual([10, 10, 101, 101]);
+    // Contains the exact rectangle, in both directions.
+    expect(result[0]).toBeLessThanOrEqual(8.4 * 1.25);
+    expect(result[0] + result[2]).toBeGreaterThanOrEqual((8.4 + 80) * 1.25);
+  });
+
+  it('returns integers at every scale factor, because the schema and the sidecar demand them', () => {
+    for (const scaleFactor of [1.0, 1.25, 1.5, 1.75, 2.0]) {
+      const result = toPhysicalRegion(css(13.3, 7.7, 101.1, 49.9), { x: 0, y: 0 }, display(0, 0, scaleFactor));
+      for (const value of result) {
+        expect(Number.isInteger(value)).toBe(true);
+      }
+      expect(result[2]).toBeGreaterThan(0);
+      expect(result[3]).toBeGreaterThan(0);
+    }
+  });
+
+  it('round-trips a region back through toLogicalRect to within the outward rounding', () => {
+    // The two functions are inverses, and this is the assertion that keeps them so. A bbox at
+    // the region's own origin must come back at the selection's logical origin.
+    const target = display(1920, 0, 1.5);
+    const selection = css(200, 120, 640, 200);
+    const region = toPhysicalRegion(selection, { x: 1920, y: 0 }, target);
+
+    const back = toLogicalRect([0, 0, region[2], region[3]], region, target);
+
+    expect(back.x).toBeCloseTo(selection.x + 1920, 6);
+    expect(back.y).toBeCloseTo(selection.y, 6);
+    expect(back.width).toBeCloseTo(selection.width, 6);
+    expect(back.height).toBeCloseTo(selection.height, 6);
+  });
+
+  it('refuses a scale factor that would place every region nowhere', () => {
+    expect(() => toPhysicalRegion(css(0, 0, 10, 10), { x: 0, y: 0 }, display(0, 0, 0))).toThrow(RangeError);
+    expect(() => toPhysicalRegion(css(0, 0, 10, 10), { x: 0, y: 0 }, display(0, 0, NaN))).toThrow(RangeError);
   });
 });

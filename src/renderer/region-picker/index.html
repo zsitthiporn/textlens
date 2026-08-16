@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Same locked-down policy as the overlay. No font-src: this surface deliberately uses the
+      system UI face rather than the bundled Thai one - it shows numbers and English hints, and
+      loading a webfont here would delay the one window whose whole job is to appear instantly
+      when the user presses the hotkey.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'"
+    />
+    <title>Textlens region picker</title>
+    <link rel="stylesheet" href="./region-picker.css" />
+  </head>
+  <body>
+    <!--
+      Four dimmed panels around the selection rather than one dark sheet with a transparent
+      hole punched in it. A `clip-path` hole re-rasterises the whole screen-sized element on
+      every mousemove; four rectangles that only change their edges do not, and this window
+      covers up to 3440x1440 on this machine alone.
+    -->
+    <div class="shade" id="shade-top"></div>
+    <div class="shade" id="shade-bottom"></div>
+    <div class="shade" id="shade-left"></div>
+    <div class="shade" id="shade-right"></div>
+
+    <div id="selection" hidden></div>
+
+    <!-- Follows the cursor while dragging; shows the size in physical px. -->
+    <div id="readout" hidden></div>
+
+    <div id="hint">
+      <strong id="hint-monitor"></strong>
+      <span>Drag to select the area to translate &middot; <kbd>Esc</kbd> to cancel</span>
+    </div>
+
+    <script type="module" src="./region-picker.ts"></script>
+  </body>
+</html>

@@ -133,6 +133,16 @@ export interface TrayState {
   readonly overlayVisible: boolean;
   /** The last thing that went wrong, or `null`. Non-null takes over the icon. */
   readonly error: string | null;
+  /**
+   * Something the user should act on that is not a failure - currently only "text is touching
+   * the edge of your region" (#30).
+   *
+   * Optional so that a caller which has no warning to give need not say so, and separate from
+   * `error` because the two behave differently: an error takes over the icon and is cleared by
+   * the next successful frame, while this is a standing condition that persists precisely
+   * *because* frames keep arriving with clipped text in them.
+   */
+  readonly warning?: string | null;
 }
 
 /**
@@ -415,7 +425,11 @@ export class TrayService {
 export function describeState(state: TrayState): string {
   if (state.error !== null) return truncate(`Textlens — error: ${state.error}`, 127);
   const hidden = state.overlayVisible ? '' : ', overlay hidden';
-  return `Textlens — ${state.mode}${hidden}`;
+  // Ranked below `error` rather than merged with it: an error means nothing is working, a
+  // warning means everything is working and the result is probably wrong. Showing the second
+  // in place of the first would hide the more urgent of the two.
+  const warning = state.warning === null || state.warning === undefined ? '' : ` — ${state.warning}`;
+  return truncate(`Textlens — ${state.mode}${hidden}${warning}`, 127);
 }
 
 function truncate(text: string, max: number): string {

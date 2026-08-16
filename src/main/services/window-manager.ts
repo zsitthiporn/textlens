@@ -26,12 +26,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { BrowserWindow, screen, type Display, type Rectangle } from 'electron';
+import { BrowserWindow, ipcMain, screen, type Display, type Rectangle } from 'electron';
 
 import type {
   OverlayPayloadChannel,
   OverlayRenderPayload,
 } from '../../renderer/overlay/contract.js';
+import type {
+  PickerInit,
+  PickerInitChannel,
+  PickerRect,
+  PickerResult,
+  PickerResultChannel,
+} from '../../renderer/region-picker/contract.js';
 import { windowKindQuery, type WindowKind } from '../../shared/types.js';
 import { nullLogger, type Logger } from './logger.js';
 
@@ -41,6 +48,38 @@ import { nullLogger, type Logger } from './logger.js';
  * fails this line at compile time. See the same constant in `src/preload/index.cts`.
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
+
+/** Same arrangement as the overlay channel above, and the same compile-time drift guard. */
+const PICKER_INIT_CHANNEL: PickerInitChannel = 'textlens:region-picker-init';
+const PICKER_RESULT_CHANNEL: PickerResultChannel = 'textlens:region-picker-result';
+
+/** What {@link WindowManager.pickRegion} needs in order to open a picker. */
+export interface RegionPickRequest {
+  /** The Electron display to cover. */
+  readonly displayId: number;
+  readonly monitorId: string;
+  readonly monitorLabel: string;
+  /** Physical px `[width, height]`, shown to the user so they know which screen this is. */
+  readonly monitorSize: readonly [number, number];
+  readonly minimumPx: number;
+  /** The existing selection in CSS px, so re-picking starts from where the last one was. */
+  readonly current: PickerRect | null;
+}
+
+/**
+ * A completed pick.
+ *
+ * `origin` is the picker window's actual top-left in logical px, and it is returned rather than
+ * assumed because it is an input to the coordinate conversion - see {@link WindowManager.pickRegion}.
+ */
+export interface RegionPickSelection {
+  readonly rect: PickerRect;
+  readonly origin: { readonly x: number; readonly y: number };
+  readonly displayId: number;
+}
+
+/** `null` means the user cancelled, or the picker went away without answering. */
+export type RegionPickOutcome = RegionPickSelection | null;
 
 /**
  * `WDA_EXCLUDEFROMCAPTURE` - the only `GetWindowDisplayAffinity` value that means "this
@@ -119,6 +158,7 @@ export class WindowManager {
   /** Set once the overlay document has run; before that an IPC send has no listener. */
   #overlayReady = false;
   #settings: BrowserWindow | null = null;
+  #picker: BrowserWindow | null = null;
   #metricsListener: ((event: Electron.Event, display: Display) => void) | null = null;
 
   constructor(options: WindowManagerOptions) {
@@ -238,6 +278,122 @@ export class WindowManager {
     return overlay;
   }
 
+  /**
+   * Open the crosshair picker on one display and resolve with what the user drew (M6-02 / #29).
+   *
+   * Resolves with `null` for a cancel, and **also** for a picker that was closed by any other
+   * route - the window being destroyed, a second call superseding it, the app quitting. There
+   * is exactly one `settle` and it is idempotent, because the alternative is a promise that
+   * never resolves and an orchestrator method that never returns.
+   *
+   * The returned `origin` is the window's **actual** top-left in logical px, read back off the
+   * window rather than taken from the display. That is not defensive programming, it is this
+   * project's measured behaviour: a window asking for a secondary display's full bounds came
+   * back 48px short, sitting inside the work area. A picker that reports its selection against
+   * the origin it *asked* for would offset every region picked on such a display, silently.
+   */
+  async pickRegion(request: RegionPickRequest): Promise<RegionPickOutcome> {
+    // One picker at a time. A second hotkey press while the first is open must not leave two
+    // fullscreen windows fighting over the mouse.
+    this.#closeRegionPicker();
+
+    const display = this.#resolveDisplay(request.displayId);
+    const bounds = display.bounds;
+
+    const picker = new BrowserWindow({
+      ...bounds,
+      transparent: true,
+      frame: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      hasShadow: false,
+      // Everything the overlay refuses. This window exists to take the mouse and the keyboard.
+      focusable: true,
+      show: false,
+      title: 'Textlens region picker',
+      webPreferences: {
+        ...BASE_WEB_PREFERENCES,
+        preload: path.join(this.#distDir, 'preload', 'index.cjs'),
+      },
+    });
+
+    this.#picker = picker;
+
+    return await new Promise<RegionPickOutcome>((resolve) => {
+      let settled = false;
+      const settle = (result: PickerResult, origin: { x: number; y: number }): void => {
+        if (settled) return;
+        settled = true;
+        ipcMain.removeListener(PICKER_RESULT_CHANNEL, onResult);
+        if (this.#picker === picker) this.#picker = null;
+        if (!picker.isDestroyed()) picker.destroy();
+        resolve(result === null ? null : { rect: result.rect, origin, displayId: display.id });
+      };
+
+      const onResult = (event: Electron.IpcMainEvent, result: PickerResult): void => {
+        // Only this window's answer. Another renderer holding the same preload could otherwise
+        // resolve a picker it has nothing to do with.
+        if (event.sender !== picker.webContents) return;
+        settle(result, this.#pickerOrigin(picker, bounds));
+      };
+
+      ipcMain.on(PICKER_RESULT_CHANNEL, onResult);
+
+      // A destroyed window can never answer, so this is the arm that stops `selectRegion` from
+      // hanging forever when the picker is closed from outside.
+      picker.on('closed', () => {
+        settle(null, { x: bounds.x, y: bounds.y });
+      });
+
+      picker.webContents.setWindowOpenHandler(({ url }) => {
+        this.#log.warn('blocked window.open from the region picker', { url });
+        return { action: 'deny' };
+      });
+
+      picker.webContents.on('render-process-gone', (_event, details) => {
+        this.#log.error('region picker renderer gone', { reason: details.reason });
+        settle(null, { x: bounds.x, y: bounds.y });
+      });
+
+      picker.once('ready-to-show', () => {
+        // Same read-back-and-check as the overlay, and it matters more here: the overlay being
+        // short clips a subtitle, while a picker being short offsets every coordinate it
+        // reports. Applied twice for the same reason `openOverlay` does it twice.
+        this.#applyPickerBounds(picker, bounds);
+        // `show`, not `showInactive`: this window needs the keyboard for Esc and Enter, and it
+        // is the one surface in this app that is allowed to take focus.
+        picker.show();
+        picker.focus();
+
+        const actual = picker.getBounds();
+        this.#log.info('region picker shown', {
+          displayId: display.id,
+          wanted: bounds,
+          actual,
+          // The number the selection will be measured against. Logged because a mismatch here
+          // is the difference between a correct region and a plausible one.
+          origin: this.#pickerOrigin(picker, bounds),
+        });
+
+        picker.webContents.send(PICKER_INIT_CHANNEL, {
+          monitorId: request.monitorId,
+          monitorLabel: request.monitorLabel,
+          monitorSize: request.monitorSize,
+          scaleFactor: display.scaleFactor,
+          minimumPx: request.minimumPx,
+          current: request.current,
+        } satisfies PickerInit);
+      });
+
+      void picker.loadFile(path.join(this.#distDir, 'renderer', 'region-picker', 'index.html'));
+    });
+  }
+
   /** The ordinary, framed window. Nothing exotic - it is here so one class owns them all. */
   openSettings(kind: WindowKind = 'settings'): BrowserWindow {
     if (this.#settings !== null && !this.#settings.isDestroyed()) {
@@ -355,6 +511,9 @@ export class WindowManager {
       screen.removeListener('display-metrics-changed', this.#metricsListener);
       this.#metricsListener = null;
     }
+    // The picker first: destroying it settles any in-flight `pickRegion` with `null` through
+    // its `closed` handler, so a shutdown during a pick cannot leave that promise pending.
+    this.#closeRegionPicker();
     for (const window of [this.#overlay, this.#settings]) {
       if (window !== null && !window.isDestroyed()) window.destroy();
     }
@@ -366,6 +525,45 @@ export class WindowManager {
   }
 
   // -------------------------------------------------------------------------
+
+  #closeRegionPicker(): void {
+    const picker = this.#picker;
+    this.#picker = null;
+    if (picker !== null && !picker.isDestroyed()) picker.destroy();
+  }
+
+  /**
+   * The picker window's real top-left in logical px.
+   *
+   * Read off the window, falling back to the requested bounds only if the window has already
+   * gone. This is the value `toPhysicalRegion` offsets by, so taking it from `display.bounds`
+   * instead would bake the very discrepancy this reads back into every region.
+   */
+  #pickerOrigin(picker: BrowserWindow, requested: Rectangle): { x: number; y: number } {
+    if (picker.isDestroyed()) return { x: requested.x, y: requested.y };
+    const actual = picker.getBounds();
+    return { x: actual.x, y: actual.y };
+  }
+
+  /** {@link #applyBounds} for the picker: same read-back, different window and log line. */
+  #applyPickerBounds(picker: BrowserWindow, bounds: Rectangle): void {
+    picker.setBounds(bounds);
+    picker.setAlwaysOnTop(true, 'screen-saver');
+
+    const actual = picker.getBounds();
+    if (
+      actual.x !== bounds.x
+      || actual.y !== bounds.y
+      || actual.width !== bounds.width
+      || actual.height !== bounds.height
+    ) {
+      this.#log.warn(
+        'the window manager did not accept the region picker bounds; the selection is measured '
+          + 'against the window it actually got, not the one it asked for',
+        { wanted: bounds, actual },
+      );
+    }
+  }
 
   #resolveDisplay(displayId: number | undefined): Display {
     if (displayId === undefined) return screen.getPrimaryDisplay();

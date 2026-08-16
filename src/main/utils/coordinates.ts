@@ -111,6 +111,69 @@ export function toLogicalRect(bbox: Rect, region: Rect, display: DisplayGeometry
   };
 }
 
+/**
+ * A rectangle in CSS px, relative to the top-left of the window that reported it.
+ *
+ * Distinct from {@link LogicalRect} on purpose, even though a CSS px and a logical px are the
+ * same size: they are measured from different origins. Conflating them is how a region picked
+ * on the left-hand monitor ends up applied to the primary one, and on a single-display machine
+ * that mistake is invisible because the origin it forgets to add is `(0, 0)`.
+ */
+export interface CssRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The inverse of {@link toLogicalRect}: a rectangle the user dragged in a window, expressed as
+ * the physical-px region the sidecar will crop with (issue M6-02 / #29).
+ *
+ *     physicalX = (cssX + windowOrigin.x - display.bounds.x) * scaleFactor
+ *
+ * It lives here for the same reason the forward conversion does - invariant 3 says scale
+ * arithmetic has exactly one owner - and it takes `windowOrigin` rather than assuming the
+ * picker covers the display, so a picker that is inset, or one that failed to get the bounds it
+ * asked for, produces a correct region instead of a plausible one. On this project's hardware
+ * that parameter is always the display origin and always cancels out; on a machine where the
+ * window manager shaved 48px off the window it does not, and that is a case the ground truth
+ * says actually happens on secondary displays.
+ *
+ * ## Rounding outward, not to nearest
+ *
+ * The result is integers, because {@link import('../../shared/config-schema.js').regionSchema}
+ * requires them and the sidecar crops with them. The origin is floored and the far edge ceiled,
+ * so the returned rect always **contains** the rectangle the user drew rather than
+ * approximating it. That asymmetry is deliberate: spike S1 measured that a crop whose edge
+ * cuts through a letter does not degrade OCR, it breaks it - `Logician` came back as
+ * `ogician`. Rounding to nearest would shave up to half a physical pixel off an edge the user
+ * placed deliberately, and at scale 2.0 that is a whole pixel of glyph. Growing by at most one
+ * pixel per edge costs nothing; shrinking by one can cost a word.
+ *
+ * This deliberately does **not** clamp to the monitor. Clamping needs the monitor's size, which
+ * is `region-guard.ts`'s input, not this module's - and this module converts rectangles.
+ */
+export function toPhysicalRegion(
+  selection: CssRect,
+  windowOrigin: { readonly x: number; readonly y: number },
+  display: DisplayGeometry,
+): Rect {
+  const { scaleFactor } = display;
+  if (!Number.isFinite(scaleFactor) || scaleFactor <= 0) {
+    throw new RangeError(`display.scaleFactor must be a positive finite number, got ${String(scaleFactor)}`);
+  }
+
+  // Offsets are applied in logical px - all three are logical - and only the total is scaled,
+  // matching `toLogicalRect` so the two are exact inverses up to the outward rounding.
+  const left = Math.floor((selection.x + windowOrigin.x - display.bounds.x) * scaleFactor);
+  const top = Math.floor((selection.y + windowOrigin.y - display.bounds.y) * scaleFactor);
+  const right = Math.ceil((selection.x + selection.width + windowOrigin.x - display.bounds.x) * scaleFactor);
+  const bottom = Math.ceil((selection.y + selection.height + windowOrigin.y - display.bounds.y) * scaleFactor);
+
+  return [left, top, right - left, bottom - top];
+}
+
 /** The smallest logical rect containing all of `rects`. Returns `undefined` for an empty list. */
 export function unionRects(rects: readonly LogicalRect[]): LogicalRect | undefined {
   const first = rects[0];

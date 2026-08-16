@@ -23,6 +23,11 @@ export default defineConfig({
       input: {
         main: path.join(renderer, 'index.html'),
         overlay: path.join(renderer, 'overlay/index.html'),
+        // The region picker is a third document for the same reason the overlay is a second
+        // one (M6-02): it is the overlay's opposite - opaque, focusable, and it wants every
+        // mouse and key event - so sharing an entry point or a stylesheet with either of the
+        // others is how one of them ends up with the wrong pointer-events policy.
+        'region-picker': path.join(renderer, 'region-picker/index.html'),
       },
     },
   },
