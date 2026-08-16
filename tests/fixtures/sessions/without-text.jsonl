@@ -1,0 +1,9 @@
+{"atMs":0,"line":"{\"ev\":\"ready\",\"version\":\"0.1.0\",\"ocrLanguages\":[\"en-US\"]}"}
+{"atMs":359,"line":"{\"ev\":\"ack\",\"cmd\":\"configure\",\"state\":\"configured\"}"}
+{"atMs":362,"line":"{\"ev\":\"ack\",\"cmd\":\"start\",\"state\":\"running\"}"}
+{"atMs":705,"line":"{\"ev\":\"frame\",\"seq\":1,\"timings\":{\"captureUs\":4172,\"diffUs\":755,\"ocrUs\":15212},\"monitor\":{\"id\":\"\\\\\\\\.\\\\DISPLAY1\",\"scale\":1,\"bounds\":[0,0,3440,1440]},\"region\":[1500,600,400,300],\"lines\":[]}"}
+{"atMs":964,"line":"{\"ev\":\"nochange\",\"seq\":2}"}
+{"atMs":1274,"line":"{\"ev\":\"nochange\",\"seq\":3}"}
+{"atMs":1574,"line":"{\"ev\":\"nochange\",\"seq\":4}"}
+{"atMs":2382,"line":"{\"ev\":\"nochange\",\"seq\":5}"}
+{"atMs":3008,"line":"{\"ev\":\"ack\",\"cmd\":\"stop\",\"state\":\"stopped\"}"}

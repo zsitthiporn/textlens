@@ -1,0 +1,2 @@
+{"atMs":0,"line":"{\"ev\":\"ready\",\"version\":\"0.1.0\",\"ocrLanguages\":[\"en-US\"]}"}
+{"atMs":21,"line":"{\"ev\":\"error\",\"code\":\"NOT_CONFIGURED\",\"message\":\"\\u0022start\\u0022 needs a region: send \\u0022configure\\u0022 first\"}"}

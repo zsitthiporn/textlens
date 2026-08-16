@@ -1,0 +1,7 @@
+{"atMs":0,"line":"{\"ev\":\"ready\",\"version\":\"0.1.0\",\"ocrLanguages\":[\"en-US\"]}"}
+{"atMs":343,"line":"{\"ev\":\"ack\",\"cmd\":\"configure\",\"state\":\"configured\"}"}
+{"atMs":345,"line":"{\"ev\":\"ack\",\"cmd\":\"start\",\"state\":\"running\"}"}
+{"atMs":688,"line":"{\"ev\":\"frame\",\"seq\":1,\"timings\":{\"captureUs\":4052,\"diffUs\":933,\"ocrUs\":21022},\"monitor\":{\"id\":\"\\\\\\\\.\\\\DISPLAY1\",\"scale\":1,\"bounds\":[0,0,3440,1440]},\"region\":[50,60,900,350],\"lines\":[{\"text\":\"quick brown fox jumps over the lazy dog.\",\"bbox\":[4,35,317,13]},{\"text\":\"ipsum dolor sit amet, consectetur adipiscing elit.\",\"bbox\":[21,53,396,13]}]}"}
+{"atMs":959,"line":"{\"ev\":\"nochange\",\"seq\":2}"}
+{"atMs":1255,"line":"{\"ev\":\"nochange\",\"seq\":3}"}
+{"atMs":1505,"line":"{\"ev\":\"ack\",\"cmd\":\"stop\",\"state\":\"stopped\"}"}

@@ -30,6 +30,7 @@ import path from 'node:path';
 import {
   decodeEvent,
   encodeCommand,
+  type AckEvent,
   type ErrorEvent,
   type FrameEvent,
   type NochangeEvent,
@@ -223,6 +224,7 @@ export interface SidecarClientEvents {
   ready: ReadyEvent;
   frame: FrameEvent;
   nochange: NochangeEvent;
+  ack: AckEvent;
   error: ErrorEvent;
   exit: SidecarExit;
   spawnError: Error;
@@ -246,6 +248,21 @@ export interface SidecarClientOptions {
   readonly maxLineBytes?: number;
   /** Injection seam for tests. Defaults to `child_process.spawn`. */
   readonly spawn?: SpawnFn;
+  /**
+   * Absolute path to a JSON-lines file. When set, every raw line read from the
+   * sidecar's stdout is appended verbatim - `{"atMs": <int>, "line": "<raw wire line>"}`,
+   * one per line, `atMs` relative to the first recorded line - before that line is
+   * decoded. Undecodable lines are recorded too, so a session that reproduces a real
+   * bug is captured exactly as the sidecar sent it, not as this build understood it.
+   *
+   * Off unless a caller sets it (issue M3-06, design doc section 8). This is the record
+   * half of record/replay: it exists to build fixtures for the fake sidecar, not
+   * something the shipped app turns on for itself. `atMs` is an integer for the same
+   * reason the protocol's `timings` are integer microseconds - two languages format
+   * decimals differently, and a fixture that has to survive a byte-for-byte replay
+   * cannot depend on that.
+   */
+  readonly recordTo?: string;
 }
 
 const DEFAULT_READY_TIMEOUT_MS = 5_000;
@@ -260,6 +277,9 @@ export class SidecarClient {
   #ready: ReadyEvent | null = null;
   #stopping = false;
   #listeners = new Map<SidecarClientEventName, Set<(payload: never) => void>>();
+
+  #recordStream: fs.WriteStream | null = null;
+  #recordStartMs: number | null = null;
 
   constructor(options: SidecarClientOptions) {
     this.#options = options;
@@ -326,6 +346,7 @@ export class SidecarClient {
 
     this.#stopping = false;
     this.#ready = null;
+    this.#openRecording();
 
     const child = this.#spawn(exePath, [...(this.#options.args ?? [])], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -378,6 +399,7 @@ export class SidecarClient {
 
     if (child.exitCode !== null || child.signalCode !== null) {
       this.#child = null;
+      await this.#closeRecording();
       return;
     }
 
@@ -405,9 +427,52 @@ export class SidecarClient {
 
     this.#child = null;
     this.#ready = null;
+    await this.#closeRecording();
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Open the record-hook file, if one was configured. Errors surface through the
+   * stream's own `error` event rather than throwing here - a bad `recordTo` path must
+   * not stop the sidecar from starting (invariant 4: reported, never silently fatal,
+   * but also never a reason to refuse the thing the caller actually asked for).
+   */
+  #openRecording(): void {
+    const target = this.#options.recordTo;
+    if (target === undefined) return;
+
+    this.#recordStartMs = null;
+    const stream = fs.createWriteStream(target, { flags: 'a' });
+    stream.on('error', (error) => {
+      this.#log.error('sidecar session recording failed', { recordTo: target, message: error.message });
+    });
+    this.#recordStream = stream;
+  }
+
+  /** Append one raw wire line, verbatim, with its ms offset from the first recorded line. */
+  #record(line: string): void {
+    const stream = this.#recordStream;
+    if (stream === null) return;
+
+    const now = performance.now();
+    if (this.#recordStartMs === null) this.#recordStartMs = now;
+    const atMs = Math.round(now - this.#recordStartMs);
+
+    stream.write(`${JSON.stringify({ atMs, line })}\n`);
+  }
+
+  /** Flush and close the record-hook file, if one is open. Safe to call more than once. */
+  async #closeRecording(): Promise<void> {
+    const stream = this.#recordStream;
+    this.#recordStream = null;
+    this.#recordStartMs = null;
+    if (stream === null) return;
+
+    await new Promise<void>((resolve) => {
+      stream.end(() => resolve());
+    });
+  }
 
   #attachStdout(child: ChildProcess): void {
     const decoder = new LineDecoder({
@@ -418,11 +483,17 @@ export class SidecarClient {
     });
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      for (const line of decoder.push(chunk)) this.#handleLine(line);
+      for (const line of decoder.push(chunk)) {
+        this.#record(line);
+        this.#handleLine(line);
+      }
     });
 
     child.stdout?.on('end', () => {
-      for (const line of decoder.flush()) this.#handleLine(line);
+      for (const line of decoder.flush()) {
+        this.#record(line);
+        this.#handleLine(line);
+      }
     });
 
     child.stdout?.on('error', (error: Error) => {
@@ -466,6 +537,12 @@ export class SidecarClient {
       const fields = { code, signal, expected, pid: child.pid };
       if (expected) this.#log.info('sidecar exited', fields);
       else this.#log.error('sidecar exited unexpectedly', fields);
+
+      // Safety net for the crash path: `stop()` also closes the recording, but a
+      // sidecar that dies on its own never goes through `stop()` at all, and an open
+      // recording stream on a process nobody is watching is exactly the kind of thing
+      // that goes unnoticed until the fixture it should have produced is missing.
+      void this.#closeRecording();
 
       this.#emit('exit', { code, signal, expected });
     });
@@ -537,10 +614,26 @@ export class SidecarClient {
       case 'nochange':
         this.#emit('nochange', event);
         return;
+      case 'ack':
+        this.#log.debug('sidecar ack', { cmd: event.cmd, state: event.state });
+        this.#emit('ack', event);
+        return;
       case 'error':
         this.#log.error('sidecar reported an error', { code: event.code, message: event.message });
         this.#emit('error', event);
         return;
+      default: {
+        // Exhaustiveness guard. `ack` was added to the protocol by M2-06 long after this
+        // switch was written, and until this guard existed it decoded fine and then fell
+        // straight through - no emit, no log, `listMonitors` replies unreachable. A silent
+        // drop is exactly what invariant 4 forbids, so the next event kind added to the
+        // contract must fail the typecheck here rather than disappear at runtime.
+        const unhandled: never = event;
+        this.#log.warn('decoded an event kind this client does not handle', {
+          ev: (unhandled as { ev?: unknown }).ev,
+        });
+        return;
+      }
     }
   }
 
