@@ -28,8 +28,19 @@ import path from 'node:path';
 
 import { BrowserWindow, screen, type Display, type Rectangle } from 'electron';
 
+import type {
+  OverlayPayloadChannel,
+  OverlayRenderPayload,
+} from '../../renderer/overlay/contract.js';
 import { windowKindQuery, type WindowKind } from '../../shared/types.js';
 import { nullLogger, type Logger } from './logger.js';
+
+/**
+ * Written out rather than imported: `contract.ts` is bundled by Vite into the renderer and has
+ * no module to `import` from `dist/main/`. The **type** crosses, so a rename in `contract.ts`
+ * fails this line at compile time. See the same constant in `src/preload/index.cts`.
+ */
+const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
 
 /**
  * `WDA_EXCLUDEFROMCAPTURE` - the only `GetWindowDisplayAffinity` value that means "this
@@ -96,6 +107,17 @@ export class WindowManager {
   #overlay: BrowserWindow | null = null;
   /** Which display the overlay is pinned to, so metric changes for others are ignored. */
   #overlayDisplayId: number | null = null;
+  /**
+   * Top-left of the display the overlay currently covers, in logical px.
+   *
+   * The renderer needs it to turn virtual-desktop coordinates into window-relative CSS px
+   * (M5-01), and it is tracked here rather than derived in the renderer from `window.screenX`
+   * because it changes under the window - `moveOverlayTo`, and `display-metrics-changed` - and
+   * two sources of truth for it would disagree exactly when a display is reconfigured.
+   */
+  #overlayOrigin: { x: number; y: number } | null = null;
+  /** Set once the overlay document has run; before that an IPC send has no listener. */
+  #overlayReady = false;
   #settings: BrowserWindow | null = null;
   #metricsListener: ((event: Electron.Event, display: Display) => void) | null = null;
 
@@ -196,9 +218,15 @@ export class WindowManager {
       this.#log.error('overlay renderer gone', { reason: details.reason });
     });
 
+    overlay.webContents.on('did-finish-load', () => {
+      this.#overlayReady = true;
+    });
+
     overlay.on('closed', () => {
       this.#overlay = null;
       this.#overlayDisplayId = null;
+      this.#overlayOrigin = null;
+      this.#overlayReady = false;
     });
 
     void overlay.loadFile(path.join(this.#distDir, 'renderer', 'overlay', 'index.html'));
@@ -255,6 +283,33 @@ export class WindowManager {
     return window;
   }
 
+  /**
+   * Hand one payload to the overlay renderer (issue M5-01).
+   *
+   * The parameter is {@link OverlayRenderPayload} - the renderer's own contract type - and
+   * `src/main/index.ts` passes the pipeline's `OverlayPayload` straight into it. That call is
+   * the drift guard: if the pipeline renames a field the renderer reads, this stops compiling.
+   *
+   * @returns whether the message was actually sent. `false` means nothing was drawn, which is
+   *          what the caller needs to know before recording anything as "displayed" (F2).
+   */
+  sendOverlayPayload(payload: OverlayRenderPayload): boolean {
+    const overlay = this.#overlay;
+    const origin = this.#overlayOrigin;
+    if (overlay === null || overlay.isDestroyed() || origin === null) return false;
+    if (!this.#overlayReady) {
+      // Frames can arrive before the overlay document has run its script, and `webContents.send`
+      // to a window with no listener is a silent no-op. Reported rather than assumed, because
+      // "the first few translations never appeared" is otherwise indistinguishable from a
+      // translation engine that was slow to warm up.
+      this.#log.debug('overlay is not ready yet; dropping a payload', { seq: payload.seq });
+      return false;
+    }
+
+    overlay.webContents.send(OVERLAY_PAYLOAD_CHANNEL, { payload, origin });
+    return true;
+  }
+
   /** Move the overlay to a different display, keeping it full-bleed on the new one. */
   moveOverlayTo(displayId: number): void {
     const overlay = this.#overlay;
@@ -276,6 +331,8 @@ export class WindowManager {
     this.#overlay = null;
     this.#settings = null;
     this.#overlayDisplayId = null;
+    this.#overlayOrigin = null;
+    this.#overlayReady = false;
   }
 
   // -------------------------------------------------------------------------
@@ -384,6 +441,9 @@ export class WindowManager {
    * translating the bottom line of subtitles (invariant 4 - no silent failures).
    */
   #applyBounds(overlay: BrowserWindow, bounds: Rectangle): void {
+    // The renderer converts logical px to CSS px by subtracting this; it has to follow the
+    // window, not the display the overlay happened to open on.
+    this.#overlayOrigin = { x: bounds.x, y: bounds.y };
     overlay.setBounds(bounds);
     // Resizing can drop a window out of the topmost band on Windows; reassert it.
     overlay.setAlwaysOnTop(true, 'screen-saver');

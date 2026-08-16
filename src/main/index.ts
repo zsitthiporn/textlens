@@ -13,8 +13,13 @@ import { app, net, screen } from 'electron';
 
 import { createLogger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
+import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
-import { createTextPipeline, type ComposedTextPipeline } from './services/text-pipeline.js';
+import {
+  createTextPipeline,
+  type ComposedTextPipeline,
+  type OverlayPayload,
+} from './services/text-pipeline.js';
 import { WindowManager } from './services/window-manager.js';
 
 /** dist/ - this file lives at dist/main/index.js once compiled. */
@@ -78,18 +83,28 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
   if (logger === null) return null;
   const log = logger.child('app');
 
+  // Layer 2 of the feedback-loop defence (F2). Created here, not inside the pipeline, because
+  // two stages share it: the pipeline reads it to drop text it recognises as our own output, and
+  // the render path below writes it - `recent-outputs.ts` is explicit that only the stage which
+  // actually puts something on screen may record it.
+  const recentOutputs = new RecentOutputs();
+
   const composed = createTextPipeline({
     fetch: net.fetch,
     cachePath: path.join(app.getPath('userData'), 'translation-cache.db'),
     logger,
     metrics,
+    recentOutputs,
     onPayload: (payload) => {
-      // M5-01 (#23) sends this to the overlay renderer and M10-02 (#41) renders the degraded
-      // warning. Until they land, the payload's counts are the record that it existed - and
-      // they contain no screen text, so they are safe at this level (PR3).
+      // M10-02 (#41) still owns rendering the degraded warning; this only draws the boxes.
+      const sent = windows?.sendOverlayPayload(payload) ?? false;
+      if (sent) rememberDisplayed(payload, recentOutputs);
+
+      // Counts only - every field here is a number or a boolean, never screen text (PR3).
       log.debug('overlay payload', {
         seq: payload.seq,
         complete: payload.complete,
+        sent,
         engine: payload.engine,
         degraded: payload.degraded,
         failures: payload.failures.length,
@@ -108,6 +123,33 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
   });
 
   return composed;
+}
+
+/**
+ * Record what the overlay just drew, so OCR reading it back is recognised as our own output
+ * (feature F2, design doc section 6, layer 2).
+ *
+ * Called only when {@link WindowManager.sendOverlayPayload} reports the payload actually
+ * reached a live renderer. Remembering text that was never drawn would filter a translation the
+ * user never saw.
+ *
+ * Two exclusions, both of which look like omissions and are not:
+ *
+ * **Only `entry.text`, never `entry.sourceText`.** `OverlayEntry.sourceText`'s own doc comment
+ * says "M5-01 remembers it", and doing that would be a serious bug. `sourceText` is the *English
+ * on the user's screen* - the thing we are here to translate. `RecentOutputs` has no TTL, so
+ * remembering it means that subtitle line is dropped by F2 for the rest of the session, and
+ * never translated again. Only the Thai we painted is our own output.
+ *
+ * **Never a `degraded` entry.** Its text *is* the original English, so remembering it is the
+ * same bug by a different route: the English echoed during an engine outage would be suppressed
+ * permanently once the engine recovered. Recorded on issue #23.
+ */
+function rememberDisplayed(payload: OverlayPayload, recentOutputs: RecentOutputs): void {
+  for (const entry of payload.entries) {
+    if (entry.origin === 'degraded') continue;
+    recentOutputs.remember(entry.text);
+  }
 }
 
 async function startSidecar(metrics: MetricsRecorder): Promise<void> {

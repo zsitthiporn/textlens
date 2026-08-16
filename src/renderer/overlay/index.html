@@ -2,44 +2,31 @@
 <html lang="th">
   <head>
     <meta charset="utf-8" />
+    <!--
+      `font-src 'self'` is new in M5-02 and is load-bearing: the default-src is 'none', so
+      without it the bundled @font-face is blocked, the overlay silently falls back to a system
+      Thai face, and every height M5-03 measures is measured against the wrong metrics.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'"
     />
     <title>Textlens overlay</title>
     <link rel="stylesheet" href="./overlay.css" />
   </head>
   <body>
     <!--
-      Everything here is the M1-05 test target, not the real overlay UI (that is M5).
-      It exists to make three otherwise invisible properties visible: that the window
-      covers the whole display, that the parts we did not paint are genuinely
-      see-through, and that what we did paint is legible over anything.
+      The only element in the document. Every translation box is created once, at startup, by
+      the node pool (M5-01) and lives in here for the process's lifetime; nothing else is ever
+      added or removed. Counting this element's children is how the "no DOM nodes created after
+      init" criterion is checked against the real renderer.
+
+      The M1-05 probe UI that used to be here - screen-edge markers, corner labels, a click
+      counter - is gone. It was explicitly a test target for "does the window cover the display
+      and pass clicks through", and leaving it in would paint a magenta frame around the user's
+      screen for as long as the app runs.
     -->
-    <div class="edge edge--top"></div>
-    <div class="edge edge--right"></div>
-    <div class="edge edge--bottom"></div>
-    <div class="edge edge--left"></div>
-
-    <div class="corner corner--tl">TL</div>
-    <div class="corner corner--tr">TR</div>
-    <div class="corner corner--bl">BL</div>
-    <div class="corner corner--br">BR</div>
-
-    <div class="probe">
-      <p class="probe__label">Textlens overlay — M1-05 test box</p>
-      <!-- Thai on purpose: three stacked diacritic levels are what the 1.7 line-height
-           in overlay.css is for, and a box that looks fine in Latin can still clip them. -->
-      <p class="probe__thai" lang="th">คุณต้องหากุญแจให้เจอก่อนที่ประตูจะปิด</p>
-      <dl class="probe__facts">
-        <dt>viewport</dt>
-        <dd id="viewport">—</dd>
-        <dt>devicePixelRatio</dt>
-        <dd id="dpr">—</dd>
-        <dt>clicks</dt>
-        <dd id="clicks">0 (should stay 0 — clicks pass through)</dd>
-      </dl>
-    </div>
+    <div id="boxes"></div>
 
     <script type="module" src="./overlay.ts"></script>
   </body>
