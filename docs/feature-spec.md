@@ -72,7 +72,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | O1 | OCR engine + fallback | P0 | 🔵 | Windows.Media.Ocr เป็นหลัก (ดู S1) |
 | O2 | Downscale ก่อน OCR | P1 | 🔵 | region เล็กอยู่แล้ว — วัดก่อนค่อยทำ |
 | O3 | Image preprocessing | P1 | 🔵 | grayscale / normalize / contrast — เผื่อ subtitle พื้นหลังโปร่ง |
-| O4 | Confidence + noise filter | P0 | 🔵 | ตัด conf ต่ำ / สั้นเกิน / bbox แคบเกิน / pattern ขยะ |
+| O4 | Noise filter | P0 | 🔵🟢 | ตัดสั้นเกิน / bbox แคบเกิน / pattern ขยะ — ~~conf ต่ำ~~ **`Windows.Media.Ocr` ไม่มี confidence** (ยืนยันด้วย reflection 2026-08-16) เกณฑ์ที่เหลือทำงานได้ครบ |
 | O5 | **Text grouping** | P0 | 🔵 | paragraph gap + column detection + sentence boundary (อยู่ฝั่ง Node) |
 | O6 | **Coordinate space handling** | P0 | 🟢 | physical px → logical px ผ่าน converter ตัวเดียวที่มี test |
 | O7 | Source language config | P1 | 🔵 | เลือกภาษาต้นทาง |
@@ -139,7 +139,7 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 | U1 | Transparent click-through window | P0 | 🔵 | frameless, always-on-top, ไม่รับ mouse, ไม่แย่ง focus, ไม่โผล่ taskbar |
 | U2 | **Side-by-side (per-bbox)** | P0 | 🔵 | กล่องคำแปลใต้ข้อความต้นฉบับแต่ละก้อน — **โหมดหลักที่เลือก** |
 | U3 | Anti-overlap placement | P0 | 🔵 | ใต้ → ขวา → บน → ดันลง, จำกัดระยะเลื่อน, spatial hash |
-| U4 | Screen area budget | P0 | 🔵 | จำกัดพื้นที่รวม + เรียงตาม area × confidence |
+| U4 | Screen area budget | P0 | 🔵🟢 | จำกัดพื้นที่รวม + เรียงตาม **area** — ~~× confidence~~ ไม่มีให้ใช้ (ดู O4) · ข้อความใหญ่มาก่อนเป็น proxy ที่ใช้ได้จริงกับ subtitle |
 | U5 | Node pooling + GPU transform | P0 | 🔵 | pre-create element, ใช้ transform, throttle ด้วย rAF |
 | U6 | **Block-level rendering** | P0 | 🟢 | 1 text block = 1 กล่อง **ไม่หั่นกลับเป็นรายบรรทัด** |
 | U7 | **Two-pass layout** | P0 | 🟢 | วาด hidden → วัดความสูงจริง → จัดตำแหน่ง แทนการเดาจากจำนวนตัวอักษร |
