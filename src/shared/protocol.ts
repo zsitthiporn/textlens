@@ -217,7 +217,14 @@ export interface MonitorInfo {
   readonly id: string;
   /** DPI scale factor, e.g. 1.0 / 1.25 / 1.5. */
   readonly scale: number;
-  /** Monitor rectangle in logical px, absolute on the virtual desktop. */
+  /**
+   * Monitor rectangle in **physical px, raw from Win32**, absolute on the virtual desktop.
+   *
+   * Carried for identification and diagnostics only. It is deliberately NOT the source of
+   * the logical origin: `coordinates.ts` takes that from the Electron `Display`, because a
+   * logical origin cannot be derived from a physical one once monitors differ in DPI. See
+   * the `Rect` doc above and design doc section 3.
+   */
   readonly bounds: Rect;
 }
 
