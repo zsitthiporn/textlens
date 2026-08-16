@@ -38,6 +38,7 @@
  * usually wins: it is unobservable by construction.
  */
 
+import { StickyAnchors } from './anchor.js';
 import type { OverlayRenderMessage } from './contract.js';
 import { BoxPool, type PooledBox } from './node-pool.js';
 import {
@@ -46,10 +47,20 @@ import {
   type Rect,
   type SkipReason,
 } from './placement.js';
+import { renderSignature, SlotAllocator, slotKey, type SlotState } from './transitions.js';
 
 /** What the renderer draws: text already in CSS px space. */
 export interface LayoutEntry {
   readonly text: string;
+  /**
+   * The OCR text this was translated from.
+   *
+   * Carried through to this module because #35 keys its sticky anchors on it. Keying on `text`
+   * instead would look like it worked and prove nothing: two frames of an unchanged subtitle
+   * produce the *identical* Thai string, so a translated-text key is stable even when the
+   * mechanism under test is not doing anything.
+   */
+  readonly sourceText: string;
   /** **CSS px, overlay-window-relative.** The conversion happened before this module. */
   readonly anchor: Rect;
   /** `true` when `text` is the untranslated original (design doc section 7). */
@@ -71,6 +82,7 @@ export function toLayoutEntries(message: OverlayRenderMessage): LayoutEntry[] {
   const { x: originX, y: originY } = message.origin;
   return message.payload.entries.map((entry) => ({
     text: entry.text,
+    sourceText: entry.sourceText,
     anchor: {
       x: entry.bbox.x - originX,
       y: entry.bbox.y - originY,
@@ -96,6 +108,10 @@ export interface LayoutOptions {
   readonly gap?: number;
   readonly maxDisplacement?: number;
   readonly marks?: MarkRecorder;
+  /** Crossfade duration in ms (#37). 0 swaps instantly and frees a departing box at once. */
+  readonly fadeMs?: number;
+  /** Milliseconds. Drives fade-out expiry only; a counter is fine in a test. */
+  readonly now?: () => number;
 }
 
 export type LayoutPhase = 'write' | 'read';
@@ -117,6 +133,51 @@ export interface RenderStats {
   readonly phaseLog: readonly LayoutPhase[];
   /** Heights as measured, index-aligned with the claimed boxes. */
   readonly measuredHeights: readonly number[];
+  /**
+   * A6: this payload would have painted the picture already on screen, so nothing was written
+   * and nothing was measured. `phaseLog` is empty when this is true, which is the check that the
+   * skip really skipped rather than doing the work and discarding it.
+   */
+  readonly unchanged: boolean;
+  /** What the picture is, as compared. Two equal signatures mean two equal pictures. */
+  readonly signature: string;
+  /** Boxes that were not on screen before this frame and fade in. */
+  readonly entering: number;
+  /** Boxes whose anchor left the payload. Still drawn, fading out. */
+  readonly leaving: number;
+  /** Boxes kept at the same anchor whose text changed - A9's crossfade, the case it is for. */
+  readonly crossfaded: number;
+  /** Anchors held from the previous frame rather than recomputed. #35's counter. */
+  readonly heldAnchors: number;
+}
+
+/**
+ * Everything the renderer remembers between frames.
+ *
+ * Passed in rather than owned by this module because "between frames" has to survive a call, and
+ * a module-level singleton would make two independent tests share one. Reset wholesale when the
+ * epoch changes - see {@link OverlayRenderMessage}.
+ */
+export class RenderSession {
+  readonly anchors: StickyAnchors;
+  readonly slots: SlotAllocator;
+  /** The picture currently on screen, as {@link renderSignature} describes it. */
+  signature: string | null = null;
+
+  constructor(options: { capacity: number; grid?: number; tolerance?: number; maxEntries?: number }) {
+    this.anchors = new StickyAnchors({
+      ...(options.grid === undefined ? {} : { grid: options.grid }),
+      ...(options.tolerance === undefined ? {} : { tolerance: options.tolerance }),
+      ...(options.maxEntries === undefined ? {} : { maxEntries: options.maxEntries }),
+    });
+    this.slots = new SlotAllocator(options.capacity);
+  }
+
+  reset(): void {
+    this.anchors.clear();
+    this.slots.clear();
+    this.signature = null;
+  }
 }
 
 export const DEFAULT_MIN_BOX_WIDTH = 140;
@@ -137,6 +198,7 @@ export function renderEntries<E extends PooledBox>(
   entries: readonly LayoutEntry[],
   pool: BoxPool<E>,
   options: LayoutOptions,
+  session: RenderSession,
 ): RenderStats {
   const marks = options.marks;
   const phaseLog: LayoutPhase[] = [];
@@ -152,22 +214,93 @@ export function renderEntries<E extends PooledBox>(
     screen.width * (options.maxBoxWidthRatio ?? DEFAULT_MAX_BOX_WIDTH_RATIO),
     1,
   );
+  const fadeMs = options.fadeMs ?? 0;
+  const now = (options.now ?? Date.now)();
 
-  const claimed = Math.min(entries.length, pool.capacity);
-  const boxes = pool.take(claimed);
+  // ---- phase 0: pure computation. Nothing below is written unless the picture differs. ----
+  //
+  // #35 runs first and everything downstream sees its answer: the signature A6 compares, the
+  // identity A9 keys a box on, and the rectangle placement is computed from. Stabilising later
+  // would leave each of those churning on raw jitter, and each of them would look like its own
+  // separate bug.
+  let heldAnchors = 0;
+  const stabilized = entries.map((entry) => {
+    const resolved = session.anchors.resolve(entry.sourceText, entry.anchor);
+    if (resolved.decision === 'held') heldAnchors += 1;
+    return { ...entry, anchor: resolved.anchor };
+  });
+
+  const signature = renderSignature(stabilized, screen);
+  if (signature === session.signature) {
+    // A6. No writes, no reads, no placement - and an empty `phaseLog`, which is how a test tells
+    // this apart from a render that did all the work and then wrote the same values back.
+    marks?.mark(MARK_RENDER_END);
+    marks?.measure(MEASURE_RENDER, MARK_RENDER_START, MARK_RENDER_END);
+    return {
+      requested: entries.length,
+      claimed: 0,
+      truncated: 0,
+      drawn: 0,
+      skipped: [],
+      comparisons: 0,
+      phaseLog,
+      measuredHeights: [],
+      unchanged: true,
+      signature,
+      entering: 0,
+      leaving: 0,
+      crossfaded: 0,
+      heldAnchors,
+    };
+  }
+
+  // Reclaim any box whose fade-out finished before this frame arrived.
+  for (const index of session.slots.sweep(now, fadeMs)) {
+    const box = pool.boxes[index];
+    if (box === undefined) continue;
+    box.style.display = 'none';
+    box.style.visibility = 'hidden';
+    box.setText('', false);
+  }
+
+  const assignment = session.slots.assign(uniqueKeys(stabilized), now);
+  // Everything still on screen keeps its box, including the ones on their way out. `take(n)`
+  // cannot express that set; see `BoxPool.retain`.
+  pool.retain(session.slots.retained);
+
+  const claimed = stabilized.length - assignment.exhausted;
   const widths: number[] = [];
+  const boxes: (E | undefined)[] = [];
+  const states: (SlotState | null)[] = [];
+  let entering = 0;
+  let crossfaded = 0;
 
   // ---- phase 1: writes only -------------------------------------------------------------
   note('write');
-  for (let index = 0; index < boxes.length; index += 1) {
-    const box = boxes[index];
-    const entry = entries[index];
-    if (box === undefined || entry === undefined) continue;
+  for (let index = 0; index < stabilized.length; index += 1) {
+    const entry = stabilized[index];
+    const slotIndex = assignment.indices[index] ?? null;
+    const state = assignment.states[index] ?? null;
+    const box = slotIndex === null ? undefined : pool.boxes[slotIndex];
+    boxes.push(box);
+    states.push(state);
+    if (box === undefined || entry === undefined) {
+      widths.push(0);
+      continue;
+    }
 
     const width = clamp(entry.anchor.width, Math.min(minWidth, maxWidth), maxWidth);
     widths.push(width);
 
-    box.textContent = entry.text;
+    // A9. A box kept at the same anchor whose words changed is the case the crossfade exists
+    // for: the plate stays, the text inside it dissolves. Anything else - a brand new box, or
+    // the identical string arriving again - has nothing to fade between and must not pay for a
+    // transition it cannot show.
+    const textChanged = box.text !== entry.text;
+    const fade = fadeMs > 0 && state === 'holding' && textChanged;
+    if (fade) crossfaded += 1;
+    box.setText(entry.text, fade);
+
     // H3: this attribute is the whole reason this project runs on Chromium. It is what selects
     // ICU's Thai dictionary line breaker; without it the text is broken as if it were Latin,
     // which for a script with no inter-word spaces means "not broken at all" until the box
@@ -177,10 +310,29 @@ export function renderEntries<E extends PooledBox>(
     box.setAttribute('data-origin', entry.degraded ? 'degraded' : 'translated');
     box.style.width = `${String(width)}px`;
     box.style.display = 'block';
+    if (state === 'entering') {
+      entering += 1;
+      // Transparent now, opaque in phase 4. The reflow phase 2 forces in between is what commits
+      // this value, which is what makes the change in phase 4 a transition rather than a jump -
+      // the measurement pass and the fade-in need the same style flush, so the fade is free.
+      if (fadeMs > 0) box.style.opacity = '0';
+    }
     // Laid out, but not presented. `visibility` rather than `opacity` because an opacity-0 box
     // is still composited, and rather than `display: none` because a display-none box has no
     // geometry to measure - which is the entire point of this pass.
     box.style.visibility = 'hidden';
+  }
+
+  // A box whose anchor is gone from this payload fades where it stands - same transform, same
+  // text - rather than blinking out. Its index stays retained until `sweep` reclaims it.
+  for (const index of assignment.leaving) {
+    const box = pool.boxes[index];
+    if (box === undefined) continue;
+    box.style.opacity = fadeMs > 0 ? '0' : '1';
+    if (fadeMs <= 0) {
+      box.style.display = 'none';
+      box.style.visibility = 'hidden';
+    }
   }
 
   // ---- phase 2: reads only. One reflow covers every box. ---------------------------------
@@ -188,15 +340,15 @@ export function renderEntries<E extends PooledBox>(
   note('read');
   const heights: number[] = [];
   for (const box of boxes) {
-    heights.push(box.getBoundingClientRect().height);
+    heights.push(box === undefined ? 0 : box.getBoundingClientRect().height);
   }
   marks?.mark(MARK_MEASURE_END);
   marks?.measure(MEASURE_MEASURE_PHASE, MARK_MEASURE_START, MARK_MEASURE_END);
 
   // ---- phase 3: pure computation, no DOM at all ------------------------------------------
   const requests: PlacementRequest[] = [];
-  for (let index = 0; index < boxes.length; index += 1) {
-    const entry = entries[index];
+  for (let index = 0; index < stabilized.length; index += 1) {
+    const entry = stabilized[index];
     if (entry === undefined) continue;
     requests.push({
       anchor: entry.anchor,
@@ -236,22 +388,50 @@ export function renderEntries<E extends PooledBox>(
     // every frame, which is precisely what the pool and the single reflow exist to avoid.
     box.style.transform = `translate3d(${String(position.x)}px, ${String(position.y)}px, 0)`;
     box.style.visibility = 'visible';
+    box.style.opacity = '1';
     drawn += 1;
   }
 
   marks?.mark(MARK_RENDER_END);
   marks?.measure(MEASURE_RENDER, MARK_RENDER_START, MARK_RENDER_END);
 
+  session.signature = signature;
+
   return {
     requested: entries.length,
     claimed,
-    truncated: entries.length - claimed,
+    truncated: assignment.exhausted,
     drawn,
     skipped,
     comparisons: outcome.comparisons,
     phaseLog,
     measuredHeights: heights,
+    unchanged: false,
+    signature,
+    entering,
+    leaving: assignment.leaving.length,
+    crossfaded,
+    heldAnchors,
   };
+}
+
+/**
+ * One key per entry, disambiguated when two anchors land on the same point.
+ *
+ * Two OCR blocks can stabilize onto one rectangle - overlapping reads of the same line, or two
+ * short labels a few px apart snapping into the same grid cell. Left alone, both entries would
+ * claim the same box and the second would overwrite the first: one translation on screen where
+ * there should be two, with no error and nothing to count. The suffix is derived from position in
+ * the payload, which `text-pipeline.ts` keeps stable, so the disambiguation is stable too.
+ */
+function uniqueKeys(entries: readonly LayoutEntry[]): string[] {
+  const seen = new Map<string, number>();
+  return entries.map((entry) => {
+    const base = slotKey(entry.anchor);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}#${String(count)}`;
+  });
 }
 
 function clamp(value: number, low: number, high: number): number {

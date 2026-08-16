@@ -103,6 +103,7 @@ import { dedupeBlocks, Deduplicator, type DedupOptions } from './dedup.js';
 import { nullLogger, type Logger } from './logger.js';
 import type { MetricsRecorder } from './metrics.js';
 import type { RecentOutputs } from './recent-outputs.js';
+import { StabilityTracker, type StabilityOptions } from './stability-tracker.js';
 import type { GoogleEngineOptions } from './translator/engines/google.js';
 import {
   createDefaultRegistry,
@@ -143,6 +144,14 @@ export interface PipelineStats {
   readonly recentOutput: number;
   /** Dropped as already handled by dedup (#16). */
   readonly duplicate: number;
+  /**
+   * Consecutive frames this screen has looked unchanged (#36). 0 means it just changed.
+   *
+   * A count, so it is safe in a default-level log line, and it is the number that explains why a
+   * frame produced nothing: an unchanged screen and a broken pipeline are otherwise identical
+   * from the outside, which is the failure invariant 4 forbids.
+   */
+  readonly stableStreak: number;
   /** Skipped by T10 - the text is already in the target language. */
   readonly sameLanguage: number;
   readonly cacheHits: number;
@@ -156,7 +165,7 @@ export interface PipelineStats {
 /** The half of {@link PipelineStats} that the group/filter/dedup stage produces. */
 export type CollectStats = Pick<
   PipelineStats,
-  'lines' | 'blocks' | 'noise' | 'thaiFeedback' | 'recentOutput' | 'duplicate'
+  'lines' | 'blocks' | 'noise' | 'thaiFeedback' | 'recentOutput' | 'duplicate' | 'stableStreak'
 >;
 
 /**
@@ -208,13 +217,29 @@ export interface PipelineCache {
 export interface TextPipelineOptions {
   readonly translator: PipelineTranslator;
   readonly cache: PipelineCache;
-  /** Called with every payload. Up to twice per frame; see {@link OverlayPayload}. */
-  readonly onPayload: (payload: OverlayPayload) => void;
+  /**
+   * Called with every payload. Up to twice per frame; see {@link OverlayPayload}.
+   *
+   * **Return `false` when the payload did not actually reach a renderer.** `WindowManager`
+   * refuses one when the overlay document has not run its script yet, which is a documented
+   * startup race rather than a rarity - and #36's baseline may only advance on something the
+   * user could have seen. Anything other than `false`, `undefined` included, counts as
+   * delivered, so a caller that does not care need not say anything.
+   */
+  readonly onPayload: (payload: OverlayPayload) => boolean | void;
   readonly logger?: Logger;
   readonly metrics?: MetricsRecorder;
   /** Reused across frames - the time window is the point. One is created if none is passed. */
   readonly deduplicator?: Deduplicator;
   readonly dedup?: DedupOptions;
+  /**
+   * Dynamic suppression of a screen that has not changed (#36).
+   *
+   * Reused across frames like the deduplicator, and for the same reason: the whole rule is about
+   * what the previous frames looked like. One is created if none is passed.
+   */
+  readonly stabilityTracker?: StabilityTracker;
+  readonly stability?: StabilityOptions;
   /** Read-only here; see the module comment on why `remember` is M5-01's call. */
   readonly recentOutputs?: RecentOutputs;
   readonly grouping?: GroupingOptions;
@@ -243,10 +268,19 @@ const NO_TRANSLATION: TranslationOutcome = { texts: [], engine: null, degraded: 
 export class TextPipeline {
   readonly #translator: PipelineTranslator;
   readonly #cache: PipelineCache;
-  readonly #onPayload: (payload: OverlayPayload) => void;
+  /**
+   * Held as `unknown`-returning rather than as the option's `boolean | void`.
+   *
+   * TypeScript treats `void` as having no overlap with `false`, so comparing the declared type
+   * against `false` is an error - while the whole point of that type is that a consumer which
+   * does not care may return nothing at all. `unknown` is what lets an explicit refusal be
+   * checked without a cast.
+   */
+  readonly #onPayload: (payload: OverlayPayload) => unknown;
   readonly #logger: Logger;
   readonly #metrics: MetricsRecorder | undefined;
   readonly #deduplicator: Deduplicator;
+  readonly #stability: StabilityTracker;
   readonly #recentOutputs: RecentOutputs | undefined;
   readonly #grouping: GroupingOptions;
   readonly #noise: NoiseFilterOptions;
@@ -275,6 +309,7 @@ export class TextPipeline {
     this.#logger = (options.logger ?? nullLogger()).child('pipeline');
     this.#metrics = options.metrics;
     this.#deduplicator = options.deduplicator ?? new Deduplicator(options.dedup ?? {});
+    this.#stability = options.stabilityTracker ?? new StabilityTracker(options.stability ?? {});
     this.#recentOutputs = options.recentOutputs;
     this.#grouping = options.grouping ?? {};
     this.#noise = options.noise ?? {};
@@ -320,12 +355,33 @@ export class TextPipeline {
     // ---- group + filter + dedup (design doc section 4: one 5ms budget row) ----------------
     const survivors = this.#collect(frame, display, nowMs);
 
+    // #36. Called for **every** frame, including the ones that end below, because the streak is a
+    // count of consecutive observations - skip the call on a quiet frame and the count is wrong
+    // for the loud one after it.
+    const stability = this.#stability.observe(survivors.observed);
+    const counts: CollectStats = { ...survivors.counts, stableStreak: stability.streak };
+
     if (survivors.blocks.length === 0) {
       // "ไม่เหลืออะไรใหม่? จบรอบ" - and deliberately no empty payload. Dedup suppresses text
       // that is still on screen unchanged, so an empty round means "nothing new", not "nothing
       // to show"; emitting one would make a renderer that replaces its contents clear the
       // overlay on every steady frame. Invariant 4 is served by the counts in this log line.
-      this.#logger.debug('nothing new in this frame', { seq: frame.seq, ...survivors.counts });
+      this.#logger.debug('nothing new in this frame', { seq: frame.seq, ...counts });
+      this.#recordTotal(frame, startedAt);
+      return undefined;
+    }
+
+    if (stability.suppress) {
+      // Dedup let something through - normally because its 3s window expired under a subtitle
+      // that is still on screen - but the screen as a whole has not changed since the last thing
+      // the user was shown. Translating and redrawing it would repaint a picture they are already
+      // reading. Counts only, and the streak is in them, so this is never a silent drop.
+      this.#logger.debug('screen unchanged; suppressing this frame', {
+        seq: frame.seq,
+        similarity: Math.round(stability.similarity * 100) / 100,
+        newLines: stability.newLines,
+        ...counts,
+      });
       this.#recordTotal(frame, startedAt);
       return undefined;
     }
@@ -375,7 +431,7 @@ export class TextPipeline {
     this.#reportCacheStatus();
 
     const baseStats = {
-      ...survivors.counts,
+      ...counts,
       sameLanguage,
       cacheHits,
       cacheMisses: misses.length,
@@ -439,6 +495,9 @@ export class TextPipeline {
     this.#recordTotal(frame, startedAt);
 
     if (payload.entries.length === 0) {
+      // The baseline is deliberately **not** advanced here. Nothing reached the screen, so the
+      // next frame must still read as new - otherwise this frame's text is suppressed from now
+      // on and never drawn at all.
       this.#logger.debug('every block translated to its own source; nothing to draw', {
         seq: frame.seq,
         ...payload.stats,
@@ -446,7 +505,25 @@ export class TextPipeline {
       return undefined;
     }
 
-    return this.#emit(payload) ? payload : undefined;
+    if (!this.#emit(payload)) return undefined;
+
+    // #36's baseline moves only here - after a payload has actually reached the renderer - and it
+    // records the frame's **whole observed set**, not the entries this payload carried. Dedup
+    // routinely removes the lines that did not change, so the payload describes the delta while
+    // the baseline has to describe the screen.
+    this.#stability.markEmitted(survivors.observed, degraded);
+    return payload;
+  }
+
+  /**
+   * Forget what the screen looked like (#36's "reset ได้เมื่อเปลี่ยน region หรือ mode").
+   *
+   * Not folded into a config listener here: this module has no config subscription and gaining
+   * one would give it a second route to its own behaviour. `src/main/index.ts` calls this.
+   */
+  resetStability(reason: string): void {
+    this.#stability.reset();
+    this.#logger.debug('stability baseline cleared', { reason });
   }
 
   /** Convert, group, and run every drop rule. Synchronous, and timed as one budget row. */
@@ -454,8 +531,13 @@ export class TextPipeline {
     frame: FrameEvent,
     display: DisplayGeometry,
     nowMs: number,
-  ): { blocks: readonly TextBlock[]; counts: CollectStats } {
-    const work = (): { blocks: readonly TextBlock[]; counts: CollectStats } => {
+  ): { blocks: readonly TextBlock[]; observed: readonly string[]; counts: Omit<CollectStats, 'stableStreak'> } {
+    type Collected = {
+      blocks: readonly TextBlock[];
+      observed: readonly string[];
+      counts: Omit<CollectStats, 'stableStreak'>;
+    };
+    const work = (): Collected => {
       const positioned: PositionedLine[] = frame.lines.map((line) => ({
         text: line.text,
         rect: toLogicalRect(line.bbox, frame.region, display),
@@ -475,6 +557,10 @@ export class TextPipeline {
 
       return {
         blocks: deduped.kept,
+        // **Before** dedup, on purpose (#36). Dedup removes precisely the lines that make a frame
+        // look unchanged, so the post-dedup list describes what is new while this describes what
+        // is on the screen - and "has the screen changed" can only be asked of the second one.
+        observed: afterRecent.map((block) => block.text),
         counts: {
           lines: frame.lines.length,
           blocks: grouped.length,
@@ -592,7 +678,17 @@ export class TextPipeline {
     this.#metrics?.record('total', sidecarMs + (this.#now() - startedAt));
   }
 
-  /** @returns whether the payload reached the renderer. */
+  /**
+   * @returns whether the payload reached the renderer - both that it was not overtaken, and that
+   *          the consumer did not refuse it.
+   *
+   * The second half matters more than it looks. `src/main/index.ts` hands the payload to
+   * `WindowManager.sendOverlayPayload`, which returns `false` while the overlay document is still
+   * starting up. Counting that as drawn would advance #36's baseline to text nobody saw: the
+   * screen would then look unchanged for the rest of the session, the retry that dedup's expiring
+   * window produces would be suppressed, and the first subtitle of the session would never appear
+   * - silently, which is the whole failure the emit-gated baseline exists to prevent.
+   */
   #emit(payload: OverlayPayload): boolean {
     if (payload.seq < this.#lastEmittedSeq) {
       // A slow frame finished after a newer one already drew. Its text is stale by definition.
@@ -604,8 +700,9 @@ export class TextPipeline {
       return false;
     }
     this.#lastEmittedSeq = payload.seq;
-    this.#onPayload(payload);
-    return true;
+    // `!== false` rather than a truthiness test: a consumer that returns nothing has not claimed
+    // a failure, and only an explicit `false` is a refusal.
+    return this.#onPayload(payload) !== false;
   }
 
   /** Invariant 4: a cache that quietly stopped caching is a performance cliff with no cause. */
@@ -647,6 +744,9 @@ export interface CreateTextPipelineOptions
   readonly rateLimit?: RateLimiterOptions;
   readonly cacheTtlMs?: number;
 }
+
+/** What a caller needs in order to reset the pipeline's memory of the screen. */
+export type StabilityResettable = Pick<TextPipeline, 'resetStability'>;
 
 export interface ComposedTextPipeline {
   readonly pipeline: TextPipeline;

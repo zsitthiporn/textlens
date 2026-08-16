@@ -96,7 +96,9 @@ function harness(
     cache,
     logger,
     metrics,
-    onPayload: (payload) => payloads.push(payload),
+    onPayload: (payload) => {
+      payloads.push(payload);
+    },
     ...overrides,
   });
 
@@ -365,7 +367,9 @@ describe('the degraded signal survives the identical-suppression rule', () => {
       translator: short,
       cache,
       logger,
-      onPayload: (payload) => payloads.push(payload),
+      onPayload: (payload) => {
+      payloads.push(payload);
+    },
     });
 
     const payload = await pipeline.handleFrame(frameWith(['alpha alpha', 'bravo bravo']), DISPLAY);
@@ -464,7 +468,9 @@ describe('a disabled cache degrades the pipeline without stopping it', () => {
       translator: new FallbackTranslator([engine], { logger }),
       cache: disabledCache,
       logger,
-      onPayload: (payload) => payloads.push(payload),
+      onPayload: (payload) => {
+      payloads.push(payload);
+    },
     });
 
     const first = await pipeline.handleFrame(frameWith(['alpha alpha'], 1), DISPLAY);
@@ -596,7 +602,9 @@ describe('createTextPipeline: the injected transport is what the engine actually
       fetch: spy,
       cachePath: ':memory:',
       rateLimit: { minIntervalMs: 0 },
-      onPayload: (payload) => payloads.push(payload),
+      onPayload: (payload) => {
+      payloads.push(payload);
+    },
     });
 
     try {

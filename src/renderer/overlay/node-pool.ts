@@ -48,10 +48,27 @@ export interface BoxStyle {
   opacity: string;
 }
 
-/** The subset of `HTMLElement` the overlay uses. A real one satisfies this structurally. */
+/**
+ * What the overlay needs a box to be able to do.
+ *
+ * No longer a subset of `HTMLElement`: A9's crossfade needs a box to be able to show two strings
+ * at once - the outgoing one fading away over the incoming one - and a single element cannot.
+ * `overlay.ts` supplies a two-layer implementation over real elements; `tests/main/overlay/`
+ * supplies a fake. Neither is `document`, and this file still never names it.
+ */
 export interface PooledBox {
   readonly style: BoxStyle;
-  textContent: string | null;
+  /** The text currently being drawn, i.e. the incoming layer's. */
+  readonly text: string;
+  /**
+   * Replace the text.
+   *
+   * @param fade When true, the string being replaced stays painted on a second layer that fades
+   *             out over the new one, instead of vanishing the instant it is overwritten (A9).
+   *             The outgoing layer must not affect the box's measured height, or M5-03's
+   *             measurement would return the taller of the two texts.
+   */
+  setText(text: string, fade: boolean): void;
   /** Carries `lang` (which drives Thai line breaking, H3) and `data-origin`. */
   setAttribute(name: string, value: string): void;
   getBoundingClientRect(): { readonly width: number; readonly height: number };
@@ -120,30 +137,47 @@ export class BoxPool<E extends PooledBox> {
   /**
    * Claim the first `count` boxes for this render and retire the rest.
    *
-   * Retired boxes go to `display: none` rather than `visibility: hidden`: a hidden box still
-   * takes part in layout, so a pool of 48 mostly-unused boxes would otherwise contribute 48
-   * boxes' worth of work to every measurement pass M5-03 performs.
-   *
    * @returns the claimed boxes, at most `capacity` of them.
    */
   take(count: number): readonly E[] {
     const wanted = Number.isFinite(count) ? Math.max(Math.trunc(count), 0) : 0;
     const granted = Math.min(wanted, this.#boxes.length);
+    this.retain(Array.from({ length: granted }, (_unused, index) => index));
+    return this.#boxes.slice(0, granted);
+  }
 
-    for (let index = granted; index < this.#boxes.length; index += 1) {
+  /**
+   * Retire every box **except** the given indices.
+   *
+   * The generalisation of {@link take} that A9 needs. `take(n)` can only express "the first n are
+   * in use", and a box fading out is a box that is no longer in the payload and must stay drawn
+   * anyway - a set the first-n model has no way to name. `take` is now this method with a
+   * contiguous set, so the two cannot drift apart.
+   *
+   * Retired boxes go to `display: none` rather than `visibility: hidden`: a hidden box still
+   * takes part in layout, so a pool of 48 mostly-unused boxes would otherwise contribute 48
+   * boxes' worth of work to every measurement pass M5-03 performs.
+   */
+  retain(indices: Iterable<number>): void {
+    const keep = new Set<number>();
+    for (const index of indices) {
+      if (Number.isInteger(index) && index >= 0 && index < this.#boxes.length) keep.add(index);
+    }
+
+    for (let index = 0; index < this.#boxes.length; index += 1) {
+      if (keep.has(index)) continue;
       const box = this.#boxes[index];
       if (box === undefined) continue;
       box.style.display = 'none';
       box.style.visibility = 'hidden';
-      box.textContent = '';
+      box.setText('', false);
     }
 
-    this.#active = granted;
-    return this.#boxes.slice(0, granted);
+    this.#active = keep.size;
   }
 
   /** Retire every box. Used when a frame produced nothing to draw. */
   hideAll(): void {
-    this.take(0);
+    this.retain([]);
   }
 }

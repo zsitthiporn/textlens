@@ -30,6 +30,7 @@ import { BrowserWindow, ipcMain, screen, type Display, type Rectangle } from 'el
 
 import type {
   OverlayPayloadChannel,
+  OverlayRenderConfig,
   OverlayRenderPayload,
 } from '../../renderer/overlay/contract.js';
 import type {
@@ -48,6 +49,23 @@ import { nullLogger, type Logger } from './logger.js';
  * fails this line at compile time. See the same constant in `src/preload/index.cts`.
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
+
+/**
+ * What a payload carries before {@link WindowManager.setOverlayRender} has been called.
+ *
+ * Identical to `DEFAULT_CONFIG.render` and to the renderer's own fallback, and duplicated here
+ * for the same reason the channel name above is: this file cannot import the schema module into
+ * a value position without dragging zod into every consumer of `WindowManager`. It governs
+ * nothing in the shipped app - `src/main/index.ts` publishes the real config before the sidecar
+ * has produced a frame.
+ */
+const FALLBACK_OVERLAY_RENDER: OverlayRenderConfig = {
+  anchorGrid: 8,
+  anchorTolerance: 6,
+  stickyMaxEntries: 128,
+  minDisplayMs: 400,
+  fadeMs: 120,
+};
 
 /** Same arrangement as the overlay channel above, and the same compile-time drift guard. */
 const PICKER_INIT_CHANNEL: PickerInitChannel = 'textlens:region-picker-init';
@@ -157,6 +175,24 @@ export class WindowManager {
   #overlayOrigin: { x: number; y: number } | null = null;
   /** Set once the overlay document has run; before that an IPC send has no listener. */
   #overlayReady = false;
+  /**
+   * The renderer's tuning, sent with every payload (#35, #37).
+   *
+   * Held here rather than pushed on a channel of its own so that it cannot arrive after the first
+   * payload it is supposed to govern; see {@link OverlayRenderConfig}. `null` until
+   * {@link setOverlayRender} is called, and a payload sent before then carries the renderer's own
+   * fallback - which is the same set of numbers, because both come from `DEFAULT_CONFIG`.
+   */
+  #overlayRender: OverlayRenderConfig | null = null;
+  /**
+   * Bumped whenever everything the renderer remembers about *where* things were stops being true.
+   *
+   * A counter on the payload rather than a "forget your cache" message, because the two can be
+   * scheduled independently and a clear that arrives after the payload it applies to would draw
+   * the new region's boxes at the old region's remembered positions - silently, and only for the
+   * first frame after a region change, which is the hardest kind of bug to catch by looking.
+   */
+  #overlayEpoch = 0;
   #settings: BrowserWindow | null = null;
   #picker: BrowserWindow | null = null;
   #metricsListener: ((event: Electron.Event, display: Display) => void) | null = null;
@@ -462,8 +498,40 @@ export class WindowManager {
       return false;
     }
 
-    overlay.webContents.send(OVERLAY_PAYLOAD_CHANNEL, { payload, origin });
+    overlay.webContents.send(OVERLAY_PAYLOAD_CHANNEL, {
+      payload,
+      origin,
+      config: this.#overlayRender ?? FALLBACK_OVERLAY_RENDER,
+      epoch: this.#overlayEpoch,
+    });
     return true;
+  }
+
+  /**
+   * Publish the renderer's tuning. Takes effect on the next payload.
+   *
+   * The parameter is the renderer's own contract type and `src/main/index.ts` hands it the parsed
+   * `config.render` straight from zod. That call is the drift guard: rename a field in the schema
+   * and this stops compiling, rather than shipping a renderer quietly reading `undefined`.
+   */
+  setOverlayRender(config: OverlayRenderConfig): void {
+    this.#overlayRender = config;
+  }
+
+  /** The epoch the renderer is currently drawing under. */
+  get overlayEpoch(): number {
+    return this.#overlayEpoch;
+  }
+
+  /**
+   * Tell the renderer that every position it remembers is meaningless now (#35).
+   *
+   * Called for a new region, a different monitor, and a move to another display - the three
+   * events after which a box held at a remembered anchor would sit under nothing.
+   */
+  bumpOverlayEpoch(reason: string): void {
+    this.#overlayEpoch += 1;
+    this.#log.debug('overlay epoch bumped', { epoch: this.#overlayEpoch, reason });
   }
 
   /**
@@ -502,6 +570,7 @@ export class WindowManager {
     if (overlay === null || overlay.isDestroyed()) return;
 
     const display = this.#resolveDisplay(displayId);
+    if (display.id !== this.#overlayDisplayId) this.bumpOverlayEpoch('overlay moved');
     this.#overlayDisplayId = display.id;
     this.#applyBounds(overlay, display.bounds);
   }

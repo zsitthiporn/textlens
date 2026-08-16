@@ -98,9 +98,19 @@ export type HeightModel = (text: string, width: number) => number;
 export class FakeBox implements PooledBox {
   readonly style: BoxStyle;
   readonly attributes = new Map<string, string>();
-  #text: string | null = null;
+  #text = '';
   /** Geometry reads performed on this box. */
   reads = 0;
+  /**
+   * The string the box is fading out, or `null`.
+   *
+   * A9's acceptance criterion is "fade, not disappear then appear", and this is what makes that
+   * checkable without a screen: during a crossfade the box holds *both* strings, so a box whose
+   * text changed while this stayed `null` is one that blinked.
+   */
+  outgoing: string | null = null;
+  /** Every `setText` call, in order, so a test can assert the sequence rather than the end state. */
+  readonly textLog: { text: string; fade: boolean }[] = [];
 
   constructor(
     private readonly log: Op[],
@@ -109,12 +119,15 @@ export class FakeBox implements PooledBox {
     this.style = new FakeStyle(log);
   }
 
-  get textContent(): string | null {
+  get text(): string {
     return this.#text;
   }
-  set textContent(value: string | null) {
+
+  setText(text: string, fade: boolean): void {
     this.log.push('write');
-    this.#text = value;
+    this.textLog.push({ text, fade });
+    this.outgoing = fade && this.#text !== '' ? this.#text : null;
+    this.#text = text;
   }
 
   setAttribute(name: string, value: string): void {
@@ -126,7 +139,7 @@ export class FakeBox implements PooledBox {
     this.log.push('read');
     this.reads += 1;
     const width = Number.parseFloat(this.style.width) || 0;
-    return { width, height: this.heightOf(this.#text ?? '', width) };
+    return { width, height: this.heightOf(this.#text, width) };
   }
 
   /** The `translate3d(Xpx, Ypx, 0)` the renderer wrote, parsed back. `null` if never positioned. */

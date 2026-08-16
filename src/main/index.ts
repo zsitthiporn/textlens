@@ -125,6 +125,20 @@ async function bootstrap(): Promise<void> {
   });
 
   windows = new WindowManager({ distDir, logger });
+  // Published before the first window opens, so no payload can ever be laid out against numbers
+  // the user did not choose. The argument is the renderer's own contract type and this is the
+  // parsed config - the assignment is the compile-time drift guard between the two.
+  windows.setOverlayRender((config?.current ?? DEFAULT_CONFIG).render);
+  config?.subscribe((current, previous) => {
+    windows?.setOverlayRender(current.render);
+    // #36's "reset ได้เมื่อเปลี่ยน region". The renderer's own positional memory is cleared by
+    // the epoch bump `AppOrchestrator` issues for the same event; this is the main-process half,
+    // and it is here rather than in the orchestrator because the pipeline is this file's to hold.
+    const moved =
+      JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) ||
+      current.capture.monitorId !== previous.capture.monitorId;
+    if (moved) textPipeline?.pipeline.resetStability('capture region or monitor changed');
+  });
   windows.openSettings('settings');
   windows.openOverlay();
 
@@ -149,6 +163,17 @@ async function bootstrap(): Promise<void> {
     logger,
     monitors,
     picker: windows,
+  });
+
+  // #36's other reset trigger. A pause, a snapshot or an overlay toggle all change what the user
+  // is looking at without changing the region, and a baseline held across one of them would
+  // suppress the first frame after the app starts capturing again - the one frame that most needs
+  // to be drawn, because the screen has been unattended since.
+  let lastMode = orchestrator.mode;
+  orchestrator.subscribe((status) => {
+    if (status.mode === lastMode) return;
+    lastMode = status.mode;
+    textPipeline?.pipeline.resetStability(`mode changed to ${status.mode}`);
   });
 
   startTray(orchestrator);
@@ -319,12 +344,17 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
     logger,
     metrics,
     recentOutputs,
+    // #36. Read once: changing these mid-session would need the baseline discarded anyway, and
+    // the reset paths below already cover the events that actually invalidate it.
+    stability: (config?.current ?? DEFAULT_CONFIG).stability,
     onPayload: (payload) => {
       // M10-02 (#41) still owns rendering the degraded warning; this only draws the boxes.
       const sent = windows?.sendOverlayPayload(payload) ?? false;
       if (sent) rememberDisplayed(payload, recentOutputs);
 
       // Counts only - every field here is a number or a boolean, never screen text (PR3).
+      // Returned, not just logged. The pipeline treats `false` as "nobody saw this", which is
+      // what stops #36 from advancing its baseline past a payload the overlay refused.
       log.debug('overlay payload', {
         seq: payload.seq,
         complete: payload.complete,
@@ -334,6 +364,8 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
         failures: payload.failures.length,
         ...payload.stats,
       });
+
+      return sent;
     },
   });
 

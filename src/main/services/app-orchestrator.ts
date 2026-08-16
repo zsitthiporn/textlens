@@ -110,6 +110,15 @@ export interface OverlayWindows {
   /** @returns whether the overlay's visibility is now what was asked for. */
   setOverlayVisible(visible: boolean): boolean;
   openSettings(): unknown;
+  /**
+   * Tell the renderer to forget every position it remembers (#35).
+   *
+   * Called from here rather than from `WindowManager`'s own config listener because this class is
+   * the one that knows a capture change has been *applied*: a region the user picked and a region
+   * the sidecar accepted are not the same event, and clearing on the former would discard the
+   * cache while the old region's frames were still arriving.
+   */
+  bumpOverlayEpoch(reason: string): void;
 }
 
 /** The part of `ConfigService` the mode machine reads and, since #29, writes. */
@@ -884,6 +893,15 @@ export class AppOrchestrator {
   #onConfigChanged(current: Config, previous: Config): void {
     if (JSON.stringify(current.capture) === JSON.stringify(previous.capture)) return;
     if (!this.#configured) return;
+
+    // #35's "เปลี่ยน region → cache ถูกล้าง". Only these two fields: a changed poll interval or
+    // diff threshold leaves every box exactly where it was, and discarding the sticky anchors for
+    // them would reintroduce the jitter the cache exists to absorb, on a settings change that has
+    // nothing to do with position.
+    const moved =
+      JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) ||
+      current.capture.monitorId !== previous.capture.monitorId;
+    if (moved) this.#windows.bumpOverlayEpoch('capture region or monitor changed');
 
     this.#log.info('capture settings changed; reconfiguring the sidecar');
     void this.#reconfigure(current.capture, 'config-change');

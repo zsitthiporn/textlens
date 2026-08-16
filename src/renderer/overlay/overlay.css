@@ -51,11 +51,17 @@ body {
 }
 
 /* The pool's parent. Fixed and full-bleed so a box's transform is measured from the window's
-   top-left, which is the origin the renderer converts logical px into. */
+   top-left, which is the origin the renderer converts logical px into.
+
+   `--textlens-fade` is written here by overlay.ts from `render.fadeMs` on every payload, so the
+   crossfade duration (#37, A9) is configurable without a rebuild. The literal below is only the
+   value in force before the first payload arrives. */
 #boxes {
   position: fixed;
   inset: 0;
   pointer-events: none;
+
+  --textlens-fade: 120ms;
 }
 
 /*
@@ -124,7 +130,52 @@ body {
   visibility: hidden;
   display: none;
   opacity: 1;
-  will-change: transform;
+  will-change: transform, opacity;
+
+  /*
+   * A9 — a box appearing fades in and a box leaving fades out, instead of blinking.
+   *
+   * Only `opacity` is transitioned, and `transform` deliberately is not. A box that genuinely
+   * moved should arrive at its new position at once: gliding there reads as the overlay drifting
+   * under text that is standing still, which is the impression this whole milestone exists to
+   * remove. #35 is what makes a *spurious* move not happen in the first place; a transition here
+   * would only make the remaining real ones look like errors.
+   *
+   * `linear`, not an ease. Two boxes crossfading with an ease-in-out on each pass through a
+   * combined dip below full opacity in the middle, which is visible as a flicker on a dark
+   * background. Two linear ramps sum to a constant.
+   */
+  transition: opacity var(--textlens-fade, 120ms) linear;
+}
+
+/*
+ * A9 — the two text layers.
+ *
+ * The incoming layer is in normal flow, so the box is exactly as tall as the text it is about to
+ * show: M5-03 measures the box, and a measurement that included the outgoing string would return
+ * the taller of the two and lay out against a height the user never sees.
+ *
+ * The outgoing layer is taken out of flow and pinned to the content box, so it contributes
+ * nothing to that measurement while it fades away over the top.
+ */
+.box-in {
+  display: block;
+}
+
+.box-out {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 4px;
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* Added by `setText`, after a forced reflow so that re-adding it restarts the fade rather than
+   being a no-op to the transition engine. */
+.box-out.fading {
+  opacity: 0;
+  transition: opacity var(--textlens-fade, 120ms) linear;
 }
 
 /*

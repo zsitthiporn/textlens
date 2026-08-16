@@ -108,8 +108,36 @@ describe('BoxPool - retirement', () => {
       // `display: none` rather than `visibility: hidden`: a hidden box still takes part in
       // layout, so 46 unused boxes would be measured on every one of M5-03's passes.
       expect(box.style.display).toBe('none');
-      expect(box.textContent).toBe('');
+      expect(box.text).toBe('');
     }
+  });
+
+  it('retains an explicit, non-contiguous index set', () => {
+    // The generalisation A9 needs: a box fading out is not in the payload and must stay drawn.
+    const factory = fakeFactory(flat);
+    const pool = new BoxPool({ capacity: 5, create: factory.create, attach: factory.attach });
+
+    pool.take(5);
+    for (const box of factory.boxes) box.style.display = 'block';
+    pool.retain([0, 3]);
+
+    expect(factory.boxes.map((box) => box.style.display)).toEqual([
+      'block',
+      'none',
+      'none',
+      'block',
+      'none',
+    ]);
+    expect(pool.activeCount).toBe(2);
+  });
+
+  it('ignores out-of-range and duplicate indices rather than mis-counting', () => {
+    const factory = fakeFactory(flat);
+    const pool = new BoxPool({ capacity: 3, create: factory.create, attach: factory.attach });
+
+    pool.retain([0, 0, 2, 9, -1, 1.5]);
+
+    expect(pool.activeCount).toBe(2);
   });
 
   it('hideAll retires the lot', () => {

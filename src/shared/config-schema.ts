@@ -240,12 +240,156 @@ export const hotkeyConfigSchema = z.strictObject(hotkeyShape).readonly();
 export const hotkeyOverrideSchema = z.strictObject(hotkeyShape).partial().readonly();
 
 // ---------------------------------------------------------------------------
+// Render — the renderer's anti-flicker numbers (issues M8-01 / #35, M8-03 / #37)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every knob the overlay renderer needs, and the only config that crosses to it.
+ *
+ * It travels on {@link import('../renderer/overlay/contract.js').OverlayRenderMessage} rather
+ * than on a channel of its own. That is one fewer IPC surface, and - more usefully - it removes
+ * an ordering hazard that would be invisible when it bit: a renderer that receives config on a
+ * separate channel can draw its first payload before the config arrives, so the first subtitle
+ * of every session would be laid out against defaults that are not the user's. Carried on the
+ * payload, the numbers cannot be later than the frame they govern.
+ *
+ * The units are **CSS px and ms** throughout - renderer space. Nothing here is physical px.
+ */
+const renderShape = {
+  /**
+   * Grid resolution the OCR anchor is snapped to before placement, in CSS px (#35).
+   *
+   * Snapping alone does not stop jitter and is not what does the work here - see
+   * {@link anchorTolerance}. What the grid buys is that two anchors a pixel apart resolve to
+   * one position, and that a recomputed anchor lands on a round number rather than on whatever
+   * the recognizer happened to report that frame.
+   */
+  anchorGrid: z.number().int().positive(),
+
+  /**
+   * How far the true OCR anchor may drift from the one currently in use before the box is
+   * allowed to move, in CSS px (#35). **This is the hysteresis, and it is the part that works.**
+   *
+   * Grid snapping on its own fails the issue's own acceptance criterion: an anchor sitting near
+   * a cell boundary flips between two cells under +-3px jitter, so the box moves a whole grid
+   * cell - further than it would have moved with no snapping at all, and on roughly 3 frames in
+   * 8. Comparing against the anchor **in use** rather than against the previous raw reading is
+   * also what bounds cumulative drift: a recogniser walking 3px per frame in one direction
+   * exceeds this on the second frame and the anchor is recomputed, so a box can never trail its
+   * text by more than this value.
+   *
+   * 6 sits above the +-3px jitter design doc section 5 describes and well below a line height,
+   * so a box is never held over the line above or below its own.
+   */
+  anchorTolerance: z.number().nonnegative(),
+
+  /**
+   * Hard cap on remembered anchors (#35, "sticky cache ไม่โตไม่จำกัด").
+   *
+   * Bounded by eviction rather than by time: a subtitle that returns after a minute should get
+   * its old position back, so a TTL would throw away exactly the entries worth keeping. 128 is
+   * comfortably above the pool's 48 boxes, so every box on the busiest possible screen has an
+   * entry with room for the recent past as well.
+   */
+  stickyMaxEntries: z.number().int().positive(),
+
+  /**
+   * How long a box is guaranteed to stay before different content may replace it, in ms (#37).
+   *
+   * Deliberately **well under the measured translate latency** (p50 897ms under real pipeline
+   * load). The pipeline emits twice per frame - cache hits first, the full set when the engine
+   * answers - and a minimum longer than that round trip would delay every completed frame
+   * behind its own progressive half, turning an optimisation into a stall. 400ms is long enough
+   * that a replaced box was readable and short enough to disappear inside a gap the user is
+   * already waiting through.
+   *
+   * 0 disables the gate.
+   */
+  minDisplayMs: z.number().int().nonnegative(),
+
+  /**
+   * Crossfade duration in ms (#37). 0 disables the transition and swaps instantly.
+   *
+   * A compositor-driven opacity transition, so its cost is not paid in the 16ms render budget -
+   * but it is still an animation on an always-on-top window, and spike S2 is the reason that
+   * sentence needs evidence rather than confidence. See `tests`/report.
+   */
+  fadeMs: z.number().int().nonnegative(),
+} as const;
+
+export const renderConfigSchema = z.strictObject(renderShape).readonly();
+export const renderOverrideSchema = z.strictObject(renderShape).partial().readonly();
+
+// ---------------------------------------------------------------------------
+// Stability — content tracking and dynamic suppression (issue M8-02 / #36)
+// ---------------------------------------------------------------------------
+
+const stabilityShape = {
+  /**
+   * Whether an unchanged screen may suppress an overlay payload at all.
+   *
+   * A switch exists because this is the one anti-flicker rule whose failure mode is a caption
+   * that never appears. Everything else in M8 can only make a box late or make it move; this can
+   * make it absent, so there has to be a way to turn it off without a rebuild.
+   */
+  enabled: z.boolean(),
+
+  /**
+   * Minimum similarity for two strings to count as the same line, 0..1.
+   *
+   * 0.95, matching `dedup.ts`, and for the reason argued at length there: `...secure the
+   * evacuation` against `...the extraction` scores 0.90, and anything that swallows that pair
+   * suppresses a different instruction silently. 0.95 covers about one changed character in
+   * twenty, which is the size of the error spike S1 measured.
+   */
+  similarityThreshold: z.number().min(0).max(1),
+
+  /**
+   * Minimum set similarity for a frame to count as unchanged, 0..1.
+   *
+   * A fuzzy Jaccard over the frame's lines. A two-line subtitle with one line replaced scores
+   * 1/3, and a three-line one scores 1/2, so 0.9 keeps "some of it changed" firmly on the emit
+   * side - which is the direction the acceptance criteria push: a suppression that is too eager
+   * loses a sentence, a suppression that is too shy costs one redundant render.
+   */
+  setThreshold: z.number().min(0).max(1),
+
+  /**
+   * Lines a frame may hold that the baseline does not, and still count as unchanged.
+   *
+   * **0, and this field exists because the ratio above is not sufficient - measured, not
+   * reasoned about.** A real run over a full-screen capture produced 70 blocks; one line changing
+   * out of 70 scores 0.97, clearing any usable ratio. Since the baseline only advances when
+   * something is drawn, that frame would be suppressed and so would every frame after it, and the
+   * changed line would never be translated - permanently, with nothing reported.
+   *
+   * Structurally the same bug as #50 (a fraction whose meaning changes with its denominator) and
+   * it takes the same fix: an absolute floor beside the fraction. The ratio still earns its place
+   * in the other direction - lines *disappearing* add nothing new, and only the ratio sees them.
+   */
+  maxNewLines: z.number().int().nonnegative(),
+
+  /**
+   * Consecutive unchanged frames required before suppression starts.
+   *
+   * 2, not 1. The first repeat still emits, which costs one redundant payload per subtitle and
+   * buys a full capture interval of margin against a single mis-scored frame silencing new text.
+   */
+  frames: z.number().int().positive(),
+} as const;
+
+export const stabilityConfigSchema = z.strictObject(stabilityShape).readonly();
+export const stabilityOverrideSchema = z.strictObject(stabilityShape).partial().readonly();
+
+// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
 const configShape = {
   capture: captureConfigSchema,
   hotkeys: hotkeyConfigSchema,
+  render: renderConfigSchema,
+  stability: stabilityConfigSchema,
 } as const;
 
 /** Validates a complete config - the result of merging an override over the defaults. */
@@ -261,6 +405,8 @@ export const configOverrideSchema = z
   .strictObject({
     capture: captureOverrideSchema.optional(),
     hotkeys: hotkeyOverrideSchema.optional(),
+    render: renderOverrideSchema.optional(),
+    stability: stabilityOverrideSchema.optional(),
   })
   .readonly();
 
@@ -268,6 +414,8 @@ export type Region = z.infer<typeof regionSchema>;
 export type SavedRegion = z.infer<typeof savedRegionSchema>;
 export type CaptureConfig = z.infer<typeof captureConfigSchema>;
 export type HotkeyConfig = z.infer<typeof hotkeyConfigSchema>;
+export type RenderConfig = z.infer<typeof renderConfigSchema>;
+export type StabilityConfig = z.infer<typeof stabilityConfigSchema>;
 export type Config = z.infer<typeof configSchema>;
 export type ConfigOverride = z.infer<typeof configOverrideSchema>;
 
@@ -304,6 +452,20 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     snapshot: 'Control+Alt+S',
     selectRegion: 'Control+Alt+R',
     toggleOverlay: 'Control+Alt+H',
+  },
+  render: {
+    anchorGrid: 8,
+    anchorTolerance: 6,
+    stickyMaxEntries: 128,
+    minDisplayMs: 400,
+    fadeMs: 120,
+  },
+  stability: {
+    enabled: true,
+    similarityThreshold: 0.95,
+    setThreshold: 0.9,
+    maxNewLines: 0,
+    frames: 2,
   },
 });
 

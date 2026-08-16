@@ -49,6 +49,25 @@ export interface OverlayRenderPayload {
 }
 
 /**
+ * The renderer's own tuning numbers, in **CSS px and ms** (issues #35, #37).
+ *
+ * A structural subset of `RenderConfig` in `src/shared/config-schema.ts`, duplicated here for
+ * exactly the reason {@link OverlayRenderPayload} is: the renderer bundle cannot import zod or
+ * anything under `main/`. The drift is a compile error rather than a matter of vigilance -
+ * `WindowManager.setOverlayRender` takes this type and `src/main/index.ts` hands it the parsed
+ * config directly, so a renamed field stops type-checking at that call.
+ *
+ * Every field's meaning, and the argument for its default, is documented on the schema.
+ */
+export interface OverlayRenderConfig {
+  readonly anchorGrid: number;
+  readonly anchorTolerance: number;
+  readonly stickyMaxEntries: number;
+  readonly minDisplayMs: number;
+  readonly fadeMs: number;
+}
+
+/**
  * What actually crosses the IPC boundary.
  *
  * `origin` is the top-left of the display the overlay covers, in **logical px**, and it is sent
@@ -59,10 +78,26 @@ export interface OverlayRenderPayload {
  *
  * Subtracting it is the logical-px -> CSS-px step of the three-space contract in
  * `src/main/utils/coordinates.ts`, which names the renderer as that step's owner (invariant 3).
+ *
+ * `config` and `epoch` ride along on every payload rather than arriving on a channel of their
+ * own; see {@link OverlayRenderConfig} and {@link epoch}.
  */
 export interface OverlayRenderMessage {
   readonly payload: OverlayRenderPayload;
   readonly origin: { readonly x: number; readonly y: number };
+  /** The tuning numbers in force for this payload. */
+  readonly config: OverlayRenderConfig;
+  /**
+   * Bumped by the main process whenever everything the renderer remembers about *where* things
+   * were has stopped being true - a new region, a different monitor, the overlay moved to
+   * another display (#35's "เปลี่ยน region → cache ถูกล้าง").
+   *
+   * A counter rather than a `clearCache` message because it cannot arrive out of order with
+   * respect to the payload it applies to: the payload carries the epoch it belongs to, so a
+   * renderer comparing it against the last one it drew can never apply new boxes with stale
+   * remembered positions, however the two were scheduled.
+   */
+  readonly epoch: number;
 }
 
 /** IPC channel for {@link OverlayRenderMessage}. */

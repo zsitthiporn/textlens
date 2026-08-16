@@ -204,7 +204,10 @@ function frameEvent(): SidecarClientEvents['frame'] {
 interface FakeWindows {
   setOverlayVisible(visible: boolean): boolean;
   openSettings(): unknown;
+  bumpOverlayEpoch(reason: string): void;
   readonly calls: boolean[];
+  /** Every epoch bump, with the reason. #35's "region changed → cache cleared" is asserted here. */
+  readonly epochBumps: string[];
   visible: boolean;
   refuse: boolean;
   settingsOpened: number;
@@ -213,6 +216,7 @@ interface FakeWindows {
 function fakeWindows(): FakeWindows {
   const windows: FakeWindows = {
     calls: [],
+    epochBumps: [],
     visible: true,
     refuse: false,
     settingsOpened: 0,
@@ -225,6 +229,9 @@ function fakeWindows(): FakeWindows {
     openSettings() {
       windows.settingsOpened += 1;
       return null;
+    },
+    bumpOverlayEpoch(reason) {
+      windows.epochBumps.push(reason);
     },
   };
   return windows;
@@ -701,6 +708,42 @@ describe('AppOrchestrator: configuration changes', () => {
     // A configure while running leaves it running - no start/stop churn.
     expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure']);
     expectConverged(h, 'auto');
+  });
+
+  it('tells the renderer to forget its positions when the region changes', async () => {
+    // #35's "เปลี่ยน region → cache ถูกล้าง". A sticky anchor survives a jittering bbox by
+    // design, so nothing else would ever dislodge one: a box held at a position from the old
+    // region would sit under whatever now happens to be there, indefinitely.
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.windows.epochBumps.length = 0;
+
+    h.config.change({
+      capture: {
+        region: { rect: [10, 20, 300, 100], monitorId: '\\\\.\\DISPLAY1', monitorSize: [1920, 1080] },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(h.sidecar.kinds).toContain('configure');
+    });
+
+    expect(h.windows.epochBumps).toHaveLength(1);
+  });
+
+  it('does not forget them for a setting that cannot have moved anything', async () => {
+    // The other half, and the one worth pinning: discarding the anchors on every capture change
+    // would reintroduce the jitter they exist to absorb, on a settings edit that has nothing to
+    // do with position.
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.windows.epochBumps.length = 0;
+
+    h.config.change({ capture: { intervalActive: 250 } });
+    await vi.waitFor(() => {
+      expect(h.sidecar.kinds).toContain('configure');
+    });
+
+    expect(h.windows.epochBumps).toHaveLength(0);
   });
 
   it('ignores a change that does not touch capture', async () => {
