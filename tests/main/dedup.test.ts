@@ -430,6 +430,23 @@ describe('dedupeBlocks', () => {
   });
 
   it('returns [] for [] rather than throwing', () => {
-    expect(dedupeBlocks([], new Deduplicator(), T0)).toEqual({ kept: [], dropped: [] });
+    expect(dedupeBlocks([], new Deduplicator(), T0)).toEqual({ kept: [], dropped: [], verdicts: [] });
+  });
+
+  it('reports one verdict per block, in input order (#53)', () => {
+    // `kept` and `dropped` both lose the position each verdict belongs to, and #53's displayed set
+    // is rebuilt in observation order - so a compacted answer would have to be re-paired with the
+    // input by the caller, which is the row-shift class of bug `text-pipeline.ts` is built around.
+    const dedup = new Deduplicator();
+    const first = block('the northern gate is open', 0, 0);
+    const second = block('do not shoot until you see it', 0, 100);
+    const repeat = block('the northern gate is open', 0, 0);
+
+    const result = dedupeBlocks([first, second, repeat], dedup, T0);
+
+    expect(result.verdicts).toHaveLength(3);
+    expect(result.verdicts.map((decision) => decision.duplicate)).toEqual([false, false, true]);
+    const third = result.verdicts[2];
+    expect(third?.duplicate === true ? third.matchedText : null).toBe('the northern gate is open');
   });
 });

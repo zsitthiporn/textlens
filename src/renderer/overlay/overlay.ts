@@ -175,6 +175,8 @@ let epoch: number | null = null;
 let session = newSession(config);
 let lastStats: RenderStats | null = null;
 let lastSeq: number | null = null;
+/** The last id reported back to the main process (#52). Readable through the diagnostics seam. */
+let lastDrawn: number | null = null;
 let lastMessage: OverlayRenderMessage | null = null;
 let sweepTimer: ReturnType<typeof setTimeout> | null = null;
 let draws = 0;
@@ -226,6 +228,14 @@ function draw(message: OverlayRenderMessage): void {
   lastSeq = message.payload.seq;
   lastMessage = message;
   draws += 1;
+
+  // #52. Here rather than in the bridge subscription, and that is the whole point: everything
+  // between the two - the minimum-display hold, the frame scheduler's coalescing - exists to
+  // *not* draw some of the payloads that arrive, and the main process has no way to know which.
+  // Reported for an A6 skip too: a skipped render means this payload's picture is already on
+  // screen, which is the same claim.
+  lastDrawn = message.id;
+  window.textlensOverlay?.reportDrawn(message.id);
 
   const stats = renderEntries(
     entries,
@@ -395,6 +405,8 @@ declare global {
       };
       readonly stats: () => RenderStats | null;
       readonly seq: () => number | null;
+      /** The id of the last message that reached `draw` and was acked to main (#52). */
+      readonly drawn: () => number | null;
       readonly renders: () => number;
       readonly draws: () => number;
       readonly repaints: () => number;
@@ -430,6 +442,7 @@ Object.defineProperty(window, '__textlensOverlay', {
     }),
     stats: () => lastStats,
     seq: () => lastSeq,
+    drawn: () => lastDrawn,
     renders: () => scheduler.renders,
     draws: () => draws,
     repaints: () => repaints,

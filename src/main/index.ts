@@ -24,6 +24,7 @@ import {
 import { DEFAULT_CONFIG } from '../shared/config-schema.js';
 import { AppOrchestrator, SIDECAR_EXIT_ERROR, type AppStatus } from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
+import { DrawnPayloads } from './services/drawn-payloads.js';
 import {
   ErrorReporter,
   describeAlert,
@@ -41,11 +42,7 @@ import { MonitorService } from './services/monitor-service.js';
 import { RecentOutputs } from './services/recent-outputs.js';
 import { SidecarClient, resolveSidecarPath } from './services/sidecar-client.js';
 import { SidecarSupervisor } from './services/sidecar-supervisor.js';
-import {
-  createTextPipeline,
-  type ComposedTextPipeline,
-  type OverlayPayload,
-} from './services/text-pipeline.js';
+import { createTextPipeline, type ComposedTextPipeline } from './services/text-pipeline.js';
 import {
   TrayService,
   resolveTrayIconDir,
@@ -75,6 +72,9 @@ let textPipeline: ComposedTextPipeline | null = null;
 let orchestrator: AppOrchestrator | null = null;
 let tray: TrayService | null = null;
 let monitors: MonitorService | null = null;
+/** F2's writing half (#52). Held so shutdown can drop what the renderer will never answer for. */
+let drawnPayloads: DrawnPayloads | null = null;
+let stopDrawnListener: (() => void) | null = null;
 let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
 /** Frames dropped because their monitor is unpaired. Counted so the log can be rate-limited. */
@@ -195,13 +195,14 @@ async function bootstrap(): Promise<void> {
   windows.setOverlayRender((config?.current ?? DEFAULT_CONFIG).render);
   config?.subscribe((current, previous) => {
     windows?.setOverlayRender(current.render);
-    // #36's "reset ได้เมื่อเปลี่ยน region". The renderer's own positional memory is cleared by
-    // the epoch bump `AppOrchestrator` issues for the same event; this is the main-process half,
-    // and it is here rather than in the orchestrator because the pipeline is this file's to hold.
+    // #36's "reset ได้เมื่อเปลี่ยน region", and since #52 the dedup and displayed-set halves of
+    // the same thing. The renderer's own positional memory is cleared by the epoch bump
+    // `AppOrchestrator` issues for the same event; this is the main-process half, and it is here
+    // rather than in the orchestrator because the pipeline is this file's to hold.
     const moved =
       JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) ||
       current.capture.monitorId !== previous.capture.monitorId;
-    if (moved) textPipeline?.pipeline.resetStability('capture region or monitor changed');
+    if (moved) textPipeline?.pipeline.resetScene('capture region or monitor changed');
   });
   windows.openSettings('settings');
   windows.openOverlay();
@@ -277,7 +278,7 @@ async function bootstrap(): Promise<void> {
 
     if (status.mode === lastMode) return;
     lastMode = status.mode;
-    textPipeline?.pipeline.resetStability(`mode changed to ${status.mode}`);
+    textPipeline?.pipeline.resetScene(`mode changed to ${status.mode}`);
   });
 
   startTray(orchestrator);
@@ -485,6 +486,19 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
   // actually puts something on screen may record it.
   const recentOutputs = new RecentOutputs();
 
+  // #52. The writing half of F2, and the reason it is a service rather than four lines here:
+  // "displayed" is a fact only the renderer has, and the rules about which of its entries may be
+  // recorded are the kind that need a test to hold them down. Visibility is read at ack time, off
+  // the window itself - `lastStatus` is the mode machine's belief, and this is the window's.
+  const drawn = new DrawnPayloads({
+    recentOutputs,
+    isVisible: () => windows?.overlayVisible ?? false,
+  });
+  drawnPayloads = drawn;
+  stopDrawnListener = windows?.onOverlayDrawn((id) => {
+    drawn.drawn(id);
+  }) ?? null;
+
   const composed = createTextPipeline({
     fetch: net.fetch,
     cachePath: path.join(app.getPath('userData'), 'translation-cache.db'),
@@ -495,8 +509,13 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
     // the reset paths below already cover the events that actually invalidate it.
     stability: (config?.current ?? DEFAULT_CONFIG).stability,
     onPayload: (payload) => {
-      const sent = windows?.sendOverlayPayload(payload) ?? false;
-      if (sent) rememberDisplayed(payload, recentOutputs);
+      const id = windows?.sendOverlayPayload(payload) ?? null;
+      const sent = id !== null;
+      // Recorded as *sent*, never as displayed. `DrawnPayloads` turns one into the other when the
+      // renderer says so, which is the whole of #52: the minimum-display gate can supersede this
+      // payload before it is ever painted, and `RecentOutputs` has no TTL to recover from being
+      // told about text nobody saw.
+      if (id !== null) drawn.sent(id, payload.entries);
 
       // #41 row 3, and the reason design doc section 7 exempts `degraded` from
       // identical-suppression in the first place: the user is looking at English, on purpose, and
@@ -513,6 +532,10 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
         seq: payload.seq,
         complete: payload.complete,
         sent,
+        // Counts only. Evidence that the ack loop is closed: `remembered` climbing while
+        // `discarded` stays flat is a renderer answering for everything it is given.
+        remembered: drawn.remembered,
+        discarded: drawn.discarded,
         engine: payload.engine,
         degraded: payload.degraded,
         failures: payload.failures.length,
@@ -533,33 +556,6 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
   });
 
   return composed;
-}
-
-/**
- * Record what the overlay just drew, so OCR reading it back is recognised as our own output
- * (feature F2, design doc section 6, layer 2).
- *
- * Called only when {@link WindowManager.sendOverlayPayload} reports the payload actually
- * reached a live renderer. Remembering text that was never drawn would filter a translation the
- * user never saw.
- *
- * Two exclusions, both of which look like omissions and are not:
- *
- * **Only `entry.text`, never `entry.sourceText`.** `OverlayEntry.sourceText`'s own doc comment
- * says "M5-01 remembers it", and doing that would be a serious bug. `sourceText` is the *English
- * on the user's screen* - the thing we are here to translate. `RecentOutputs` has no TTL, so
- * remembering it means that subtitle line is dropped by F2 for the rest of the session, and
- * never translated again. Only the Thai we painted is our own output.
- *
- * **Never a `degraded` entry.** Its text *is* the original English, so remembering it is the
- * same bug by a different route: the English echoed during an engine outage would be suppressed
- * permanently once the engine recovered. Recorded on issue #23.
- */
-function rememberDisplayed(payload: OverlayPayload, recentOutputs: RecentOutputs): void {
-  for (const entry of payload.entries) {
-    if (entry.origin === 'degraded') continue;
-    recentOutputs.remember(entry.text);
-  }
 }
 
 /**
@@ -688,6 +684,11 @@ async function shutdown(): Promise<void> {
   // After the sidecar, so no frame can arrive and find the cache handle already gone.
   textPipeline?.close();
   log?.info('translation cache closed');
+
+  // Before the windows go: once the overlay is destroyed nothing can ever confirm what it drew,
+  // and a payload left waiting for an ack that cannot arrive is not a payload that was displayed.
+  stopDrawnListener?.();
+  drawnPayloads?.reset();
 
   windows?.closeAll();
   log?.info('shutdown complete');

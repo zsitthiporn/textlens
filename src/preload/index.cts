@@ -5,6 +5,8 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { TextlensBridge } from '../shared/types.js';
 import type {
   OverlayBridge,
+  OverlayDrawnChannel,
+  OverlayDrawnMessage,
   OverlayPayloadChannel,
   OverlayRenderMessage,
   OverlayStatusChannel,
@@ -40,6 +42,7 @@ contextBridge.exposeInMainWorld('textlens', bridge);
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
 const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
+const OVERLAY_DRAWN_CHANNEL: OverlayDrawnChannel = 'textlens:overlay-drawn';
 
 /**
  * The overlay half of the bridge, on its own key.
@@ -75,6 +78,14 @@ const overlayBridge: OverlayBridge = {
     return () => {
       ipcRenderer.removeListener(OVERLAY_STATUS_CHANNEL, wrapped);
     };
+  },
+  // `send`, not `invoke`, for the same reason the region picker's `submit` is (#52): the renderer
+  // is reporting something that has already happened and has nothing to wait for. The id is
+  // narrowed here rather than trusted, because the diagnostics seam lets a CDP driver push a
+  // message in that never came from the main process and so has no id at all.
+  reportDrawn(id: number): void {
+    if (typeof id !== 'number' || !Number.isFinite(id)) return;
+    ipcRenderer.send(OVERLAY_DRAWN_CHANNEL, { id } satisfies OverlayDrawnMessage);
   },
 };
 

@@ -185,6 +185,38 @@ export class Deduplicator {
   }
 
   /**
+   * Drop every entry recorded for one string, wherever it sits (#53).
+   *
+   * The window alone cannot express "this text left the screen". `text-pipeline.ts` retires an
+   * overlay entry the first frame OCR stops seeing its source, and without this the two memories
+   * disagree in the one direction that loses text: the entry is gone from the displayed set while
+   * the dedup entry is still live, so the same line reappearing inside the window is called a
+   * duplicate, has no translation to be re-shown from, and is drawn *nowhere* until the window
+   * expires - up to `windowMs` of a caption that is on screen and untranslated, with nothing to
+   * see in the log.
+   *
+   * Forgetting instead means a reappearance is treated as new text and retranslated, which is a
+   * cache hit and the cheap error this module is tuned around.
+   *
+   * @param text Raw or already-normalized; normalization is idempotent, so callers holding an
+   *             entry's recorded text and callers holding OCR output can both use this.
+   * @returns how many entries were dropped.
+   */
+  forget(text: string): number {
+    const key = normalizeForComparison(text);
+    if (key.length === 0) return 0;
+
+    let dropped = 0;
+    for (const [cellKey, entries] of this.#cells) {
+      const kept = entries.filter((entry) => entry.text !== key);
+      dropped += entries.length - kept.length;
+      if (kept.length === 0) this.#cells.delete(cellKey);
+      else if (kept.length !== entries.length) this.#cells.set(cellKey, kept);
+    }
+    return dropped;
+  }
+
+  /**
    * Decide whether this candidate has already been handled, and record it if it has not.
    *
    * A duplicate verdict deliberately records **nothing**: the entry it matched stays as it is,
@@ -296,6 +328,16 @@ export interface DedupeBlocksResult {
   readonly kept: readonly TextBlock[];
   /** Blocks suppressed as duplicates, with the rule and the text they matched. */
   readonly dropped: readonly { readonly block: TextBlock; readonly decision: DedupDecision }[];
+  /**
+   * One verdict per input block, in input order (#53).
+   *
+   * `kept` and `dropped` are the two halves a caller usually wants, and both of them have lost
+   * the thing #53 needs: which *position* on the screen each verdict belongs to. The pipeline
+   * rebuilds the whole displayed set in observation order, so it needs the blocks and the
+   * verdicts index-aligned - the same "aligned, never compacted" rule `placement.ts` and
+   * `SlotAllocator` follow, and for the same reason.
+   */
+  readonly verdicts: readonly DedupDecision[];
 }
 
 /**
@@ -312,14 +354,16 @@ export function dedupeBlocks(
 ): DedupeBlocksResult {
   const kept: TextBlock[] = [];
   const dropped: { block: TextBlock; decision: DedupDecision }[] = [];
+  const verdicts: DedupDecision[] = [];
 
   for (const block of blocks) {
     const decision = deduplicator.admit({ text: block.text, bbox: block.bbox }, nowMs);
+    verdicts.push(decision);
     if (decision.duplicate) dropped.push({ block, decision });
     else kept.push(block);
   }
 
-  return { kept, dropped };
+  return { kept, dropped, verdicts };
 }
 
 /**

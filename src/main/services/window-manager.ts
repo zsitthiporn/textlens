@@ -29,6 +29,8 @@ import path from 'node:path';
 import { BrowserWindow, ipcMain, screen, type Display, type Rectangle } from 'electron';
 
 import type {
+  OverlayDrawnChannel,
+  OverlayDrawnMessage,
   OverlayPayloadChannel,
   OverlayRenderConfig,
   OverlayRenderPayload,
@@ -52,6 +54,7 @@ import { nullLogger, type Logger } from './logger.js';
  */
 const OVERLAY_PAYLOAD_CHANNEL: OverlayPayloadChannel = 'textlens:overlay-payload';
 const OVERLAY_STATUS_CHANNEL: OverlayStatusChannel = 'textlens:overlay-status';
+const OVERLAY_DRAWN_CHANNEL: OverlayDrawnChannel = 'textlens:overlay-drawn';
 
 /**
  * What a payload carries before {@link WindowManager.setOverlayRender} has been called.
@@ -196,6 +199,13 @@ export class WindowManager {
    * first frame after a region change, which is the hardest kind of bug to catch by looking.
    */
   #overlayEpoch = 0;
+  /**
+   * Monotonic id for every payload message sent (#52).
+   *
+   * Never reset, including when the overlay is replaced: an ack that arrives from a document that
+   * has since gone away must not be able to match a message sent to its successor.
+   */
+  #overlayMessageId = 0;
   /**
    * The last status published (#41), replayed once the overlay document is ready.
    *
@@ -496,29 +506,63 @@ export class WindowManager {
    * `src/main/index.ts` passes the pipeline's `OverlayPayload` straight into it. That call is
    * the drift guard: if the pipeline renames a field the renderer reads, this stops compiling.
    *
-   * @returns whether the message was actually sent. `false` means nothing was drawn, which is
-   *          what the caller needs to know before recording anything as "displayed" (F2).
+   * @returns the id this message was sent under, or `null` when nothing was sent.
+   *
+   * A number rather than the old boolean, because "it was sent" and "it was drawn" are different
+   * facts and #52 is the bug that came of conflating them. The id is what {@link onOverlayDrawn}
+   * reports back; a caller that only cares whether anything left the process still gets its
+   * answer from `!== null`.
    */
-  sendOverlayPayload(payload: OverlayRenderPayload): boolean {
+  sendOverlayPayload(payload: OverlayRenderPayload): number | null {
     const overlay = this.#overlay;
     const origin = this.#overlayOrigin;
-    if (overlay === null || overlay.isDestroyed() || origin === null) return false;
+    if (overlay === null || overlay.isDestroyed() || origin === null) return null;
     if (!this.#overlayReady) {
       // Frames can arrive before the overlay document has run its script, and `webContents.send`
       // to a window with no listener is a silent no-op. Reported rather than assumed, because
       // "the first few translations never appeared" is otherwise indistinguishable from a
       // translation engine that was slow to warm up.
       this.#log.debug('overlay is not ready yet; dropping a payload', { seq: payload.seq });
-      return false;
+      return null;
     }
 
+    this.#overlayMessageId += 1;
     overlay.webContents.send(OVERLAY_PAYLOAD_CHANNEL, {
+      id: this.#overlayMessageId,
       payload,
       origin,
       config: this.#overlayRender ?? FALLBACK_OVERLAY_RENDER,
       epoch: this.#overlayEpoch,
     });
-    return true;
+    return this.#overlayMessageId;
+  }
+
+  /**
+   * Subscribe to the renderer's confirmation that a payload was drawn (issue #52).
+   *
+   * Registered against `ipcMain` once and filtered by sender, the same way `pickRegion` filters
+   * its result: every window in this app loads the same preload, so another renderer holding it
+   * could otherwise confirm a payload it has nothing to do with. Returns an unsubscribe.
+   */
+  onOverlayDrawn(listener: (id: number) => void): () => void {
+    const handler = (event: Electron.IpcMainEvent, message: OverlayDrawnMessage): void => {
+      const overlay = this.#overlay;
+      if (overlay === null || overlay.isDestroyed()) return;
+      if (event.sender !== overlay.webContents) return;
+      if (typeof message?.id !== 'number' || !Number.isFinite(message.id)) return;
+      listener(message.id);
+    };
+
+    ipcMain.on(OVERLAY_DRAWN_CHANNEL, handler);
+    return () => {
+      ipcMain.removeListener(OVERLAY_DRAWN_CHANNEL, handler);
+    };
+  }
+
+  /** Whether the overlay window is on screen. `false` when it is hidden or does not exist. */
+  get overlayVisible(): boolean {
+    const overlay = this.#overlay;
+    return overlay !== null && !overlay.isDestroyed() && overlay.isVisible();
   }
 
   /**

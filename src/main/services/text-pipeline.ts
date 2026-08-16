@@ -77,9 +77,11 @@
  * ## What is deliberately not here
  *
  * - **`RecentOutputs.remember`.** That module is explicit that only the stage which actually
- *   puts something on screen may record it, and that stage is M5-01. This one reads (`has`) and
- *   does not write, so an optional `recentOutputs` passed in today filters nothing and is
- *   correct the moment render starts remembering.
+ *   puts something on screen may record it, and that stage is the renderer - which since #52 says
+ *   so itself, on the ack channel. This one reads (`has`) and does not write. Note that the
+ *   displayed set below is *not* a second copy of that memory and must not be conflated with it:
+ *   this one holds what the overlay should be showing, including untranslated originals, while
+ *   `RecentOutputs` holds only what we painted and must never learn about a degraded entry.
  * - **Monitor-to-Display pairing.** `handleFrame` takes the `DisplayGeometry` from its caller;
  *   picking the right display for `frame.monitor.id` is M6-01, and `coordinates.ts` explains at
  *   length why it cannot be derived from the wire.
@@ -99,10 +101,18 @@ import {
   type ThaiScriptFilterOptions,
 } from '../utils/thai-script-filter.js';
 import { TranslationCache, type CacheLookup, type CacheStatus, type CacheWrite } from './cache.js';
-import { dedupeBlocks, Deduplicator, type DedupOptions } from './dedup.js';
+import {
+  dedupeBlocks,
+  Deduplicator,
+  digitSignature,
+  similarity,
+  DEFAULT_POSITION_TOLERANCE,
+  DEFAULT_SIMILARITY_THRESHOLD,
+  type DedupOptions,
+} from './dedup.js';
 import { nullLogger, type Logger } from './logger.js';
 import type { MetricsRecorder } from './metrics.js';
-import type { RecentOutputs } from './recent-outputs.js';
+import { normalizeForComparison, type RecentOutputs } from './recent-outputs.js';
 import { StabilityTracker, type StabilityOptions } from './stability-tracker.js';
 import type { GoogleEngineOptions } from './translator/engines/google.js';
 import {
@@ -122,7 +132,13 @@ export type EntryOrigin = 'cache' | 'engine' | 'degraded';
 export interface OverlayEntry {
   /** The text to display. The original when `origin` is `degraded`. */
   readonly text: string;
-  /** The OCR text this came from. M5-03's sticky placement compares on it; M5-01 remembers it. */
+  /**
+   * The OCR text this came from. M5-03's sticky placement compares on it.
+   *
+   * **Nothing records this string.** It is the English on the user's screen, and `RecentOutputs`
+   * has no TTL - remembering it would drop that line from translation for the rest of the session
+   * (#52). Only `text`, and only once the renderer confirms it was drawn.
+   */
   readonly sourceText: string;
   /** Logical px, absolute on the virtual desktop. The renderer converts to CSS px. */
   readonly bbox: LogicalRect;
@@ -158,6 +174,16 @@ export interface PipelineStats {
   readonly cacheMisses: number;
   /** Translated, but the result equalled the source, so it was not forwarded to render. */
   readonly identical: number;
+  /**
+   * Entries carried over from an earlier frame because their source text is still on screen (#53).
+   *
+   * The counterpart to `duplicate`: dedup removed those blocks so they are not translated again,
+   * and this is how many of them are still in the payload anyway. A frame where `duplicate` is
+   * high and this is 0 is the bug #53 describes, visible in one log line.
+   */
+  readonly held: number;
+  /** Entries retired because OCR no longer sees their source text (#53). */
+  readonly removed: number;
   /** Entries in this payload. */
   readonly rendered: number;
 }
@@ -176,6 +202,20 @@ export type CollectStats = Pick<
  * is the progressive-render branch of the design doc section 4 diagram - a cache hit costs 0ms
  * and has no reason to wait behind a 300-500ms round trip. The second payload is the *full*
  * set, not the remainder, so a renderer that replaces its contents wholesale stays correct.
+ *
+ * ## `entries` is the whole displayed set, never a delta (#53)
+ *
+ * Every entry the overlay should be showing is in here, including the ones this frame did not
+ * translate because dedup recognised their source text as unchanged. That is what the renderer
+ * has always assumed - `renderEntries` draws what it is given and retires everything else - and
+ * what `transitions.ts` relies on when it argues that a payload displacing another inside the
+ * minimum-display hold cannot lose content.
+ *
+ * Until #53 it was not true: dedup's job is to remove the unchanged blocks, so a frame in which
+ * one line of forty changed carried one entry and retired thirty-nine boxes whose text was still
+ * on the screen. Measured on a live desktop capture, the overlay oscillated between 39 boxes and
+ * 1 every 1.6 seconds. `TextPipeline` therefore remembers what each block was translated to and
+ * re-emits it for as long as OCR keeps reporting the source.
  */
 export interface OverlayPayload {
   /** The `frame.seq` this came from. Two payloads may share one. */
@@ -183,7 +223,16 @@ export interface OverlayPayload {
   /** False for the progressive first half; true for the frame's final payload. */
   readonly complete: boolean;
   readonly entries: readonly OverlayEntry[];
-  /** True when at least one entry is an untranslated original because every engine failed. */
+  /**
+   * True when **this frame's** translation attempt fell back to the untranslated original.
+   *
+   * Deliberately not "this payload contains a degraded entry", which since #53 is a different
+   * question: an English box held from an earlier outage can still be on screen after an engine
+   * has recovered. `judgeTranslation` (#41) reads this one, and it must keep describing the
+   * attempt, because `failures` - the only thing that can say *why* the user is looking at
+   * English - is empty on a frame that called no engine. The other reader, #36's degraded
+   * baseline, needs the on-screen question instead and is given it separately; see `#run`.
+   */
   readonly degraded: boolean;
   /** The engine that answered, or null when none was called or all of them failed. */
   readonly engine: string | null;
@@ -193,6 +242,66 @@ export interface OverlayPayload {
   readonly cacheStatus: CacheStatus;
   readonly stats: PipelineStats;
 }
+
+/**
+ * One entry the overlay is currently showing, remembered so it can be sent again (#53).
+ *
+ * Keyed exactly the way `dedup.ts` keys its own entries - `normalizeForComparison(block.text)` -
+ * because dedup is what answers "is this block the one that produced that entry". A duplicate
+ * verdict carries the recorded entry's text as `matchedText`, and that string *is* the key here,
+ * which is what lets a jittered re-read of the same line find its translation.
+ */
+interface DisplayedEntry {
+  /** The text on screen: the translation, or the original when `origin` is `degraded`. */
+  readonly text: string;
+  /**
+   * The source text as first read, **not** as re-read this frame.
+   *
+   * #35 keys its sticky anchors on this, so a value that drifted with OCR jitter would give the
+   * box a new anchor identity every frame - the churn the sticky anchors exist to remove, moved
+   * one stage upstream. The rectangle *does* follow the fresh reading; only the identity is held.
+   */
+  readonly sourceText: string;
+  /** Where it was last seen. Only {@link TextPipeline.recall}'s fallback match reads this. */
+  readonly bbox: LogicalRect;
+  readonly origin: EntryOrigin;
+}
+
+/**
+ * One block as this frame observed it, with dedup's verdict already applied.
+ *
+ * The ordered list of these is the screen; `slot` is the only thing that distinguishes a block
+ * that needs translating from one that is already accounted for.
+ */
+interface ObservedBlock {
+  readonly block: TextBlock;
+  /** The key its translation is remembered under. See {@link DisplayedEntry}. */
+  readonly key: string;
+  /** Index into the fresh-block array when dedup let it through; `null` when it is a duplicate. */
+  readonly slot: number | null;
+}
+
+/** One observed block paired with whatever the overlay is already showing for it. */
+interface RecalledBlock extends ObservedBlock {
+  readonly remembered: DisplayedEntry | undefined;
+}
+
+/**
+ * How closely a re-read has to match a remembered entry to be the same line, when the key does
+ * not match outright. Deliberately `dedup.ts`'s own numbers.
+ *
+ * The fallback exists because dedup's key is only stable while dedup remembers the line. Its
+ * window is 3s and a match does not refresh it, so a subtitle that sits still is readmitted every
+ * 3s and - if OCR read it even one character differently that time - readmitted under a *new*
+ * key. Keyed alone, the entry the user is looking at would read as vanished on that frame and the
+ * box would be retired and rebuilt every three seconds, which is #53 again with a longer period.
+ *
+ * Matching on the same threshold as dedup means the two agree by construction: any reading dedup
+ * would have called a duplicate is a reading this finds, and the position bound stops a repeated
+ * label elsewhere on the screen from adopting an entry that really did disappear.
+ */
+const RECALL_SIMILARITY = DEFAULT_SIMILARITY_THRESHOLD;
+const RECALL_POSITION_TOLERANCE = DEFAULT_POSITION_TOLERANCE;
 
 /**
  * The translator, structurally.
@@ -302,6 +411,16 @@ export class TextPipeline {
   #lastEmittedSeq = Number.NEGATIVE_INFINITY;
   #cacheDisabledReported = false;
 
+  /**
+   * What the overlay is showing, as of the last payload that reached it (#53).
+   *
+   * Replaced wholesale on every successful emit rather than mutated, so it can only ever contain
+   * blocks this frame observed - which is what makes "gone" an observation instead of a guess.
+   * Advanced only on a *successful* emit, for the same reason #36's baseline is: a payload the
+   * renderer refused did not change the screen.
+   */
+  #displayed = new Map<string, DisplayedEntry>();
+
   constructor(options: TextPipelineOptions) {
     this.#translator = options.translator;
     this.#cache = options.cache;
@@ -358,20 +477,67 @@ export class TextPipeline {
     // #36. Called for **every** frame, including the ones that end below, because the streak is a
     // count of consecutive observations - skip the call on a quiet frame and the count is wrong
     // for the loud one after it.
-    const stability = this.#stability.observe(survivors.observed);
+    const stability = this.#stability.observe(survivors.observedTexts);
     const counts: CollectStats = { ...survivors.counts, stableStreak: stability.streak };
 
+    /**
+     * What the overlay is showing, matched against what this frame sees (#53).
+     *
+     * `absent` is the entries no block in this frame accounts for, and **one frame of absence is
+     * the whole rule**. It is an observation rather than a guess: the sidecar runs OCR over the
+     * *entire* region and only emits a frame when the pixels changed, so a line missing from
+     * `frame.lines` is a line that is not on the screen. A grace period would buy nothing against
+     * the case that matters - text vanishing usually leaves a quiet screen behind it, no further
+     * frames arrive, and a countdown measured in frames would never expire.
+     */
+    const resolved = this.#resolve(survivors.observed);
+    const absent = resolved.absent;
+
     if (survivors.blocks.length === 0) {
-      // "ไม่เหลืออะไรใหม่? จบรอบ" - and deliberately no empty payload. Dedup suppresses text
-      // that is still on screen unchanged, so an empty round means "nothing new", not "nothing
-      // to show"; emitting one would make a renderer that replaces its contents clear the
-      // overlay on every steady frame. Invariant 4 is served by the counts in this log line.
-      this.#logger.debug('nothing new in this frame', { seq: frame.seq, ...counts });
+      if (absent.length === 0) {
+        // "ไม่เหลืออะไรใหม่? จบรอบ" - and deliberately no payload at all. Everything on screen is
+        // still on screen and already drawn, so the only payload this frame could produce is the
+        // one the renderer is already showing. Invariant 4 is served by the counts in this line.
+        this.#logger.debug('nothing new in this frame', { seq: frame.seq, ...counts });
+        this.#recordTotal(frame, startedAt);
+        return undefined;
+      }
+
+      // Nothing new, but something left: the two-source case in #53 - a HUD disappears while the
+      // subtitle under it is unchanged. No engine, no cache, no translation; the payload is simply
+      // what is still there, which is how the box that is not comes off the screen.
+      const built = this.#buildEntries(resolved.blocks, [], []);
       this.#recordTotal(frame, startedAt);
-      return undefined;
+      return this.#deliver(
+        {
+          seq: frame.seq,
+          complete: true,
+          entries: built.entries,
+          degraded: false,
+          engine: null,
+          failures: [],
+          cacheStatus: this.#cache.status,
+          stats: {
+            ...counts,
+            sameLanguage: 0,
+            cacheHits: 0,
+            cacheMisses: 0,
+            identical: 0,
+            held: built.held,
+            removed: absent.length,
+            rendered: built.entries.length,
+          },
+        },
+        { observed: survivors.observedTexts, next: built.next, absent, degradedOnScreen: built.degraded },
+      );
     }
 
-    if (stability.suppress) {
+    // A frame that only *loses* entries is never suppressed. #36 scores similarity over the whole
+    // screen, and one line vanishing from a screen of seventy scores 0.986 - comfortably
+    // "unchanged", which is true of the text that remains and false of the box that no longer has
+    // any. The override cannot loop: the payload it lets through is strictly smaller, so it
+    // differs from the one on screen and the baseline advances past it.
+    if (stability.suppress && absent.length === 0) {
       // Dedup let something through - normally because its 3s window expired under a subtitle
       // that is still on screen - but the screen as a whole has not changed since the last thing
       // the user was shown. Translating and redrawing it would repaint a picture they are already
@@ -438,11 +604,20 @@ export class TextPipeline {
     };
 
     // ---- progressive render: hits do not wait behind a 300-500ms round trip ---------------
-    const partial = cacheHits > 0 && misses.length > 0 ? this.#buildEntries(blocks, translated, origins) : undefined;
+    const partial =
+      cacheHits > 0 && misses.length > 0
+        ? this.#buildEntries(resolved.blocks, translated, origins)
+        : undefined;
     // `partial.entries` can be empty even with hits: identical translations are cached (a proper
     // noun comes back unchanged from every engine), so the next frame's hit is suppressed as
     // identical and there is nothing early to draw. Emitting that would clear a renderer that
     // replaces its contents - the same reason the empty round below emits nothing.
+    //
+    // The blocks still in flight are *absent* from this payload, which is the one place the
+    // whole-set rule costs something: a box whose words just changed is retired for the length of
+    // the round trip and re-enters with the new text. Before #53 every box in the frame was, so
+    // this is the same trade made over a far smaller set - and `#displayed` is deliberately not
+    // advanced here, so the in-flight blocks are not mistaken for gone on the next frame.
     if (partial !== undefined && partial.entries.length > 0) {
       this.#emit({
         seq: frame.seq,
@@ -452,7 +627,13 @@ export class TextPipeline {
         engine: null,
         failures: [],
         cacheStatus: this.#cache.status,
-        stats: { ...baseStats, identical: partial.identical, rendered: partial.entries.length },
+        stats: {
+          ...baseStats,
+          identical: partial.identical,
+          held: partial.held,
+          removed: absent.length,
+          rendered: partial.entries.length,
+        },
       });
     }
 
@@ -480,7 +661,7 @@ export class TextPipeline {
     }
 
     // ---- payload --------------------------------------------------------------------------
-    const built = this.#buildEntries(blocks, translated, origins);
+    const built = this.#buildEntries(resolved.blocks, translated, origins);
     const payload: OverlayPayload = {
       seq: frame.seq,
       complete: true,
@@ -489,15 +670,25 @@ export class TextPipeline {
       engine: outcome.engine,
       failures: outcome.failures,
       cacheStatus: this.#cache.status,
-      stats: { ...baseStats, identical: built.identical, rendered: built.entries.length },
+      stats: {
+        ...baseStats,
+        identical: built.identical,
+        held: built.held,
+        removed: absent.length,
+        rendered: built.entries.length,
+      },
     };
 
     this.#recordTotal(frame, startedAt);
 
-    if (payload.entries.length === 0) {
+    if (payload.entries.length === 0 && absent.length === 0) {
       // The baseline is deliberately **not** advanced here. Nothing reached the screen, so the
       // next frame must still read as new - otherwise this frame's text is suppressed from now
       // on and never drawn at all.
+      //
+      // `absent.length === 0` is what keeps this from swallowing a screen that emptied: an empty
+      // payload with something to remove is not "nothing to draw", it is "draw nothing", and the
+      // renderer needs to be told before it will let the last boxes go.
       this.#logger.debug('every block translated to its own source; nothing to draw', {
         seq: frame.seq,
         ...payload.stats,
@@ -505,36 +696,182 @@ export class TextPipeline {
       return undefined;
     }
 
+    return this.#deliver(payload, {
+      observed: survivors.observedTexts,
+      next: built.next,
+      absent,
+      // #36's degraded exemption asks whether the **user is looking at** untranslated English, not
+      // whether this frame's engine call failed. Since #53 those differ: after a recovery the new
+      // line translates while old English boxes are still held, and a baseline that called that
+      // frame healthy would let suppression strand them - the exact stranding
+      // `stability-tracker.ts` documents. `payload.degraded` keeps the narrower meaning for #41.
+      degradedOnScreen: degraded || built.degraded,
+    });
+  }
+
+  /**
+   * Emit a payload and, if it landed, adopt everything that follows from it (#53).
+   *
+   * One place, because the three effects are one decision and splitting them is how they drift:
+   * the displayed set, #36's baseline and dedup's memory of vanished text all describe the screen
+   * *after* this payload, and none of them may move if the payload never reached it.
+   */
+  #deliver(
+    payload: OverlayPayload,
+    scene: {
+      readonly observed: readonly string[];
+      readonly next: Map<string, DisplayedEntry>;
+      readonly absent: readonly string[];
+      readonly degradedOnScreen: boolean;
+    },
+  ): OverlayPayload | undefined {
     if (!this.#emit(payload)) return undefined;
 
+    this.#displayed = scene.next;
+
+    // The other half of one-frame removal, and the half that is easy to miss: the entry is gone
+    // from the displayed set while dedup still holds the text for up to `windowMs`. Left alone,
+    // the same line reappearing inside that window is called a duplicate, finds no translation to
+    // be re-shown from, and is drawn nowhere at all. See `Deduplicator.forget`.
+    for (const key of scene.absent) this.#deduplicator.forget(key);
+
     // #36's baseline moves only here - after a payload has actually reached the renderer - and it
-    // records the frame's **whole observed set**, not the entries this payload carried. Dedup
-    // routinely removes the lines that did not change, so the payload describes the delta while
-    // the baseline has to describe the screen.
-    this.#stability.markEmitted(survivors.observed, degraded);
+    // records the frame's **whole observed set**, not the entries this payload carried. The two
+    // still differ: the payload holds only the blocks that produced a box, while the baseline has
+    // to describe every line on the screen, including the ones nothing was drawn for.
+    this.#stability.markEmitted(scene.observed, scene.degradedOnScreen);
     return payload;
   }
 
   /**
-   * Forget what the screen looked like (#36's "reset ได้เมื่อเปลี่ยน region หรือ mode").
+   * Forget everything this pipeline believes about the screen (#36 and #52).
+   *
+   * Three memories, one event. `StabilityTracker` was reset on a region or mode change from the
+   * day it was written; `Deduplicator` was not, and had no caller anywhere in the project - so a
+   * user who re-pointed the region at text they had just been reading got it silently filtered as
+   * a duplicate and never translated. The displayed set (#53) joins them because it describes a
+   * screen that is about to stop existing.
    *
    * Not folded into a config listener here: this module has no config subscription and gaining
    * one would give it a second route to its own behaviour. `src/main/index.ts` calls this.
    */
-  resetStability(reason: string): void {
+  resetScene(reason: string): void {
     this.#stability.reset();
-    this.#logger.debug('stability baseline cleared', { reason });
+    this.#deduplicator.reset();
+    this.#displayed = new Map();
+    this.#logger.debug('screen memory cleared', { reason });
   }
 
-  /** Convert, group, and run every drop rule. Synchronous, and timed as one budget row. */
+  /**
+   * Pair every observed block with what the overlay is already showing for it, and work out what
+   * is showing that this frame did not see at all (#53).
+   *
+   * Pure and cheap - a map lookup per block, and the fallback scan only runs over entries no block
+   * claimed by key, which is normally none. It happens before the cache and the engine because its
+   * answer decides whether the frame is worth translating at all.
+   */
+  #resolve(observed: readonly ObservedBlock[]): { blocks: RecalledBlock[]; absent: string[] } {
+    const unclaimed = new Map(this.#displayed);
+    const remembered = new Array<DisplayedEntry | undefined>(observed.length);
+    /** Indices into `observed`, aligned - never compacted. */
+    const deferred: number[] = [];
+
+    // Two passes, so an exact key match always wins over a fuzzy one: a screen holding two similar
+    // lines must not have the first block it happens to visit adopt the entry belonging to the
+    // other one.
+    //
+    // An exact match is read from the whole map rather than from `unclaimed`, so two blocks with
+    // the *same* text - a repeated label, a name in both subtitle lines - both get the entry
+    // instead of the second one silently losing its box. Their translation is by definition the
+    // same string; only the rectangle differs, and that comes from the block. `unclaimed` is
+    // still narrowed, because one sighting is enough to prove the text is on screen.
+    for (let index = 0; index < observed.length; index += 1) {
+      const item = observed[index];
+      if (item === undefined) continue;
+      const exact = this.#displayed.get(item.key);
+      if (exact === undefined) {
+        deferred.push(index);
+        continue;
+      }
+      unclaimed.delete(item.key);
+      remembered[index] = exact;
+    }
+
+    for (const index of deferred) {
+      const item = observed[index];
+      if (item === undefined) continue;
+      const recalled = this.#recall(item, unclaimed);
+      if (recalled === null) continue;
+      unclaimed.delete(recalled.key);
+      remembered[index] = recalled.entry;
+    }
+
+    return {
+      blocks: observed.map((item, index) => ({ ...item, remembered: remembered[index] })),
+      absent: [...unclaimed.keys()],
+    };
+  }
+
+  /**
+   * The fallback half of {@link #resolve}: the same line, read slightly differently.
+   *
+   * See {@link RECALL_SIMILARITY} for why this exists at all. Both bounds must hold - a repeated
+   * label on another part of the screen is text-identical and is not this entry.
+   */
+  #recall(
+    item: ObservedBlock,
+    unclaimed: ReadonlyMap<string, DisplayedEntry>,
+  ): { key: string; entry: DisplayedEntry } | null {
+    if (unclaimed.size === 0) return null;
+    const text = normalizeForComparison(item.block.text);
+    if (text.length === 0) return null;
+    const digits = digitSignature(text);
+
+    let best: { key: string; entry: DisplayedEntry } | null = null;
+    let bestScore = RECALL_SIMILARITY;
+    for (const [key, entry] of unclaimed) {
+      if (Math.abs(entry.bbox.x - item.block.bbox.x) > RECALL_POSITION_TOLERANCE) continue;
+      if (Math.abs(entry.bbox.y - item.block.bbox.y) > RECALL_POSITION_TOLERANCE) continue;
+      // `dedup.ts` rule 2, and it has to be repeated here rather than inherited: dedup applied it
+      // to the duplicates, and this path is the *fresh* blocks it let through. `wave 12 of 30` and
+      // `wave 13 of 30` are one edit apart in a long string, so similarity alone would call the
+      // new number a re-read of the old one and keep showing the old translation until the engine
+      // answers. No character metric can separate a changed number from a slipped recogniser, and
+      // the jitter this fallback exists for - o/O, I/1, a dropped space - carries no digits.
+      if (digitSignature(key) !== digits) continue;
+      const score = key === text ? 1 : similarity(text, key);
+      if (score < bestScore) continue;
+      bestScore = score;
+      best = { key, entry };
+    }
+    return best;
+  }
+
+  /**
+   * Convert, group, and run every drop rule. Synchronous, and timed as one budget row.
+   *
+   * Returns the screen three ways, because three stages need three different views of it and
+   * deriving any one from another is where the delta bug came from:
+   *
+   *   - `blocks` - what still needs translating. Dedup's `kept`, unchanged.
+   *   - `observed` - every surviving block in reading order, each carrying dedup's verdict. The
+   *     displayed set is rebuilt from this (#53).
+   *   - `observedTexts` - the same list as plain strings, for #36's baseline.
+   */
   #collect(
     frame: FrameEvent,
     display: DisplayGeometry,
     nowMs: number,
-  ): { blocks: readonly TextBlock[]; observed: readonly string[]; counts: Omit<CollectStats, 'stableStreak'> } {
+  ): {
+    blocks: readonly TextBlock[];
+    observed: readonly ObservedBlock[];
+    observedTexts: readonly string[];
+    counts: Omit<CollectStats, 'stableStreak'>;
+  } {
     type Collected = {
       blocks: readonly TextBlock[];
-      observed: readonly string[];
+      observed: readonly ObservedBlock[];
+      observedTexts: readonly string[];
       counts: Omit<CollectStats, 'stableStreak'>;
     };
     const work = (): Collected => {
@@ -555,12 +892,27 @@ export class TextPipeline {
 
       const deduped = dedupeBlocks(afterRecent, this.#deduplicator, nowMs);
 
+      let slot = 0;
+      const observed: ObservedBlock[] = afterRecent.map((block, index) => {
+        const decision = deduped.verdicts[index];
+        if (decision !== undefined && decision.duplicate) {
+          // The key is the *matched* entry's text, never this reading's. They differ exactly when
+          // OCR jittered - which is the case the whole lookup exists for - and dedup does not
+          // rewrite an entry on a match, so its text is the one stable name for this line.
+          return { block, key: decision.matchedText, slot: null };
+        }
+        const fresh = { block, key: normalizeForComparison(block.text), slot };
+        slot += 1;
+        return fresh;
+      });
+
       return {
         blocks: deduped.kept,
+        observed,
         // **Before** dedup, on purpose (#36). Dedup removes precisely the lines that make a frame
         // look unchanged, so the post-dedup list describes what is new while this describes what
         // is on the screen - and "has the screen changed" can only be asked of the second one.
-        observed: afterRecent.map((block) => block.text),
+        observedTexts: afterRecent.map((block) => block.text),
         counts: {
           lines: frame.lines.length,
           blocks: grouped.length,
@@ -624,37 +976,87 @@ export class TextPipeline {
   }
 
   /**
-   * Turn the survivors into entries, dropping the ones that carry nothing.
+   * Turn the observed screen into the whole displayed set (#53).
    *
-   * Runs over the whole survivor list both times it is called, so a block is counted the same
-   * way in the progressive payload and in the complete one - a block still waiting on the engine
-   * simply has no result yet and is skipped rather than counted as anything.
+   * Walks every observed block in reading order, not just the ones that were translated, so the
+   * result describes the screen rather than the delta. Each block contributes at most one entry
+   * and it comes from one of two places:
+   *
+   *   - **fresh** (`slot !== null`): this frame's translation, at the block's own index. A
+   *     `undefined` result is a block still waiting on the engine (progressive half) or one the
+   *     same-language skip took out. The first of those keeps whatever the box was showing, which
+   *     is what stops a line whose words changed from blinking out for the length of the round
+   *     trip; the second has nothing remembered and produces nothing.
+   *   - **duplicate**: whatever that text was translated to when it was last translated. The
+   *     rectangle comes from *this* frame, so a line that moved takes its box with it, while the
+   *     `sourceText` identity stays as first read - see {@link DisplayedEntry}.
+   *
+   * `next` is the displayed set this payload would produce. It is returned rather than assigned
+   * because a payload that never reaches the renderer must not change what we believe is on it.
+   *
+   * A `degraded` entry is held like any other. That is design doc section 7 seen from one stage
+   * further on: if held entries excluded the untranslated originals, then the frame after an
+   * outage - every block a duplicate, every lookup a miss - would draw nothing at all, which is
+   * precisely the blank screen the exemption exists to prevent. `RecentOutputs` still must never
+   * record them; the two memories have opposite rules on purpose.
    */
   #buildEntries(
-    blocks: readonly TextBlock[],
+    observed: readonly RecalledBlock[],
     translated: readonly (string | undefined)[],
     origins: readonly EntryOrigin[],
-  ): { entries: OverlayEntry[]; identical: number } {
+  ): {
+    entries: OverlayEntry[];
+    identical: number;
+    held: number;
+    /** Whether any entry in this set is an untranslated original, held or fresh. */
+    degraded: boolean;
+    next: Map<string, DisplayedEntry>;
+  } {
     const entries: OverlayEntry[] = [];
+    const next = new Map<string, DisplayedEntry>();
     let identical = 0;
+    let held = 0;
+    let degraded = false;
 
-    for (let index = 0; index < blocks.length; index += 1) {
-      const block = blocks[index];
-      const text = translated[index];
-      // `undefined` here is a block that is still waiting on the engine (progressive half) or
-      // one the same-language skip took out. Neither is an entry.
-      if (block === undefined || text === undefined) continue;
+    const keep = (key: string, entry: DisplayedEntry, block: TextBlock): void => {
+      entries.push({
+        text: entry.text,
+        sourceText: entry.sourceText,
+        bbox: block.bbox,
+        origin: entry.origin,
+      });
+      // The rectangle is refreshed, the identity is not: `#recall`'s position bound has to be
+      // measured against where the box actually is, or a line drifting a few px a frame would
+      // eventually fall outside a rectangle recorded minutes ago.
+      next.set(key, { ...entry, bbox: block.bbox });
+      if (entry.origin === 'degraded') degraded = true;
+    };
 
-      const origin = origins[index] ?? 'engine';
+    for (const item of observed) {
+      const { block, key, slot, remembered } = item;
+      const text = slot === null ? undefined : translated[slot];
+
+      if (text === undefined) {
+        // Nothing new for this block. Either it is a duplicate, or its translation has not come
+        // back yet. Both mean "show what is already there", and nothing remembered means there is
+        // nothing to show - a same-language skip, an identical translation, or a line whose entry
+        // was retired. None of those is an error.
+        if (remembered === undefined) continue;
+        keep(key, remembered, block);
+        held += 1;
+        continue;
+      }
+
+      const origin = origins[slot ?? 0] ?? 'engine';
       if (origin !== 'degraded' && text.trim() === block.text.trim()) {
         identical += 1;
         continue;
       }
 
-      entries.push({ text, sourceText: block.text, bbox: block.bbox, origin });
+      keep(key, { text, sourceText: block.text, bbox: block.bbox, origin }, block);
     }
 
-    return { entries, identical };
+    return { entries, identical, held, degraded, next };
   }
 
   #isAlreadyTargetLanguage(text: string): boolean {
@@ -683,8 +1085,8 @@ export class TextPipeline {
    *          the consumer did not refuse it.
    *
    * The second half matters more than it looks. `src/main/index.ts` hands the payload to
-   * `WindowManager.sendOverlayPayload`, which returns `false` while the overlay document is still
-   * starting up. Counting that as drawn would advance #36's baseline to text nobody saw: the
+   * `WindowManager.sendOverlayPayload`, which sends nothing while the overlay document is still
+   * starting up. Counting that as sent would advance #36's baseline to text nobody saw: the
    * screen would then look unchanged for the rest of the session, the retry that dedup's expiring
    * window produces would be suppressed, and the first subtitle of the session would never appear
    * - silently, which is the whole failure the emit-gated baseline exists to prevent.
@@ -746,7 +1148,7 @@ export interface CreateTextPipelineOptions
 }
 
 /** What a caller needs in order to reset the pipeline's memory of the screen. */
-export type StabilityResettable = Pick<TextPipeline, 'resetStability'>;
+export type SceneResettable = Pick<TextPipeline, 'resetScene'>;
 
 export interface ComposedTextPipeline {
   readonly pipeline: TextPipeline;

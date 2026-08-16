@@ -83,6 +83,17 @@ export interface OverlayRenderConfig {
  * own; see {@link OverlayRenderConfig} and {@link epoch}.
  */
 export interface OverlayRenderMessage {
+  /**
+   * Monotonic per message, so the renderer can say *which* one it drew (#52).
+   *
+   * Not `payload.seq`: a frame emits up to two payloads under one seq - the cache hits, then the
+   * whole set - and the main process has to tell those apart. What it does with the answer is
+   * record the text as displayed, and recording the second one's entries because the first one
+   * was drawn would be the bug this exists to remove, in a smaller form.
+   *
+   * Assigned by `WindowManager`, which is also the only thing that reads the reply.
+   */
+  readonly id: number;
   readonly payload: OverlayRenderPayload;
   readonly origin: { readonly x: number; readonly y: number };
   /** The tuning numbers in force for this payload. */
@@ -102,6 +113,36 @@ export interface OverlayRenderMessage {
 
 /** IPC channel for {@link OverlayRenderMessage}. */
 export const OVERLAY_PAYLOAD_CHANNEL = 'textlens:overlay-payload';
+
+/**
+ * The renderer confirming what it actually put on screen (issue #52).
+ *
+ * The only message that travels renderer -> main on the overlay's behalf, and it exists because
+ * the main process cannot know this on its own. Two things between `sendOverlayPayload` and a
+ * painted box can decide a payload never becomes a picture:
+ *
+ *   - `MinDisplayGate` holds a payload that arrived too soon and drops the held one when a newer
+ *     payload replaces it (#37);
+ *   - `FrameScheduler` coalesces several payloads that arrived inside one frame into the last.
+ *
+ * Both are correct and both mean the same thing here: the entries that were superseded were never
+ * seen. `RecentOutputs` has no TTL by design, so recording one string that was never displayed
+ * filters it out of translation for the rest of the session, silently.
+ *
+ * It carries the id and nothing else. The renderer does not decide *what* is remembered - the
+ * degraded exclusion and the hidden-overlay rule live in the main process, where the rest of F2
+ * lives - so this cannot become a second place that has an opinion about the feedback filter.
+ */
+export interface OverlayDrawnMessage {
+  /** The {@link OverlayRenderMessage.id} that reached the document. */
+  readonly id: number;
+}
+
+/** IPC channel for {@link OverlayDrawnMessage}. */
+export const OVERLAY_DRAWN_CHANNEL = 'textlens:overlay-drawn';
+
+/** Same compile-time drift guard as {@link OverlayPayloadChannel}; see its comment. */
+export type OverlayDrawnChannel = typeof OVERLAY_DRAWN_CHANNEL;
 
 /**
  * The channel name as a type, so the two files that cannot import the *value* still cannot drift
@@ -164,4 +205,6 @@ export interface OverlayBridge {
   onPayload(listener: (message: OverlayRenderMessage) => void): () => void;
   /** Registers `listener` for every status change (#41). Returns a function that unsubscribes. */
   onStatus(listener: (message: OverlayStatusMessage) => void): () => void;
+  /** Report that a payload reached the document and was drawn (#52). Fire and forget. */
+  reportDrawn(id: number): void;
 }

@@ -637,6 +637,326 @@ describe('createTextPipeline: the injected transport is what the engine actually
   });
 });
 
+describe('acceptance: the payload is the whole displayed set, never a delta (#53)', () => {
+  /**
+   * The bug, stated as a scene: two sources of text on screen, one of them changing.
+   *
+   * Every test here drives frames through one pipeline with a controllable clock, because the
+   * whole question is what the *second* frame carries - and the answer depends on dedup's window,
+   * which is 3s and cannot be waited out in a test suite.
+   */
+  const HUD = 'ammunition twenty seven rounds remaining';
+  const FIRST = 'the northern gate is open and the guards have gone';
+  const SECOND = 'do not shoot until you see the signal fire';
+
+  /**
+   * A frame whose lines keep the y they are given.
+   *
+   * `frameWith` stacks by array index, which is wrong for every test here: removing the top line
+   * would move the one below it 60px, dedup would call the survivor a *different* block, and the
+   * test would be measuring a moved line rather than a removed one.
+   */
+  function sceneFrame(lines: readonly (readonly [string, number])[], seq: number): FrameEvent {
+    return {
+      ev: 'frame',
+      seq,
+      timings: { captureUs: 500, diffUs: 100, ocrUs: 4000 },
+      monitor: { id: '\\\\.\\DISPLAY1', scale: 1, bounds: [0, 0, 1920, 1080] },
+      region: [0, 0, 1200, 400],
+      lines: lines.map(([text, y]) => ({ text, bbox: [0, y, 200, 20] as const })),
+    };
+  }
+
+  interface SceneHarness extends Harness {
+    advance(ms: number): void;
+  }
+
+  function scene(
+    overrides: Partial<Omit<TextPipelineOptions, 'translator' | 'cache'>> = {},
+    engine = new FakeEngine('google'),
+  ): SceneHarness {
+    let clock = 0;
+    const base = harness({ now: () => clock, ...overrides }, engine);
+    return {
+      ...base,
+      advance: (ms) => {
+        clock += ms;
+      },
+    };
+  }
+
+  /** Texts of the boxes the overlay would be showing after this payload. */
+  function shown(payload: OverlayPayload | undefined): string[] {
+    return (payload?.entries ?? []).map((entry) => entry.text);
+  }
+
+  it('a block that did not change is still in the payload when its neighbour does', async () => {
+    const h = scene();
+
+    const first = await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [FIRST, 120]], 1), DISPLAY);
+    expect(shown(first)).toEqual([`google(${HUD})`, `google(${FIRST})`]);
+
+    h.advance(800);
+    const second = await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [SECOND, 120]], 2), DISPLAY);
+
+    // The HUD line is unchanged, so dedup removed it - and it is in the payload anyway. Before
+    // #53 this was `[google(SECOND)]` and the HUD's box was retired every time the subtitle moved.
+    expect(shown(second)).toEqual([`google(${HUD})`, `google(${SECOND})`]);
+    expect(second?.stats.duplicate).toBe(1);
+    expect(second?.stats.held).toBe(1);
+    // Held, not retranslated: one engine call for the first frame's pair, one for the new line.
+    expect(h.engine.calls.map((call) => call.texts)).toEqual([[HUD, FIRST], [SECOND]]);
+  });
+
+  it('a held entry keeps its identity and takes the fresh rectangle', async () => {
+    const h = scene();
+    await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [FIRST, 120]], 1), DISPLAY);
+
+    h.advance(800);
+    // The HUD line jittered 3px down, which is what OCR does to text that did not move.
+    const second = await h.pipeline.handleFrame(sceneFrame([[HUD, 3], [SECOND, 120]], 2), DISPLAY);
+
+    const held = second?.entries[0];
+    // #35 keys sticky anchors on `sourceText`: it must be the text as first read, or the anchor
+    // identity churns every frame and the box it is meant to hold still moves anyway.
+    expect(held?.sourceText).toBe(HUD);
+    // The rectangle does follow the fresh reading, so a line that really moves takes its box.
+    expect(held?.bbox.y).toBe(3);
+  });
+
+  it('text that leaves the screen takes its box with it, on the next frame', async () => {
+    const h = scene();
+    await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [FIRST, 120]], 1), DISPLAY);
+
+    // The HUD disappears. Nothing else changed, so dedup drops the surviving line and there is
+    // nothing new in this frame at all - the case that used to end in `return undefined`.
+    h.advance(800);
+    const after = await h.pipeline.handleFrame(sceneFrame([[FIRST, 120]], 2), DISPLAY);
+
+    expect(shown(after)).toEqual([`google(${FIRST})`]);
+    expect(after?.stats.removed).toBe(1);
+    expect(after?.stats.held).toBe(1);
+    expect(h.engine.callCount).toBe(1);
+  });
+
+  it('a screen that empties clears the overlay instead of leaving the last boxes up', async () => {
+    const h = scene();
+    await h.pipeline.handleFrame(sceneFrame([[FIRST, 120]], 1), DISPLAY);
+
+    h.advance(800);
+    const empty = await h.pipeline.handleFrame(sceneFrame([], 2), DISPLAY);
+
+    // An empty payload is a statement now, not the absence of one: `entries: []` is what tells
+    // the renderer to let the last box go.
+    expect(empty).toBeDefined();
+    expect(empty?.entries).toEqual([]);
+    expect(empty?.stats.removed).toBe(1);
+  });
+
+  it('a screen that is simply quiet still emits nothing', async () => {
+    const h = scene();
+    await h.pipeline.handleFrame(sceneFrame([[FIRST, 120]], 1), DISPLAY);
+    const sent = h.payloads.length;
+
+    h.advance(800);
+    const quiet = await h.pipeline.handleFrame(sceneFrame([[FIRST, 120]], 2), DISPLAY);
+
+    // Nothing new, nothing gone: the renderer is already showing the right picture and an IPC
+    // round trip per frame to say so is what #36 exists to avoid.
+    expect(quiet).toBeUndefined();
+    expect(h.payloads).toHaveLength(sent);
+  });
+
+  it('text that comes back after being retired is translated again rather than swallowed', async () => {
+    // The half of one-frame removal that is easy to miss. The entry is gone from the displayed
+    // set while dedup still holds the text for the rest of its 3s window - so without the purge
+    // in `#deliver`, the returning line is a duplicate with nothing remembered and is drawn
+    // nowhere at all.
+    const h = scene();
+    await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [FIRST, 120]], 1), DISPLAY);
+
+    h.advance(800);
+    await h.pipeline.handleFrame(sceneFrame([[FIRST, 120]], 2), DISPLAY);
+
+    h.advance(800); // t=1.6s: well inside dedup's 3s window.
+    const back = await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [FIRST, 120]], 3), DISPLAY);
+
+    expect(shown(back)).toEqual([`google(${HUD})`, `google(${FIRST})`]);
+    // The load-bearing pair. `duplicate: 1` is the surviving line and *not* the returning one, and
+    // the returning one reached the translate stage - a cache hit, because it was written back the
+    // first time round, but the stage ran. Without the purge this frame reads `duplicate: 2`,
+    // `cacheHits: 0`, and the HUD is on the screen with no box for the rest of dedup's window.
+    expect(back?.stats.duplicate).toBe(1);
+    expect(back?.stats.cacheHits).toBe(1);
+    expect(back?.stats.held).toBe(1);
+  });
+
+  it('an untranslated original is held like any other entry while the outage lasts', async () => {
+    // Design doc section 7, one stage further on. If held entries excluded `degraded`, the frame
+    // after an outage - every block a duplicate - would draw nothing at all, which is the blank
+    // screen the exemption exists to prevent.
+    const engine = new FakeEngine('google', () => {
+      throw new Error('offline');
+    });
+    const h = scene({}, engine);
+
+    const outage = await h.pipeline.handleFrame(sceneFrame([[FIRST, 0]], 1), DISPLAY);
+    expect(outage?.degraded).toBe(true);
+    expect(outage?.entries[0]?.origin).toBe('degraded');
+
+    h.advance(800);
+    const held = await h.pipeline.handleFrame(sceneFrame([[FIRST, 0], [SECOND, 120]], 2), DISPLAY);
+
+    expect(held?.entries[0]?.text).toBe(FIRST);
+    expect(held?.entries[0]?.origin).toBe('degraded');
+    expect(held?.stats.held).toBe(1);
+  });
+
+  it('the progressive payload carries the held entries too', async () => {
+    const h = scene();
+    const cached = 'reinforcements are three minutes out';
+    seed(h.cache, cached, 'TH-cached');
+    await h.pipeline.handleFrame(sceneFrame([[HUD, 0]], 1), DISPLAY);
+    h.payloads.length = 0;
+
+    h.advance(800);
+    await h.pipeline.handleFrame(sceneFrame([[HUD, 0], [cached, 120], [SECOND, 240]], 2), DISPLAY);
+
+    // Two payloads: the cache hit plus everything held, then the whole set once the engine
+    // answers. The first must not be the lone hit - that would clear every other box for the
+    // length of the round trip, which is the same bug on a shorter timescale.
+    const partial = h.payloads.find((payload) => !payload.complete);
+    expect(partial?.entries.map((entry) => entry.text)).toEqual([`google(${HUD})`, 'TH-cached']);
+    expect(partial?.stats.held).toBe(1);
+  });
+
+  it('a changed number is new text, not a re-read of the old one', async () => {
+    // `dedup.ts` rule 2, on the one path that does not inherit it: the fallback that matches a
+    // re-read against what is on screen is fuzzy, and `wave 12 of 30` against `wave 13 of 30` is
+    // one edit in a long string. Without the digit guard the counter's old translation is held
+    // over the new number for the length of the round trip.
+    const h = scene();
+    const before = 'wave 12 of 30 defenders remaining';
+    const after = 'wave 13 of 30 defenders remaining';
+    await h.pipeline.handleFrame(sceneFrame([[before, 0]], 1), DISPLAY);
+
+    // Past dedup's window, so the line is readmitted as fresh and the fallback is what decides.
+    h.advance(3200);
+    const second = await h.pipeline.handleFrame(sceneFrame([[after, 0]], 2), DISPLAY);
+
+    expect(shown(second)).toEqual([`google(${after})`]);
+    expect(second?.stats.held).toBe(0);
+    // The old count is gone from the displayed set rather than being carried under the new one.
+    expect(second?.stats.removed).toBe(1);
+  });
+
+  it('two identical lines in different places keep two boxes', async () => {
+    // The displayed set is keyed by text, so the collision case has to be pinned: a screen with
+    // the same string twice must not collapse to one entry when both are held.
+    const h = scene();
+    const repeated = 'incoming transmission from the northern outpost';
+    await h.pipeline.handleFrame(
+      sceneFrame([[repeated, 0], [repeated, 120], [FIRST, 240]], 1),
+      DISPLAY,
+    );
+
+    h.advance(800);
+    const second = await h.pipeline.handleFrame(
+      sceneFrame([[repeated, 0], [repeated, 120], [SECOND, 240]], 2),
+      DISPLAY,
+    );
+
+    expect(second?.entries.map((entry) => entry.bbox.y)).toEqual([0, 120, 240]);
+    expect(second?.entries.filter((entry) => entry.text === `google(${repeated})`)).toHaveLength(2);
+    expect(second?.stats.held).toBe(2);
+  });
+});
+
+describe('acceptance: changing the region forgets what was on the old one (#52)', () => {
+  const LINE = 'the northern gate is open and the guards have gone';
+
+  /**
+   * A pipeline whose cache never answers, so an engine call is the only way a translation can
+   * reach the payload.
+   *
+   * With the real cache the second translation of the same string is served from it, and the
+   * assertion "it was translated again" could be satisfied by a pipeline that never consulted
+   * anything at all - the failure this whole file is careful about.
+   */
+  function coldHarness(): { pipeline: TextPipeline; engine: FakeEngine; clock: { ms: number } } {
+    const engine = new FakeEngine('google');
+    const logger = new RecordingLogger();
+    const clock = { ms: 0 };
+    const cache: PipelineCache = {
+      status: 'ready',
+      getBatch: (lookups) => lookups.map(() => undefined),
+      setBatch: () => {},
+    };
+    const pipeline = new TextPipeline({
+      translator: new FallbackTranslator([engine], { logger }),
+      cache,
+      logger,
+      onPayload: () => {},
+      now: () => clock.ms,
+    });
+    return { pipeline, engine, clock };
+  }
+
+  it('the same text in a new region is translated again', async () => {
+    const h = coldHarness();
+
+    await h.pipeline.handleFrame(frameWith([LINE], 1), DISPLAY);
+    expect(h.engine.callCount).toBe(1);
+
+    // Without the reset this frame is silently swallowed by dedup's window: same text, same
+    // place, and the user who just re-pointed the region at it sees nothing and is told nothing.
+    h.pipeline.resetScene('capture region or monitor changed');
+
+    h.clock.ms += 800;
+    const after = await h.pipeline.handleFrame(frameWith([LINE], 2), DISPLAY);
+
+    // The engine call is the proof, not the payload: a payload could equally have come from the
+    // displayed set being re-emitted.
+    expect(h.engine.callCount).toBe(2);
+    expect(h.engine.calls[1]?.texts).toEqual([LINE]);
+    expect(after?.entries.map((entry) => entry.text)).toEqual([`google(${LINE})`]);
+    expect(after?.stats.duplicate).toBe(0);
+    expect(after?.stats.held).toBe(0);
+  });
+
+  it('without the reset the same frame is swallowed, which is what made this a bug', async () => {
+    // The control. Without it the assertion above passes for a pipeline that never deduplicated.
+    const h = coldHarness();
+
+    await h.pipeline.handleFrame(frameWith([LINE], 1), DISPLAY);
+    h.clock.ms += 800;
+    const after = await h.pipeline.handleFrame(frameWith([LINE], 2), DISPLAY);
+
+    expect(h.engine.callCount).toBe(1);
+    // Nothing new and nothing gone, so there is no payload at all - which is correct here and is
+    // exactly what made the missing reset invisible: the user re-points the region and the app
+    // has nothing to say about it.
+    expect(after).toBeUndefined();
+  });
+
+  it('the displayed set goes with it, so nothing is reported as removed afterwards', async () => {
+    const h = coldHarness();
+
+    await h.pipeline.handleFrame(frameWith([LINE], 1), DISPLAY);
+    h.pipeline.resetScene('mode changed to paused');
+
+    h.clock.ms += 800;
+    const after = await h.pipeline.handleFrame(
+      frameWith(['a completely different line of text'], 2),
+      DISPLAY,
+    );
+
+    // A stale displayed set would report the old region's line as newly gone, which is a removal
+    // the renderer has already forgotten about - the epoch bump cleared it.
+    expect(after?.stats.removed).toBe(0);
+  });
+});
+
 describe('end to end from a real recorded sidecar frame', () => {
   /**
    * The M3-06 fixture is a real recording of the real `Textlens.Capture.exe`, so this exercises
