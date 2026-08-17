@@ -305,37 +305,81 @@ export interface EdgeReport {
 }
 
 /**
- * Which edges of the region have recognised text pressed against them (#30).
+ * Which edges of the region have recognised text pressed against them (#30, #59).
  *
  * `lines[].bbox` is physical px **relative to the region's top-left**, so the region's own
- * position never enters this: the far edges are the region's width and height. Getting that
- * wrong would compare a region-relative box against a monitor-relative edge and report every
- * frame as clipped, which is how a warning becomes noise and then gets turned off.
+ * position never enters the *line* comparison: the far edges are the region's width and height.
+ * Getting that wrong would compare a region-relative box against a monitor-relative edge and
+ * report every frame as clipped, which is how a warning becomes noise and then gets turned off.
+ *
+ * ## An edge that is also the monitor's edge is never reported (#59)
+ *
+ * The whole meaning of this report is "widen the region", and at the screen boundary that
+ * sentence cannot be obeyed - there is no pixel to the left of the left of the screen. Nothing is
+ * being clipped there either: text that ran further left would have had nowhere to be drawn.
+ * {@link padRegion} says the same thing from the other side, by clamping, which is what makes a
+ * boundary region permanently unpaddable on that side and therefore permanently in contact with
+ * it. Reported anyway, it produced #59: a banner the user could neither act on nor dismiss.
+ *
+ * This is deliberately **not** the same as switching the warning off. A region that stops short
+ * of the screen edge reports exactly as it always did, and a region pinned to one edge still
+ * reports the other three - the bottom-left subtitle box that is the app's main use case can
+ * still tell the user their line is running off the *right* of it, which is the case that loses
+ * words.
+ *
+ * Compared with no slop, unlike the line comparison. Slop exists because OCR boxes are not
+ * pixel-exact; region and monitor rectangles are exact integers in the same physical-px space
+ * (`FrameEvent.region` is relative to the monitor's top-left, `MonitorInfo.bounds` is the
+ * monitor's own rect), and a region one pixel inside the screen genuinely does have one pixel to
+ * grow into.
+ *
+ * @param monitorSize `[width, height]` of the monitor the region sits on, physical px - the same
+ * value {@link padRegion} clamped against. Required rather than optional: an omitted monitor
+ * would silently restore the false positive, and there is no sensible default for "where the
+ * screen ends".
  */
-export function findEdgeContact(lines: readonly OcrLine[], region: Rect, slop = EDGE_SLOP_PX): EdgeReport {
-  const [, , width, height] = region;
+export function findEdgeContact(
+  lines: readonly OcrLine[],
+  region: Rect,
+  monitorSize: readonly [number, number],
+  slop = EDGE_SLOP_PX,
+): EdgeReport {
+  const [regionX, regionY, width, height] = region;
+  const [monitorWidth, monitorHeight] = monitorSize;
+
+  // Which of the region's edges the user has no room to move. `<=` and `>=` rather than `===`
+  // so a region that somehow extends past the monitor is treated as pinned rather than as
+  // having room beyond the screen.
+  const pinnedLeft = regionX <= 0;
+  const pinnedTop = regionY <= 0;
+  const pinnedRight = regionX + width >= monitorWidth;
+  const pinnedBottom = regionY + height >= monitorHeight;
+
   const edges = new Set<'left' | 'top' | 'right' | 'bottom'>();
   let touching = 0;
 
   for (const line of lines) {
     const [x, y, lineWidth, lineHeight] = line.bbox;
     let touched = false;
-    if (x <= slop) {
+    if (!pinnedLeft && x <= slop) {
       edges.add('left');
       touched = true;
     }
-    if (y <= slop) {
+    if (!pinnedTop && y <= slop) {
       edges.add('top');
       touched = true;
     }
-    if (x + lineWidth >= width - slop) {
+    if (!pinnedRight && x + lineWidth >= width - slop) {
       edges.add('right');
       touched = true;
     }
-    if (y + lineHeight >= height - slop) {
+    if (!pinnedBottom && y + lineHeight >= height - slop) {
       edges.add('bottom');
       touched = true;
     }
+    // Counted only for a line touching an edge that was *reported*. A line against the screen
+    // boundary alone is not a line at risk, and counting it would put a number in the log for a
+    // problem the same call just decided does not exist.
     if (touched) touching += 1;
   }
 

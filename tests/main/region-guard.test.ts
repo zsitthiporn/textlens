@@ -354,10 +354,12 @@ describe('checkRegionSize', () => {
 });
 
 describe('findEdgeContact', () => {
+  // Clear of all four monitor edges, so nothing here is suppressed by #59 and these cases read
+  // as they always have.
   const region: Rect = [400, 900, 1200, 150];
 
   it('reports nothing when every line sits clear of the edges', () => {
-    const report = findEdgeContact([line(20, 20, 400, 40), line(20, 80, 600, 40)], region);
+    const report = findEdgeContact([line(20, 20, 400, 40), line(20, 80, 600, 40)], region, MONITOR);
 
     expect(report.edges).toEqual([]);
     expect(report.lines).toBe(0);
@@ -366,27 +368,27 @@ describe('findEdgeContact', () => {
   it('reports the right edge when a line runs to it', () => {
     // bbox is region-relative, so the right edge is the region's *width*, not its x + width.
     // Comparing against a monitor-relative edge instead would report every frame as clipped.
-    const report = findEdgeContact([line(20, 20, 1180, 40)], region);
+    const report = findEdgeContact([line(20, 20, 1180, 40)], region, MONITOR);
 
     expect(report.edges).toContain('right');
     expect(report.lines).toBe(1);
   });
 
   it('reports the left and top edges', () => {
-    const report = findEdgeContact([line(0, 0, 300, 40)], region);
+    const report = findEdgeContact([line(0, 0, 300, 40)], region, MONITOR);
 
     expect(report.edges).toContain('left');
     expect(report.edges).toContain('top');
   });
 
   it('reports the bottom edge', () => {
-    const report = findEdgeContact([line(20, 110, 300, 40)], region);
+    const report = findEdgeContact([line(20, 110, 300, 40)], region, MONITOR);
 
     expect(report.edges).toContain('bottom');
   });
 
   it('counts lines, not edges, so two clipped lines are two lines', () => {
-    const report = findEdgeContact([line(0, 20, 300, 40), line(0, 80, 300, 40)], region);
+    const report = findEdgeContact([line(0, 20, 300, 40), line(0, 80, 300, 40)], region, MONITOR);
 
     expect(report.lines).toBe(2);
     expect(report.edges).toEqual(['left']);
@@ -395,9 +397,76 @@ describe('findEdgeContact', () => {
   it('tolerates a line that ends a pixel short of the edge', () => {
     // OCR boxes are not pixel-exact, and a line ending one pixel inside the region means the
     // same thing as one ending exactly on it.
-    const report = findEdgeContact([line(20, 20, 1179, 40)], region);
+    const report = findEdgeContact([line(20, 20, 1179, 40)], region, MONITOR);
 
     expect(report.edges).toContain('right');
+  });
+});
+
+/**
+ * #59, cause 2: the warning that could not be obeyed.
+ *
+ * `padRegion` clamps to the monitor, so a region dragged against the screen edge can never be
+ * grown on that side - and "widen it" was being said about that side on every single frame.
+ * Nothing is lost there either: there are no pixels past the edge of the screen for OCR to miss.
+ */
+describe('findEdgeContact at the monitor boundary (#59)', () => {
+  it('says nothing about the left edge when the region starts at the left of the screen', () => {
+    const atLeft: Rect = [0, 900, 1200, 150];
+
+    const report = findEdgeContact([line(0, 20, 300, 40)], atLeft, MONITOR);
+
+    expect(report.edges).toEqual([]);
+    // The line touched nothing the user can act on, so it is not a line at risk either.
+    expect(report.lines).toBe(0);
+  });
+
+  it('says nothing about the bottom edge for a subtitle region on the floor of the screen', () => {
+    // The app's main use case (`padRegion`'s own doc says so), and the shape that produced the
+    // permanent banner in #59.
+    const onTheFloor: Rect = [400, 930, 1200, 150];
+
+    const report = findEdgeContact([line(20, 110, 300, 40)], onTheFloor, MONITOR);
+
+    expect(report.edges).toEqual([]);
+  });
+
+  it('says nothing at all about a whole-screen region, whose text is always against an edge', () => {
+    const whole: Rect = [0, 0, 1920, 1080];
+
+    const report = findEdgeContact([line(0, 0, 1920, 1080)], whole, MONITOR);
+
+    expect(report.edges).toEqual([]);
+  });
+
+  it('still reports the edges the user CAN widen on a region pinned to one side', () => {
+    // The discriminator between "suppress what cannot be acted on" and "delete the feature":
+    // this region is against the left of the screen and has room on the right, and text running
+    // off its right edge is exactly the case that silently loses words.
+    const atLeft: Rect = [0, 900, 1200, 150];
+
+    const report = findEdgeContact([line(0, 20, 1200, 40)], atLeft, MONITOR);
+
+    expect(report.edges).toEqual(['right']);
+    expect(report.lines).toBe(1);
+  });
+
+  it('reports a right edge that stops one pixel short of the screen, which can still be widened', () => {
+    // Suppression is exact, with no slop: unlike an OCR bbox, region and monitor rectangles are
+    // exact integers in the same physical-px space, and one pixel of room is room.
+    const nearlyAtRight: Rect = [719, 900, 1200, 150];
+
+    const report = findEdgeContact([line(20, 20, 1180, 40)], nearlyAtRight, MONITOR);
+
+    expect(report.edges).toEqual(['right']);
+  });
+
+  it('treats a region that overhangs the screen as pinned rather than as having room past it', () => {
+    const overhanging: Rect = [0, 900, 2000, 200];
+
+    const report = findEdgeContact([line(0, 160, 2000, 40)], overhanging, MONITOR);
+
+    expect(report.edges).toEqual([]);
   });
 });
 

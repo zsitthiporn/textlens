@@ -1103,7 +1103,13 @@ export class AppOrchestrator {
       return this.#setRegionWarning(null);
     }
 
-    const report = findEdgeContact(frame.lines, frame.region);
+    // The monitor's own size, straight off the frame that carried the region. Both are physical
+    // px in the same space - `frame.region` is relative to this monitor's top-left and
+    // `frame.monitor.bounds` is this monitor's rect - so they compare directly and invariant 3's
+    // one-converter rule is not engaged. Taking it from the frame rather than from
+    // `MonitorRegistry` also means the two numbers always describe the same capture (#59).
+    const monitorSize: readonly [number, number] = [frame.monitor.bounds[2], frame.monitor.bounds[3]];
+    const report = findEdgeContact(frame.lines, frame.region, monitorSize);
     if (report.edges.length === 0) {
       // Cleared as soon as a frame comes back clean, so a warning cannot outlive the problem.
       this.#edgeThrottle.shouldReport(report);

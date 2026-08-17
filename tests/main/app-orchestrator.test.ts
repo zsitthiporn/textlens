@@ -1276,6 +1276,58 @@ describe('AppOrchestrator: region edge warning', () => {
     expect(h.orchestrator.status.warning).not.toContain('touching');
     expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
   });
+
+  /**
+   * #59, cause 2, at the seam.
+   *
+   * `region-guard.test.ts` owns the rule. What is only testable here is that the monitor's size
+   * reaches it at all: the check reads `frame.monitor.bounds`, and a plumbing mistake there is
+   * invisible in the guard's own tests because they are handed the number directly.
+   */
+  describe('a region pinned to the edge of the screen (#59)', () => {
+    const CORNER_RECT = [0, 930, 1200, 150] as const;
+    const CORNER_CONFIG: Config = {
+      ...DEFAULT_CONFIG,
+      capture: {
+        ...DEFAULT_CONFIG.capture,
+        region: { rect: [...CORNER_RECT], monitorId: PRIMARY.id, monitorSize: [1920, 1080] },
+      },
+    };
+
+    function cornerFrame(lines: readonly { bbox: readonly [number, number, number, number] }[]) {
+      return {
+        ev: 'frame' as const,
+        seq: 1,
+        timings: { captureUs: 1, diffUs: 1, ocrUs: 1 },
+        // The bottom-left corner of PRIMARY: x is 0 and y + h is 1080, so two of its four edges
+        // are the screen's own and `padRegion` has already clamped them.
+        monitor: PRIMARY,
+        region: CORNER_RECT,
+        lines: lines.map((entry) => ({ text: 'sample', bbox: entry.bbox })),
+      };
+    }
+
+    it('says nothing when the text is only against the edges of the screen itself', async () => {
+      const h = harness({ config: CORNER_CONFIG });
+      await h.orchestrator.initialize();
+
+      h.sidecar.emit('frame', cornerFrame([{ bbox: [0, 110, 300, 40] }]));
+
+      // Not "a warning the user can ignore" - no warning at all. There is nothing past the edge
+      // of the screen to lose, and "widen it" names an action that cannot be taken.
+      expect(h.orchestrator.status.warning).toBeNull();
+    });
+
+    it('still warns about the right edge, which that same region can be widened into', async () => {
+      const h = harness({ config: CORNER_CONFIG });
+      await h.orchestrator.initialize();
+
+      h.sidecar.emit('frame', cornerFrame([{ bbox: [0, 20, 1200, 40] }]));
+
+      expect(h.orchestrator.status.warning).toContain('right');
+      expect(h.orchestrator.status.warning).not.toContain('left');
+    });
+  });
 });
 
 /**
