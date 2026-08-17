@@ -12,7 +12,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ConfigIssue } from '../../src/main/services/config.js';
 import {
+  DEFAULT_BANNER_TIMEOUT_MS,
   ErrorReporter,
+  alertSurfaces,
   describeAlert,
   describeConfigIssues,
   describeHotkeyFailures,
@@ -20,6 +22,7 @@ import {
   describeSupervisor,
   describeTranslationFailure,
   judgeTranslation,
+  type ScheduleTimer,
 } from '../../src/main/services/error-reporter.js';
 import type { HotkeyRegistration } from '../../src/main/services/hotkey-service.js';
 import type { SupervisorStatus } from '../../src/main/services/sidecar-supervisor.js';
@@ -137,6 +140,193 @@ describe('ErrorReporter: only the worst one shows', () => {
     reporter.set('config', { severity: 'warning', cause: 'bad field', remedy: 'fix it' });
 
     expect(good).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * #59: the banner gives the screen back, and nothing is forgotten when it does.
+ *
+ * The bug was a banner that stood for an entire session over a condition the user could not act
+ * on and could not dismiss - the overlay is click-through, so there is no gesture that closes it.
+ * The fix has to be narrow in a specific way: what stops is the *drawing*, not the alert. If the
+ * message were dropped from the tray too, this would be invariant 4 broken by the fix for #59,
+ * which is why almost every test here asserts both halves at once.
+ *
+ * The timer is injected, so nothing here waits eight real seconds.
+ */
+describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => {
+  function fakeTimers() {
+    const scheduled: { handler: () => void; delayMs: number; cancelled: boolean }[] = [];
+    const schedule: ScheduleTimer = (handler, delayMs) => {
+      const entry = { handler, delayMs, cancelled: false };
+      scheduled.push(entry);
+      return () => {
+        entry.cancelled = true;
+      };
+    };
+    return {
+      schedule,
+      /** Timers still waiting to fire. */
+      get live() {
+        return scheduled.filter((entry) => !entry.cancelled);
+      },
+      /** Let every waiting timer's delay elapse. */
+      elapse() {
+        for (const entry of [...scheduled]) {
+          if (entry.cancelled) continue;
+          entry.cancelled = true;
+          entry.handler();
+        }
+      },
+    };
+  }
+
+  const EDGE = {
+    severity: 'warning',
+    cause: 'text is touching the right edge of the region; widen it',
+    remedy: 'use the tray menu → "Select Region…"',
+  } as const;
+
+  it('stops drawing a warning after its time, while the tray still says it', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    expect(alertSurfaces(reporter).overlayAlert?.cause).toBe(EDGE.cause);
+
+    timers.elapse();
+
+    // The screen is clear...
+    expect(reporter.banner).toBeNull();
+    expect(alertSurfaces(reporter).overlayAlert).toBeNull();
+    // ...and the user can still find out what happened, which is the whole of invariant 4 here.
+    expect(reporter.top?.cause).toBe(EDGE.cause);
+    expect(alertSurfaces(reporter).trayWarning).toContain('touching the right edge');
+    expect(reporter.alerts).toHaveLength(1);
+  });
+
+  it('uses the default eight seconds, not some other number', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+
+    reporter.set('region', EDGE);
+
+    expect(timers.live[0]?.delayMs).toBe(DEFAULT_BANNER_TIMEOUT_MS);
+    expect(DEFAULT_BANNER_TIMEOUT_MS).toBe(8_000);
+  });
+
+  it('tells subscribers when the banner goes, so the overlay is actually repainted', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    const listener = vi.fn();
+    reporter.subscribe(listener);
+
+    timers.elapse();
+
+    // Without this the banner would stay drawn until some unrelated thing happened to change.
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['error', 'fatal'] as const)('never takes a %s off the screen', (severity) => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+
+    reporter.set('sidecar', { severity, cause: 'the capture engine is not running', remedy: 'restart it' });
+    timers.elapse();
+
+    // Nothing was even scheduled: the harm these name is that the app looks like it is working
+    // when it is not, and a banner the user has stopped seeing is how that starts.
+    expect(timers.live).toHaveLength(0);
+    expect(reporter.banner?.cause).toBe('the capture engine is not running');
+    expect(alertSurfaces(reporter).trayError).toContain('not running');
+  });
+
+  it('does not come back when the same condition is asserted again in the same words', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    timers.elapse();
+
+    // What the frame handler does on every single frame for as long as the region is wrong. If
+    // this re-showed the banner, or even restarted the timer, auto-hide would never be observed
+    // in practice - which is the failure mode this whole test exists for.
+    for (let i = 0; i < 50; i += 1) reporter.set('region', EDGE);
+
+    expect(reporter.banner).toBeNull();
+    expect(timers.live).toHaveLength(0);
+  });
+
+  it('shows the new message, with a fresh turn, when the same source changes its wording', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    timers.elapse();
+
+    reporter.set('region', { ...EDGE, cause: 'text is touching the bottom edge of the region; widen it' });
+
+    // Different edge, different fix. Text spilling off the bottom is not the thing the user just
+    // read about, and suppressing it because it arrived from the same source would hide it for
+    // as long as the first one keeps recurring.
+    expect(reporter.banner?.cause).toContain('bottom edge');
+    expect(timers.live).toHaveLength(1);
+  });
+
+  it('shows a condition again if it is fixed and then comes back', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    timers.elapse();
+    expect(reporter.banner).toBeNull();
+
+    reporter.set('region', null);
+    reporter.set('region', EDGE);
+
+    // "The condition, not the clock, decides whether it is still true" still holds: having gone
+    // away and returned, this is news, not the message the user already dismissed by waiting.
+    expect(reporter.banner?.cause).toBe(EDGE.cause);
+  });
+
+  it('does not let a displaced warning’s timer blank the message that displaced it', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+
+    // An error arrives three seconds in and takes the banner. The warning's timer is still in
+    // flight, and firing it here would blank a banner that has only just gone up.
+    reporter.set('sidecar', { severity: 'error', cause: 'the capture engine died', remedy: 'restart it' });
+    timers.elapse();
+
+    expect(reporter.banner?.cause).toBe('the capture engine died');
+  });
+
+  it('gives a warning that was covered up a full turn of its own once the error clears', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    reporter.set('sidecar', { severity: 'error', cause: 'the capture engine died', remedy: 'restart it' });
+    timers.elapse();
+
+    reporter.set('sidecar', null);
+
+    expect(reporter.banner?.cause).toBe(EDGE.cause);
+    expect(timers.live).toHaveLength(1);
+  });
+
+  it('sends the tray the standing alert and the overlay the drawn one, never the other way round', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    reporter.set('region', EDGE);
+    reporter.set('config', { severity: 'warning', cause: 'capture.intervalActive is not valid', remedy: 'fix it' });
+    timers.elapse();
+
+    const surfaces = alertSurfaces(reporter);
+
+    // `region` outranks `config`, so one message is on both surfaces - and after the timeout the
+    // tray has it and the overlay does not. Wiring both to the same view is the mistake this
+    // pins: to `top` and the banner never leaves, to `banner` and the tray goes blank.
+    expect(surfaces.trayWarning).toContain('touching the right edge');
+    expect(surfaces.trayError).toBeNull();
+    expect(surfaces.overlayAlert).toBeNull();
   });
 });
 

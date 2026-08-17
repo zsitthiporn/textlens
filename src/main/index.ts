@@ -29,13 +29,12 @@ import { ConfigService } from './services/config.js';
 import { DrawnPayloads } from './services/drawn-payloads.js';
 import {
   ErrorReporter,
-  describeAlert,
+  alertSurfaces,
   describeConfigIssues,
   describeHotkeyFailures,
   describeMissingRecognizer,
   describeSupervisor,
   judgeTranslation,
-  type Alert,
 } from './services/error-reporter.js';
 import { HotkeyService } from './services/hotkey-service.js';
 import { createLogger, type RootLogger } from './services/logger.js';
@@ -111,6 +110,12 @@ let lastStatus: AppStatus = { mode: 'idle', overlayVisible: true, error: null, w
  * The tray gets the alert in its `error` slot when it is `fatal` or `error`, because that slot is
  * what turns the icon red; a `warning` or `info` alert lands in `warning`, which is the tooltip
  * and a disabled menu row. That mapping is the whole of "tray icon เปลี่ยนเป็นสถานะ error".
+ *
+ * **The tray and the banner read different views of the same alert (#59).** The tray reads
+ * `reporter.top`, which stands until its source clears it; the banner reads `reporter.banner`,
+ * which hands the screen back after a while for everything short of an error. The mapping itself
+ * is `alertSurfaces`, in `error-reporter.ts`, so the split is pinned by a test rather than by
+ * this function being read carefully.
  */
 function renderStatus(): void {
   // Pulled from the reporter rather than from a variable a subscriber keeps up to date. A real run
@@ -119,19 +124,16 @@ function renderStatus(): void {
   // only ever written by that notification was therefore still `null` for the whole session when
   // the very first alert was published before anything had subscribed. Reading the source of truth
   // at render time removes the ordering question entirely.
-  const alert: Alert | null = reporter.top;
-  const severe = alert !== null && (alert.severity === 'fatal' || alert.severity === 'error');
+  const surfaces = alertSurfaces(reporter);
 
   tray?.update({
     mode: lastStatus.mode,
     overlayVisible: lastStatus.overlayVisible,
-    error: severe && alert !== null ? describeAlert(alert) : null,
-    warning: !severe && alert !== null ? describeAlert(alert) : null,
+    error: surfaces.trayError,
+    warning: surfaces.trayWarning,
   });
 
-  windows?.sendOverlayStatus({
-    alert: alert === null ? null : { severity: alert.severity, cause: alert.cause, remedy: alert.remedy },
-  });
+  windows?.sendOverlayStatus({ alert: surfaces.overlayAlert });
 
   // The third surface (#39). It shows the same single worst alert the other two do - one ranking,
   // three renderings - plus everything underneath it that the tray has no room for.
