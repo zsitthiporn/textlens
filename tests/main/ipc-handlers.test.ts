@@ -247,7 +247,13 @@ describe('SettingsIpc: the state the window renders', () => {
     const r = rig();
     const rows = r.ipc.state.hotkeys;
 
-    expect(rows.map((row) => row.action)).toEqual(['toggleAuto', 'snapshot', 'selectRegion', 'toggleOverlay']);
+    expect(rows.map((row) => row.action)).toEqual([
+      'toggleAuto',
+      'snapshot',
+      'selectRegion',
+      'toggleOverlay',
+      'dismiss',
+    ]);
     expect(rows.every((row) => !row.ok)).toBe(true);
     expect(rows[2]?.accelerator).toBe('Control+Alt+R');
   });

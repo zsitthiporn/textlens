@@ -31,7 +31,7 @@
 
 import type { ConfigOverride } from '../../shared/config-schema.js';
 import { acceleratorFromKeyStroke } from '../../shared/accelerator.js';
-import { describeMode, MODE_NAMES, type UserMode } from '../../shared/mode-presentation.js';
+import { DISMISS_LABEL, MODE_NAMES, describeMode, type UserMode } from '../../shared/mode-presentation.js';
 
 import './settings.css';
 import type {
@@ -129,6 +129,25 @@ const APPEARANCE_FIELDS: readonly NumberField[] = [
   },
 ];
 
+/**
+ * `modes.snapshotHoldMs` (#61) - its own panel rather than a line under Appearance, because it
+ * governs when a held translation clears itself, not how it looks.
+ */
+const TRANSLATE_ONCE_FIELDS: readonly NumberField[] = [
+  {
+    path: 'modes.snapshotHoldMs',
+    label: 'Snapshot hold time',
+    hint: '0 keeps a "Translate once" capture on screen until you press Dismiss - the default. '
+      + 'A higher value clears it on its own after that many ms.',
+    min: 0,
+    max: 30_000,
+    step: 500,
+    unit: 'ms',
+    read: (state) => state.config.modes.snapshotHoldMs,
+    write: (value) => ({ modes: { snapshotHoldMs: value } }),
+  },
+];
+
 const CAPTURE_FIELDS: readonly NumberField[] = [
   {
     path: 'capture.intervalActive',
@@ -178,6 +197,7 @@ const HOTKEY_LABELS: Readonly<Record<string, string>> = {
   snapshot: MODE_NAMES.once,
   selectRegion: 'Choose a region',
   toggleOverlay: 'Show / hide the boxes',
+  dismiss: DISMISS_LABEL,
 };
 
 // ---------------------------------------------------------------------------
@@ -337,6 +357,10 @@ export function mountSettings(root: HTMLElement): void {
       'The only mode that is built. Replace, hover-marker and panel modes are on the backlog, not hidden behind a setting.',
     ),
   );
+
+  // -- translate once (#61) ------------------------------------------------
+  const translateOnceBody = panel(left, 'Translate once');
+  const translateOnceControls = numberControls(TRANSLATE_ONCE_FIELDS, translateOnceBody);
 
   // -- hotkeys ------------------------------------------------------------
   const hotkeyBody = panel(
@@ -727,6 +751,7 @@ export function mountSettings(root: HTMLElement): void {
     for (const [fields, controls] of [
       [CAPTURE_FIELDS, captureControls],
       [APPEARANCE_FIELDS, appearanceControls],
+      [TRANSLATE_ONCE_FIELDS, translateOnceControls],
     ] as const) {
       for (const field of fields) {
         const control = controls.get(field.path);
