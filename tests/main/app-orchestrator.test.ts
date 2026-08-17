@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   AppOrchestrator,
+  EDGE_WARNING_CLEAR_DELAY_MS,
   NO_REGION_WARNING,
   describeAppWarning,
   type AppMode,
@@ -1528,15 +1529,79 @@ describe('AppOrchestrator: region edge warning', () => {
     expect(h.orchestrator.status.warning).toContain('left');
   });
 
-  it('clears the warning as soon as a frame comes back clean', async () => {
-    const h = harness({ config: REGION_CONFIG });
-    await h.orchestrator.initialize();
-    h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
-    expect(h.orchestrator.status.warning).not.toBeNull();
+  /**
+   * #65: the edge warning used to clear on the very next clean frame, and real subtitle text
+   * drifts in and out of edge contact fast enough that this made the overlay banner flash on and
+   * off roughly once a second. Now the *screen* debounces the clear while the log's own
+   * `EdgeWarningThrottle` keeps its separate, already-tested cadence untouched.
+   */
+  describe('the user-facing warning debounces its own clear (#65)', () => {
+    const DIRTY = [{ bbox: [0, 20, 300, 40] }] as const;
+    const CLEAN = [{ bbox: [20, 20, 300, 40] }] as const;
 
-    h.sidecar.emit('frame', frameWith([{ bbox: [20, 20, 300, 40] }]));
+    it('does not clear on the next clean frame, only after the debounce window elapses', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.sidecar.emit('frame', frameWith(DIRTY));
+      expect(h.orchestrator.status.warning).not.toBeNull();
 
-    expect(h.orchestrator.status.warning).toBeNull();
+      h.sidecar.emit('frame', frameWith(CLEAN));
+
+      // Not cleared yet - a clean frame only arms a timer, it does not clear synchronously.
+      expect(h.orchestrator.status.warning).not.toBeNull();
+      expect(timers.live).toHaveLength(1);
+      // Pinning the value, not just its presence - the same discipline #59's own
+      // "uses the default eight seconds, not some other number" test uses for its timeout.
+      expect(timers.live[0]?.delayMs).toBe(EDGE_WARNING_CLEAR_DELAY_MS);
+
+      timers.elapse();
+
+      // A condition that genuinely stopped does clear - once the window has passed, not never.
+      expect(h.orchestrator.status.warning).toBeNull();
+    });
+
+    it('reaches the user promptly on the very first dirty frame, with no delay at all', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
+      await h.orchestrator.initialize();
+
+      h.sidecar.emit('frame', frameWith(DIRTY));
+
+      // Set synchronously, on this same tick - only the clearing direction is ever deferred.
+      expect(h.orchestrator.status.warning).toContain('left');
+      expect(timers.live).toHaveLength(0);
+    });
+
+    it('produces at most one user-visible transition across a burst of alternating frames', async () => {
+      // The exact shape #65 measured on a real run: dirty, clean, dirty, clean, dirty, clean, all
+      // inside the debounce window (the real gaps were 1463ms, 1001ms, 493ms, 1021ms, 461ms -
+      // every one of them under EDGE_WARNING_CLEAR_DELAY_MS). `timers.elapse()` is never called,
+      // because in that trace the window never actually ran out.
+      const timers = fakeTimers();
+      const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
+      await h.orchestrator.initialize();
+
+      const seen: Array<string | null> = [];
+      const sequence = [DIRTY, CLEAN, DIRTY, CLEAN, DIRTY, CLEAN];
+      for (const lines of sequence) {
+        h.sidecar.emit('frame', frameWith(lines));
+        seen.push(h.orchestrator.status.warning);
+      }
+
+      let transitions = 0;
+      let previous: string | null = null;
+      for (const value of seen) {
+        if (value !== previous) transitions += 1;
+        previous = value;
+      }
+
+      // Before #65's fix this was 6 - one per frame, matching the real log exactly. The debounce
+      // collapses the whole burst to the one transition that actually reached the user: the
+      // initial null -> warning.
+      expect(transitions).toBe(1);
+      expect(h.orchestrator.status.warning).not.toBeNull();
+    });
   });
 
   it('never warns about edges when the whole monitor is the region', async () => {

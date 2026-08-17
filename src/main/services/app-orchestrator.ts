@@ -323,6 +323,56 @@ export const SIDECAR_EXIT_ERROR = 'the capture sidecar stopped unexpectedly';
 const DEFAULT_IDLE_WARNING_MS = 25_000;
 
 /**
+ * How long the edge warning must see clean frames before {@link AppStatus.warning} actually
+ * clears (#65).
+ *
+ * ## The bug this exists for
+ *
+ * {@link AppOrchestrator.#checkRegionEdges} decides afresh on every frame, and real subtitle text
+ * drifts in and out of edge contact from one frame to the next. A run on a near-full-screen region
+ * (poll 500ms) logged **6 transitions in 4.4 seconds** - warning, all clear, warning, all clear,
+ * warning, all clear, the gaps between them 1463ms, 1001ms, 493ms, 1021ms and 461ms - so the
+ * overlay banner appeared and vanished roughly once a second. `EdgeWarningThrottle` already rate-
+ * limits `#log.warn` for exactly this kind of repetition, but it never touched what the user sees:
+ * `#setRegionWarning` ran unconditionally beside it.
+ *
+ * ## Why only the *clearing* direction is held back
+ *
+ * A condition that starts must still reach the user at once - {@link #checkRegionEdges}'s dirty
+ * branch still calls {@link #setRegionWarning} directly, with no delay, so a warning is never late
+ * to appear. Only a clean frame is deferred: it arms a timer instead of clearing immediately, and
+ * every dirty frame that arrives before the timer fires cancels it
+ * ({@link #cancelEdgeWarningClear}). A condition that flickers therefore reads as continuously
+ * true, which is what it is; a condition that is genuinely over still clears, once nothing has
+ * contradicted the clear for the whole window.
+ *
+ * ## Why a timer, not "wait for the next clean frame to confirm it"
+ *
+ * `#checkRegionEdges` only ever runs from a `frame` event, and a frame is evidence something
+ * *changed* enough to re-run OCR - a screen that has genuinely gone still stops producing them.
+ * Confirming a clear by waiting for another frame would therefore never fire for the case that
+ * matters most: text that was touching the edge and then simply stopped changing. That is the
+ * shape of #59's bug reappearing one field over, so this is a real `ScheduleTimer`
+ * ({@link scheduleWithTimeout} by default, `unref()`'d the same as everywhere else in this file),
+ * not a frame-driven check - the clock keeps counting whether or not another frame ever arrives.
+ *
+ * ## ms, not frames - and why this size
+ *
+ * A window measured in polls would mean something different on this machine (`capture.
+ * intervalActive` 500ms in the log above) than on a fresh install (the shipped default, 800ms) or
+ * on whatever a user tunes it to. A window in milliseconds means the same thing everywhere, so
+ * this is ms.
+ *
+ * 3000ms is a little over double the longest gap in the trace above (1463ms) - enough margin that
+ * an ordinary flicker episode never produces a spurious clear-then-reopen - and roughly 4x the
+ * shipped `intervalActive` default, so a single slow or dropped poll tick cannot look like the
+ * condition ending either. It is well under `error-reporter.ts`'s own 8s banner auto-hide
+ * (`DEFAULT_BANNER_TIMEOUT_MS`, #59) and far under {@link DEFAULT_IDLE_WARNING_MS} (25s): this is
+ * a debounce against frame-to-frame noise, not a grace period, and it should not read as one.
+ */
+export const EDGE_WARNING_CLEAR_DELAY_MS = 3_000;
+
+/**
  * What the user is told while no capture region has been chosen (#51).
  *
  * The condition it names is a real one and it is not a matter of taste. With `region: null` the
@@ -404,6 +454,15 @@ export class AppOrchestrator {
   /** Standing "your region is clipping text" condition (#30). Not an error - see `AppStatus`. */
   #regionWarning: string | null = null;
   readonly #edgeThrottle = new EdgeWarningThrottle();
+  /**
+   * Cancels the pending "clear the edge warning" timer, or `null` when nothing is counting down
+   * (#65). Governs {@link #regionWarning} the way {@link #holdCancel} governs the held snapshot -
+   * one timer, owned by the condition it is timing, cancelled the instant that condition is no
+   * longer what it was timing. See {@link EDGE_WARNING_CLEAR_DELAY_MS} for what it is timing and
+   * why. Distinct from {@link #edgeThrottle}, which is a separate cadence for a separate surface:
+   * that one paces `#log.warn`, this one paces what reaches {@link AppStatus.warning}.
+   */
+  #edgeWarningClearCancel: CancelTimer | null = null;
   /** Standing "auto mode is finding nothing at all" condition (#50). */
   #idleWarning: string | null = null;
   /**
@@ -916,8 +975,10 @@ export class AppOrchestrator {
     if (this.#disposed) return;
     this.#disposed = true;
     // A pending hold has nothing left to time once this object stops reacting to anything (#61,
-    // case 4 of "the timer must never outlive what it was timing").
+    // case 4 of "the timer must never outlive what it was timing"). Same reasoning for the edge
+    // warning's pending clear (#65).
     this.#cancelHold();
+    this.#cancelEdgeWarningClear();
     for (const off of this.#unsubscribes) off();
     this.#unsubscribes.length = 0;
     this.#listeners.clear();
@@ -1319,7 +1380,7 @@ export class AppOrchestrator {
   }
 
   /**
-   * Notice recognised text pressed against the region's edge and tell the user (#30).
+   * Notice recognised text pressed against the region's edge and tell the user (#30, #65).
    *
    * Padding (see {@link #resolveRegion}) handles the user being a pixel or two tight. It cannot
    * handle the text genuinely being wider than the region - a longer subtitle line than the one
@@ -1329,10 +1390,22 @@ export class AppOrchestrator {
    * Only meaningful with a chosen region. Capturing a whole monitor puts text against the edge
    * constantly and legitimately, and warning about it would be pure noise.
    *
-   * @returns whether the status changed and subscribers need telling.
+   * **Setting is immediate; clearing is not.** A dirty frame calls {@link #setRegionWarning}
+   * straight away, on this same tick. A clean frame does not - it hands off to
+   * {@link #scheduleEdgeWarningClear}, which is what turns "cleared every frame" into "cleared
+   * once the condition has actually stayed away" (#65, {@link EDGE_WARNING_CLEAR_DELAY_MS}).
+   *
+   * @returns whether the status changed **synchronously** and subscribers need telling now. A
+   * clean frame that only armed or left alone a pending clear returns `false` even though
+   * something did happen internally - the resulting change, if any, is notified later by the
+   * timer itself.
    */
   #checkRegionEdges(frame: SidecarClientEvents['frame']): boolean {
     if (this.#config.current.capture.region === null) {
+      // No region means no meaningful edge to report - see the doc above - so there is nothing
+      // to debounce either: a dangling timer from a region that no longer applies would be
+      // debounce state outliving the condition it was timing.
+      this.#cancelEdgeWarningClear();
       return this.#setRegionWarning(null);
     }
 
@@ -1344,9 +1417,11 @@ export class AppOrchestrator {
     const monitorSize: readonly [number, number] = [frame.monitor.bounds[2], frame.monitor.bounds[3]];
     const report = findEdgeContact(frame.lines, frame.region, monitorSize);
     if (report.edges.length === 0) {
-      // Cleared as soon as a frame comes back clean, so a warning cannot outlive the problem.
+      // Still paces `#log.warn` on every clean frame, exactly as before - resetting its memo so
+      // the *next* dirty report logs at once rather than waiting out an interval that began the
+      // last time this happened. This is the log's own cadence and #65 does not touch it.
       this.#edgeThrottle.shouldReport(report);
-      return this.#setRegionWarning(null);
+      return this.#scheduleEdgeWarningClear();
     }
 
     const message = `text is touching the ${report.edges.join('/')} edge of the region; widen it`;
@@ -1357,7 +1432,40 @@ export class AppOrchestrator {
         region: frame.region,
       });
     }
+    // A condition that is (still, or newly) true always wins outright: cancel whatever clear was
+    // counting down before setting, so a warning that reappears mid-countdown is never raced by
+    // its own pending clear.
+    this.#cancelEdgeWarningClear();
     return this.#setRegionWarning(message);
+  }
+
+  /**
+   * Arm the debounced clear {@link EDGE_WARNING_CLEAR_DELAY_MS} names, unless one is already
+   * counting down or there is nothing showing to clear.
+   *
+   * Deliberately does **not** restart an already-pending timer on a second, third, ... clean
+   * frame in a row. The window is measured from the *first* clean observation, so extra
+   * confirmation only makes the eventual clear arrive sooner relative to when the condition
+   * actually ended, never later.
+   *
+   * @returns `false`, always - arming a timer is not itself a change to {@link #regionWarning};
+   * the change, if the timer is not cancelled first, happens later in the timer body, which
+   * notifies subscribers itself.
+   */
+  #scheduleEdgeWarningClear(): boolean {
+    if (this.#regionWarning === null) return false;
+    if (this.#edgeWarningClearCancel !== null) return false;
+    this.#edgeWarningClearCancel = this.#schedule(() => {
+      this.#edgeWarningClearCancel = null;
+      if (this.#setRegionWarning(null)) this.#notify();
+    }, EDGE_WARNING_CLEAR_DELAY_MS);
+    return false;
+  }
+
+  /** Cancel the pending edge-warning clear, if any. Calling it with nothing pending is harmless. */
+  #cancelEdgeWarningClear(): void {
+    this.#edgeWarningClearCancel?.();
+    this.#edgeWarningClearCancel = null;
   }
 
   #setRegionWarning(message: string | null): boolean {
