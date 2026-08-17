@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Main process entry point: wiring, and only wiring.
  *
  * Everything electron-specific is resolved here - `userData`, `isPackaged`,
