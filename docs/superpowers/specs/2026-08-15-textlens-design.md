@@ -30,7 +30,7 @@ Textlens จับภาพพื้นที่บนหน้าจอ อ่�
 │ Electron  (TypeScript)                    "โลกของ text"    │
 │                                                            │
 │ Main process                                               │
-│  ├── AppOrchestrator    lifecycle, mode (auto/snapshot)   │
+│  ├── AppOrchestrator    lifecycle, mode (ดู 2.1)          │
 │  ├── SidecarClient      spawn + supervise + JSON-lines    │
 │  ├── TextPipeline       group → dedup → translate → emit  │
 │  ├── TranslatorService  engine registry + fallback chain  │
@@ -75,6 +75,31 @@ Textlens จับภาพพื้นที่บนหน้าจอ อ่�
 | `TranslationCache` | อ่าน/เขียน SQLite, normalize key, TTL | — |
 | `ConfigService` | โหลด/merge/validate/persist, แจ้ง subscriber เมื่อเปลี่ยน | — |
 | `WindowManager` | สร้างและจัดการ BrowserWindow ทั้งสามตัว | ConfigService |
+
+### 2.1 Mode model — ข้างในสี่ ผู้ใช้เห็นสอง
+
+`AppOrchestrator` ถือ mode ภายในสี่ตัว แต่**ผู้ใช้เลือกระหว่างสองอย่างเท่านั้น** การ map อยู่ที่ `src/shared/mode-presentation.ts` ที่เดียว (tray กับ settings window วาดจากตัวเดียวกัน — [#60](https://github.com/zsitthiporn/textlens/issues/60) เกิดเพราะสองที่นี้เคยเรียกของเดียวกันคนละชื่อ)
+
+| mode ภายใน | capture loop | ผู้ใช้เห็นว่า | feature |
+|---|---|---|---|
+| `idle` | หยุด | *not started* — ยังไม่ได้เลือก region หรือยังไม่ได้ configure | [#51](https://github.com/zsitthiporn/textlens/issues/51) |
+| `auto` | **วิ่ง** | `Auto` | G3 |
+| `paused` | หยุดจริง (sidecar `stop`) | `Auto (paused)` — **สถานะหนึ่งของ Auto ไม่ใช่โหมดคู่ขนาน** | G5 |
+| `snapshot` | หยุด | `Translate once` | G4 |
+
+- **`paused` หยุด sidecar จริง** ไม่ใช่แค่ซ่อน overlay — `CaptureLoop.Stop` ทิ้ง timer ทิ้ง เกณฑ์ CPU ของ [#34](https://github.com/zsitthiporn/textlens/issues/34) วัดข้อนี้ และข้อนี้**ไม่ถูกย้อน**
+- **ซ่อน overlay ≠ pause** — `toggleOverlay` ไม่แตะ sidecar เลย
+- `idle` **ไม่ใช่ตัวเลือก** ที่ยื่นให้ผู้ใช้ ความหมายเดียวของมันคือ "ยังไม่พร้อม"
+
+#### `Translate once` ค้างจริง — และนี่คือการย้อนข้อตกลงของ #34 โดยเจตนา
+
+`snapshot()` ตั้ง mode เป็น `snapshot` **จากที่ไหนก็ได้ รวมทั้งจาก `auto`** loop จึงถูกสั่ง `stop` ก่อน แล้วค่อยยิงคำสั่ง `snapshot` เฟรมที่ได้กลับมาจึงเป็นเฟรมสุดท้ายจนกว่าผู้ใช้จะกลับไป Auto เอง
+
+กฎเดิม (#34) คือ *snapshot จาก `auto` ให้กลับมาอยู่ `auto`* — snapshot เป็น **action** ไม่ใช่ mode ยกเว้นตอนกดจาก `idle` เหตุผลตอนนั้นคือ "การขอเฟรมเดียวไม่ควรไปเปลี่ยนโหมดที่ผู้ใช้เลือกไว้" ซึ่งฟังขึ้นและ consistent ในตัวเอง
+
+**สิ่งที่ล้มกฎนั้นคือการใช้จริง** — ไม่แตะ mode แปลว่าไม่แตะ loop ด้วย tick ถัดไป (default 800ms) จึงทับเฟรมที่เพิ่งกดขอไปทันที "แปลครั้งเดียวแล้วค้างไว้อ่าน" จึงใช้ไม่ได้เลยจากโหมดที่ผู้ใช้อยู่แทบตลอดเวลา มันค้างจริงเฉพาะตอนกดจาก `idle` และ G4 เขียนไว้ตั้งแต่ก่อน #34 ว่า "จับครั้งเดียว **ค้างไว้จน dismiss**" — โค้ดขัดกับ spec ของตัวเองอยู่ ไม่ใช่แค่ขัดกับความคาดหวังของผู้ใช้
+
+สิ่งที่เสียไปจากการย้อน และมันเสียจริง: **กด Translate once ตอนอยู่ Auto แล้วออกจาก Auto** ไม่มีทางขอเฟรมเดียวโดยไม่ออกจากโหมดอีกแล้ว ทางกลับคือกด `Control+Alt+A` หรือคลิก `Auto` ใน tray อีกครั้ง — แลกกันโดยรู้ตัว โหมดที่หลุดออกง่ายมีค่าน้อยกว่าเฟรมที่ค้างอยู่จริง
 
 ---
 

@@ -7,14 +7,22 @@
  * overlay while its pipeline keeps running, and two independent things driving the capture
  * loop is how a codebase ends up in that state without anyone deciding to.
  *
- * ## The four modes
+ * ## Four modes here, two in front of the user
  *
- * | mode       | capture loop | what the user sees                                    |
- * |------------|--------------|-------------------------------------------------------|
- * | `idle`     | stopped      | nothing; the sidecar is not configured yet             |
- * | `auto`     | **running**  | boxes refreshed on the adaptive interval (G3)          |
- * | `paused`   | stopped      | the last boxes, frozen (G5)                            |
- * | `snapshot` | stopped      | one frame captured on demand, held (G4)                |
+ * | mode       | capture loop | the user calls it | what they see                          |
+ * |------------|--------------|-------------------|-----------------------------------------|
+ * | `idle`     | stopped      | *not started*     | nothing; no region chosen, or pre-configure |
+ * | `auto`     | **running**  | Auto              | boxes refreshed on the adaptive interval (G3) |
+ * | `paused`   | stopped      | Auto (paused)     | the last boxes, frozen (G5)             |
+ * | `snapshot` | stopped      | Translate once    | one frame captured on demand, held (G4) |
+ *
+ * The right-hand column is not decoration and it is not written here: `shared/mode-presentation.ts`
+ * owns it, because the tray and the settings window both draw it and #60 was filed after they
+ * drifted into calling the same thing different names. **`auto` and `paused` are one choice** -
+ * Auto on and Auto off - and `idle` is offered as no choice at all, since its only meaning is "not
+ * set up yet". The union stayed four because the tray's icon files, {@link AppOrchestrator.#apply}
+ * and `SidecarSupervisor`'s "the user paused, leave it dead" rule all key on it; none of those are
+ * naming questions.
  *
  * **`paused` really stops the sidecar.** `stop` disposes the loop's timer
  * (`CaptureLoop.Stop`), so a paused Textlens costs approximately nothing - which is what
@@ -25,17 +33,30 @@
  * {@link AppOrchestrator.toggleOverlay} touches only the window and never the sidecar, so
  * capture, OCR and translation all carry on while the boxes are hidden.
  *
- * ## `snapshot` is an action everywhere except from `idle`
+ * ## `snapshot` is a mode, entered from anywhere - and that reverses #34
  *
- * The issue asks for three things which together pin this down: a snapshot taken during
- * `auto` ends back in `auto`, one taken during `paused` stays `paused`, and `snapshot` is
- * nevertheless a mode of its own - G4's "จับครั้งเดียว ค้างไว้จน dismiss", the
- * document-reading mode whose cost is one tick.
+ * {@link AppOrchestrator.snapshot} sets the mode to `snapshot` whatever it was. Because
+ * {@link AppOrchestrator.#apply} stops the loop before it fires the held command, the frame that
+ * comes back is the last one the sidecar produces until the user asks for `auto` again. That is
+ * G4's "จับครั้งเดียว ค้างไว้จน dismiss", and "held" now means held.
  *
- * So: from `auto` or `paused`, a snapshot is one extra `snapshot` command and the mode does
- * not move. From `idle` - where there is no mode to go back to and nothing is running - it
- * becomes the resting mode `snapshot`, and the frame stays on screen until something else
- * moves the machine.
+ * **This section used to say the opposite, and the reversal is deliberate (#60).** The rule was:
+ * a snapshot taken during `auto` ends back in `auto`, one taken during `paused` stays `paused`,
+ * and only from `idle` does it become a resting mode - a snapshot was an *action* everywhere else.
+ * #34 asked for that and the argument for it was that a snapshot should not disturb the mode the
+ * user chose.
+ *
+ * What overturned it was using the app. Leaving `auto` alone leaves the **loop** alone, so the
+ * tick 800ms later overwrote the frame the user had just pressed a key to hold. "Translate once"
+ * therefore held nothing from the mode users are in essentially all the time; it worked only from
+ * `idle`, a state they are almost never in. The old rule was self-consistent and it contradicted
+ * both the user's mental model and G4, which had said "ค้างไว้จน dismiss" since before #34.
+ *
+ * Worth being precise about what was lost, because it is a real cost rather than none: a snapshot
+ * can no longer be taken *without* leaving Auto. Pressing Translate once during Auto now stops
+ * capture, and getting back is one more press of `Control+Alt+A` or one click on the tray's Auto
+ * item. That is the trade #60 made knowingly - a mode you can leave by accident is worth less than
+ * a frame that stays on screen.
  *
  * ## Why rapid mode switching cannot corrupt anything
  *
