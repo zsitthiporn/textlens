@@ -26,12 +26,19 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   AppOrchestrator,
+  NO_REGION_WARNING,
+  describeAppWarning,
   type AppMode,
   type CaptureConfigSource,
   type CaptureSidecar,
   type MonitorRegistry,
   type RegionPickerWindows,
 } from '../../src/main/services/app-orchestrator.js';
+import {
+  DEFAULT_BANNER_TIMEOUT_MS,
+  ErrorReporter,
+  type ScheduleTimer,
+} from '../../src/main/services/error-reporter.js';
 import type { LogFields, Logger } from '../../src/main/services/logger.js';
 import type { SidecarClientEvents } from '../../src/main/services/sidecar-client.js';
 import { DEFAULT_CONFIG, type Config, type ConfigOverride } from '../../src/shared/config-schema.js';
@@ -1777,5 +1784,94 @@ describe('AppOrchestrator: the first run has no region (#51)', () => {
 
     expect(h.orchestrator.mode).toBe('snapshot');
     expect(h.sidecar.kinds).toContain('snapshot');
+  });
+});
+
+/**
+ * Four different conditions reach the user through the one `warning` channel, and since #59 the
+ * banner drops a `warning` after a few seconds so it stops covering the screen.
+ *
+ * That is right for three of them and wrong for the fourth. "You have not chosen a region yet" is
+ * not something that went wrong during a session - it is the state a fresh install sits in,
+ * translating nothing on purpose, and the banner is the only thing on screen that explains why
+ * the app appears to be doing nothing. Auto-hiding it would put a first run back exactly where it
+ * was before that message existed: an app that starts, shows nothing, and says nothing.
+ */
+describe('AppOrchestrator: which warnings may leave the screen by themselves (#59)', () => {
+  function fakeTimers() {
+    const scheduled: { handler: () => void; cancelled: boolean }[] = [];
+    const schedule: ScheduleTimer = (handler) => {
+      const entry = { handler, cancelled: false };
+      scheduled.push(entry);
+      return () => {
+        entry.cancelled = true;
+      };
+    };
+    return {
+      schedule,
+      elapse() {
+        for (const entry of [...scheduled]) {
+          if (entry.cancelled) continue;
+          entry.cancelled = true;
+          entry.handler();
+        }
+      },
+    };
+  }
+
+  it('never hides "you have not chosen a region yet", however long it is left up', () => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+
+    reporter.set('region', describeAppWarning(NO_REGION_WARNING));
+    timers.elapse();
+    timers.elapse();
+
+    expect(reporter.banner?.cause).toBe(NO_REGION_WARNING);
+  });
+
+  it('carries that exemption all the way from a first run with no region configured', async () => {
+    // The seam a hand-built alert cannot check: that the orchestrator's own status text is the
+    // one the exemption is keyed on. A reworded warning that missed the constant would show up
+    // here and nowhere else.
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    const h = harness({ config: DEFAULT_CONFIG });
+    await h.orchestrator.initialize();
+
+    reporter.set('region', describeAppWarning(h.orchestrator.status.warning));
+    timers.elapse();
+
+    expect(h.orchestrator.status.warning).toBe(NO_REGION_WARNING);
+    expect(reporter.banner?.cause).toBe(NO_REGION_WARNING);
+    // And the tray was never in question.
+    expect(reporter.top?.cause).toBe(NO_REGION_WARNING);
+  });
+
+  it.each([
+    ['text clipping the region (#30)', 'text is touching the right edge of the region; widen it'],
+    ['a saved region that no longer applies (#31)', 'DISPLAY1 was 1920x1080 when the region was saved'],
+    ['auto mode finding nothing (#50)', 'no change has been detected for over 25s'],
+  ])('lets the warning about %s stop covering the screen', (_label, warning) => {
+    const timers = fakeTimers();
+    const reporter = new ErrorReporter({ schedule: timers.schedule });
+
+    reporter.set('region', describeAppWarning(warning));
+    timers.elapse();
+
+    // Every one of these describes something happening to a capture that is running. The user
+    // has read it, the tray still holds it, and the screen is worth more than the repetition.
+    expect(reporter.banner).toBeNull();
+    expect(reporter.top?.cause).toBe(warning);
+  });
+
+  it('marks only the no-region warning as one that stays', () => {
+    expect(describeAppWarning(NO_REGION_WARNING)?.sticky).toBe(true);
+    expect(describeAppWarning('anything else at all')?.sticky).toBe(false);
+    expect(describeAppWarning(null)).toBeNull();
+    // Not a substring match: a message that merely mentions the region is not this message.
+    expect(describeAppWarning(`${NO_REGION_WARNING}, probably`)?.sticky).toBe(false);
+    // Sanity: the exemption is worth nothing if the timeout is not real.
+    expect(DEFAULT_BANNER_TIMEOUT_MS).toBeGreaterThan(0);
   });
 });

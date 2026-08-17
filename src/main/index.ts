@@ -24,7 +24,12 @@ import {
 
 import { DEFAULT_CONFIG } from '../shared/config-schema.js';
 import { SettingsIpc } from './ipc-handlers.js';
-import { AppOrchestrator, SIDECAR_EXIT_ERROR, type AppStatus } from './services/app-orchestrator.js';
+import {
+  AppOrchestrator,
+  SIDECAR_EXIT_ERROR,
+  describeAppWarning,
+  type AppStatus,
+} from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
 import { DrawnPayloads } from './services/drawn-payloads.js';
 import {
@@ -354,16 +359,10 @@ function publishOrchestratorAlerts(status: AppStatus): void {
       ? null
       : { severity: 'error', cause: status.error, remedy: 'see the log for detail; capture retries on its own' },
   );
-  reporter.set(
-    'region',
-    status.warning === null
-      ? null
-      : {
-          severity: 'warning',
-          cause: status.warning,
-          remedy: 'use the tray menu → "Select Region…" to change what is being captured',
-        },
-  );
+  // The mapping itself lives with the warning texts in `app-orchestrator.ts`, because which of
+  // the four conditions on this channel may leave the banner by itself (#59) is a question about
+  // what they mean, and this file must be able to say nothing about that.
+  reporter.set('region', describeAppWarning(status.warning));
 }
 
 /**

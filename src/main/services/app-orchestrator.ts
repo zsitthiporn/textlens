@@ -64,6 +64,9 @@
 import type { CaptureConfig, Config, ConfigOverride } from '../../shared/config-schema.js';
 import type { AckEvent, MonitorInfo, Rect, SidecarCommand } from '../../shared/protocol.js';
 import { toPhysicalRegion } from '../utils/coordinates.js';
+// Type-only, and one direction: this file names the conditions, `error-reporter.ts` decides how
+// one of them is shown. Importing the value would be a cycle waiting to happen.
+import type { Alert } from './error-reporter.js';
 import { nullLogger, type Logger } from './logger.js';
 import type { PairableDisplay } from './monitor-service.js';
 import {
@@ -237,8 +240,39 @@ const DEFAULT_IDLE_WARNING_MS = 25_000;
  * detectable and the value that makes a desktop quiet are on opposite sides of each other, and
  * three regression tests hold the current ones shut precisely so that #50 cannot come back.
  */
-const NO_REGION_WARNING =
+export const NO_REGION_WARNING =
   'no capture region has been chosen, so Textlens would translate the whole screen';
+
+/**
+ * {@link AppStatus.warning} as the alert the user-facing surfaces show (#41, #59).
+ *
+ * Here rather than in `index.ts` for two reasons. It has to be testable without Electron, and it
+ * belongs next to the text it keys on: four separate conditions arrive on this one channel - text
+ * clipping the region (#30), a saved region that no longer applies (#31), auto mode finding
+ * nothing (#50), and no region chosen at all (#51) - and only this file knows which is which.
+ *
+ * **Three of the four should stop covering the screen after a while; the fourth must not.** #51's
+ * warning is not an event that happened, it is the state the app is deliberately resting in: it
+ * sits in `idle` translating nothing, and this sentence is the only thing on screen explaining
+ * why. Timing it out would leave a first run looking like an app that simply does nothing, which
+ * is the silence #51 was filed to end. The other three describe something that is going wrong
+ * while the app runs, the tray keeps the text either way, and the region is still being captured
+ * whether or not the banner is up.
+ *
+ * Keyed on the exported constant by identity, not on a substring or a severity or the source -
+ * the same reason `SIDECAR_EXIT_ERROR` is exported rather than matched on. A future warning
+ * cannot acquire the exemption by wording itself similarly, and a reworded {@link
+ * NO_REGION_WARNING} cannot silently lose it, because both sides move together in one file.
+ */
+export function describeAppWarning(warning: string | null): Omit<Alert, 'source'> | null {
+  if (warning === null) return null;
+  return {
+    severity: 'warning',
+    cause: warning,
+    remedy: 'use the tray menu → "Select Region…" to change what is being captured',
+    sticky: warning === NO_REGION_WARNING,
+  };
+}
 
 export class AppOrchestrator {
   readonly #sidecar: CaptureSidecar;
