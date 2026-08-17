@@ -24,18 +24,22 @@ import {
 
 import { DEFAULT_CONFIG } from '../shared/config-schema.js';
 import { SettingsIpc } from './ipc-handlers.js';
-import { AppOrchestrator, SIDECAR_EXIT_ERROR, type AppStatus } from './services/app-orchestrator.js';
+import {
+  AppOrchestrator,
+  SIDECAR_EXIT_ERROR,
+  describeAppWarning,
+  type AppStatus,
+} from './services/app-orchestrator.js';
 import { ConfigService } from './services/config.js';
 import { DrawnPayloads } from './services/drawn-payloads.js';
 import {
   ErrorReporter,
-  describeAlert,
+  alertSurfaces,
   describeConfigIssues,
   describeHotkeyFailures,
   describeMissingRecognizer,
   describeSupervisor,
   judgeTranslation,
-  type Alert,
 } from './services/error-reporter.js';
 import { HotkeyService } from './services/hotkey-service.js';
 import { createLogger, type RootLogger } from './services/logger.js';
@@ -111,6 +115,12 @@ let lastStatus: AppStatus = { mode: 'idle', overlayVisible: true, error: null, w
  * The tray gets the alert in its `error` slot when it is `fatal` or `error`, because that slot is
  * what turns the icon red; a `warning` or `info` alert lands in `warning`, which is the tooltip
  * and a disabled menu row. That mapping is the whole of "tray icon เปลี่ยนเป็นสถานะ error".
+ *
+ * **The tray and the banner read different views of the same alert (#59).** The tray reads
+ * `reporter.top`, which stands until its source clears it; the banner reads `reporter.banner`,
+ * which hands the screen back after a while for everything short of an error. The mapping itself
+ * is `alertSurfaces`, in `error-reporter.ts`, so the split is pinned by a test rather than by
+ * this function being read carefully.
  */
 function renderStatus(): void {
   // Pulled from the reporter rather than from a variable a subscriber keeps up to date. A real run
@@ -119,19 +129,16 @@ function renderStatus(): void {
   // only ever written by that notification was therefore still `null` for the whole session when
   // the very first alert was published before anything had subscribed. Reading the source of truth
   // at render time removes the ordering question entirely.
-  const alert: Alert | null = reporter.top;
-  const severe = alert !== null && (alert.severity === 'fatal' || alert.severity === 'error');
+  const surfaces = alertSurfaces(reporter);
 
   tray?.update({
     mode: lastStatus.mode,
     overlayVisible: lastStatus.overlayVisible,
-    error: severe && alert !== null ? describeAlert(alert) : null,
-    warning: !severe && alert !== null ? describeAlert(alert) : null,
+    error: surfaces.trayError,
+    warning: surfaces.trayWarning,
   });
 
-  windows?.sendOverlayStatus({
-    alert: alert === null ? null : { severity: alert.severity, cause: alert.cause, remedy: alert.remedy },
-  });
+  windows?.sendOverlayStatus({ alert: surfaces.overlayAlert });
 
   // The third surface (#39). It shows the same single worst alert the other two do - one ranking,
   // three renderings - plus everything underneath it that the tray has no room for.
@@ -352,16 +359,10 @@ function publishOrchestratorAlerts(status: AppStatus): void {
       ? null
       : { severity: 'error', cause: status.error, remedy: 'see the log for detail; capture retries on its own' },
   );
-  reporter.set(
-    'region',
-    status.warning === null
-      ? null
-      : {
-          severity: 'warning',
-          cause: status.warning,
-          remedy: 'use the tray menu → "Select Region…" to change what is being captured',
-        },
-  );
+  // The mapping itself lives with the warning texts in `app-orchestrator.ts`, because which of
+  // the four conditions on this channel may leave the banner by itself (#59) is a question about
+  // what they mean, and this file must be able to say nothing about that.
+  reporter.set('region', describeAppWarning(status.warning));
 }
 
 /**

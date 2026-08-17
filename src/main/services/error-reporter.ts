@@ -19,8 +19,31 @@
  * stack of them. So this is a map keyed by {@link AlertSource} - one slot per source of truth,
  * last writer for that source wins - and {@link ErrorReporter.top} picks the winner. A source
  * clears itself by writing `null`, which is what makes a transient failure disappear on its own
- * while a fatal one stays put: nothing here expires an alert on a timer, because the condition,
- * not the clock, is what decides whether it is still true.
+ * while a fatal one stays put.
+ *
+ * ## No alert expires. One *surface* does (#59)
+ *
+ * This used to say that nothing here expires an alert on a timer, because the condition and not
+ * the clock decides whether it is still true. The first half is still exactly right and
+ * {@link ErrorReporter.top} still obeys it: an alert leaves the map when its source says the
+ * condition ended, and never because time passed. The tray tooltip, the tray menu row and the
+ * settings window read that, so what the user can go and *look up* is unchanged.
+ *
+ * What the second half missed is that one of the two surfaces charges rent. The overlay banner
+ * sits on top of whatever the user is reading, and the overlay is click-through, so there is no
+ * gesture that dismisses it - #59 is a banner that stood for an entire session over a condition
+ * whose remedy was impossible to follow. A message that cannot be acted on and cannot be closed
+ * stops being information and becomes an obstruction.
+ *
+ * So {@link ErrorReporter.banner} is a second, *narrower* view of the same one alert:
+ * `warning` and `info` stop being drawn after {@link DEFAULT_BANNER_TIMEOUT_MS}; `error` and
+ * `fatal` are drawn until their source clears them, because those are the ones where continuing
+ * to look at a working-looking screen is the actual harm. An alert may also opt out with
+ * {@link Alert.sticky}. Nothing is forgotten in either case - invariant 4 is about the user being
+ * able to find out, and the tray still says it.
+ *
+ * The clock is injected ({@link ErrorReporterOptions.schedule}) for the same reason it is
+ * everywhere else in this codebase: a test that waits eight real seconds is a test nobody runs.
  *
  * ## Pure, and Electron-free
  *
@@ -82,6 +105,24 @@ export interface Alert {
   readonly cause: string;
   /** What to do about it. Required - an alert without one is a complaint. */
   readonly remedy: string;
+  /**
+   * Keep this on the overlay banner until its source clears it, whatever its severity (#59).
+   *
+   * Severity answers "how badly is the user being let down". This answers a different question:
+   * "is this a condition that happened, or a state the app is resting in". A `warning` normally
+   * stops being drawn after {@link DEFAULT_BANNER_TIMEOUT_MS} on the reasoning that the user has
+   * read it and the tray still holds it - which is right for something that came and went, and
+   * wrong for a setup step that has not been done. #51's "no capture region has been chosen" is
+   * the second kind: the app is deliberately sitting still, the banner is the only thing on
+   * screen saying why, and timing it out would restore the silence #51 was filed to end.
+   *
+   * **Opt-in, per alert, and defaulted off**, which is the point of it being a field rather than
+   * a rule about severities or sources: nothing can inherit the exemption by resembling the alert
+   * that has it, and the only way to acquire it is a caller writing `sticky: true` next to a
+   * reason for doing so. There is one such caller today: `describeAppWarning` in
+   * `app-orchestrator.ts`, which is also the file that owns the text it keys on.
+   */
+  readonly sticky?: boolean;
 }
 
 /**
@@ -94,23 +135,89 @@ export function describeAlert(alert: Pick<Alert, 'cause' | 'remedy'>): string {
   return `${alert.cause} — ${alert.remedy}`;
 }
 
+/**
+ * How long a `warning` or `info` covers the overlay before it stops being drawn (#59).
+ *
+ * Long enough to read twice - the banner carries two sentences, and a user whose eyes are on a
+ * subtitle needs a moment to notice it arrived at all. Short enough that it is gone before the
+ * next few lines of dialogue, which is the thing #59 is about: the alert is not urgent (it is a
+ * `warning` by definition) and the screen belongs to what the user came here to read.
+ */
+export const DEFAULT_BANNER_TIMEOUT_MS = 8_000;
+
+/** Cancels a pending banner timeout. Calling it after the timeout fired must be harmless. */
+export type CancelTimer = () => void;
+
+/**
+ * Runs `handler` after `delayMs`. Injected so the banner's lifecycle is testable in plain Node.
+ */
+export type ScheduleTimer = (handler: () => void, delayMs: number) => CancelTimer;
+
+function scheduleWithTimeout(handler: () => void, delayMs: number): CancelTimer {
+  const timer = setTimeout(handler, delayMs);
+  // A banner that is about to hide itself must never be the reason the process is still alive:
+  // this timer can be pending when the user quits, and `app.quit()` waiting eight seconds for a
+  // cosmetic countdown would look like a hang.
+  timer.unref();
+  return () => {
+    clearTimeout(timer);
+  };
+}
+
 export interface ErrorReporterOptions {
   readonly logger?: Logger;
+  /** How long a non-severe alert stays on the overlay banner. See {@link DEFAULT_BANNER_TIMEOUT_MS}. */
+  readonly bannerTimeoutMs?: number;
+  /** The clock behind that timeout. Tests pass one they can fire by hand. */
+  readonly schedule?: ScheduleTimer;
 }
 
 export class ErrorReporter {
   readonly #log: Logger;
   readonly #alerts = new Map<AlertSource, Alert>();
   readonly #listeners = new Set<(top: Alert | null) => void>();
+  readonly #bannerTimeoutMs: number;
+  readonly #schedule: ScheduleTimer;
+  /**
+   * Alerts whose banner time is up, keyed by severity and cause (#59).
+   *
+   * Keyed by the *message* rather than by source, because that is the unit the user experiences:
+   * a source re-asserting the same words is the same banner they already read, and a source
+   * changing its wording is news. Pruned in {@link #recompute} the moment an alert leaves the
+   * map, so a condition that is fixed and then comes back is shown again rather than being
+   * remembered as dismissed forever.
+   */
+  readonly #timedOut = new Set<string>();
+  /** The key the pending timeout belongs to, or `null` when nothing is being timed. */
+  #timing: string | null = null;
+  #cancelTimer: CancelTimer | null = null;
   #top: Alert | null = null;
+  #banner: Alert | null = null;
 
   constructor(options: ErrorReporterOptions = {}) {
     this.#log = (options.logger ?? nullLogger()).child('alerts');
+    this.#bannerTimeoutMs = options.bannerTimeoutMs ?? DEFAULT_BANNER_TIMEOUT_MS;
+    this.#schedule = options.schedule ?? scheduleWithTimeout;
   }
 
-  /** The single alert the surfaces should show, or `null` when everything is fine. */
+  /**
+   * The single alert the user should be told about, or `null` when everything is fine.
+   *
+   * **Not affected by the banner timeout.** This is what the tray tooltip, the tray menu and the
+   * settings window read, and it stands until its source clears it - see the module doc.
+   */
   get top(): Alert | null {
     return this.#top;
+  }
+
+  /**
+   * The same alert, filtered to what should currently be *drawn over the screen* (#59).
+   *
+   * `null` while {@link top} is not, once a `warning` or `info` has had its time on the banner.
+   * That is not the alert ending; it is the alert giving the screen back.
+   */
+  get banner(): Alert | null {
+    return this.#banner;
   }
 
   /** Everything currently standing, worst first. For the settings window (#39) when it exists. */
@@ -152,15 +259,40 @@ export class ErrorReporter {
   // -------------------------------------------------------------------------
 
   #recompute(): void {
-    const next = this.alerts[0] ?? null;
-    const changed =
-      (next === null) !== (this.#top === null) ||
-      (next !== null && this.#top !== null && (next.cause !== this.#top.cause || next.severity !== this.#top.severity));
+    const standing = this.alerts;
+    const next = standing[0] ?? null;
+    const topChanged = !isSameMessage(next, this.#top);
     this.#top = next;
-    if (!changed) return;
 
-    if (next === null) this.#log.info('all clear');
-    else this.#log.warn('user-facing alert', { source: next.source, severity: next.severity, text: describeAlert(next) });
+    // A message nobody is asserting any more has no banner history worth keeping. A condition
+    // that was fixed and has come back is news again, and showing it again is the honest
+    // reading of "the clock does not decide whether it is still true".
+    if (this.#timedOut.size > 0) {
+      const live = new Set(standing.map(messageKey));
+      for (const key of [...this.#timedOut]) {
+        if (!live.has(key)) this.#timedOut.delete(key);
+      }
+    }
+
+    const banner = next !== null && !this.#timedOut.has(messageKey(next)) ? next : null;
+    const bannerChanged = !isSameMessage(banner, this.#banner);
+    this.#banner = banner;
+    this.#retime();
+
+    // Logged on the alert changing, never on the banner hiding: a hide is not a new condition,
+    // and a second line for it would read in the log exactly like the alert firing twice.
+    if (topChanged) {
+      if (next === null) this.#log.info('all clear');
+      else {
+        this.#log.warn('user-facing alert', {
+          source: next.source,
+          severity: next.severity,
+          text: describeAlert(next),
+        });
+      }
+    }
+
+    if (!topChanged && !bannerChanged) return;
 
     for (const listener of [...this.#listeners]) {
       try {
@@ -172,6 +304,109 @@ export class ErrorReporter {
       }
     }
   }
+
+  /**
+   * Keep the pending timeout pointed at whatever the banner is showing now (#59).
+   *
+   * One timer at a time, owned by the displayed message. The case that forces that: a warning
+   * appears, an `error` displaces it three seconds later, and the original timeout is still in
+   * flight - left running, it would fire while a *different* message is on screen and blank a
+   * banner that had been up for three seconds. Cancelling on every banner change also gives the
+   * displaced warning a full turn if it comes back, which is what the user would expect, having
+   * had it covered up.
+   *
+   * A banner that has not changed keeps its running timer untouched. That is what makes the
+   * timeout mean "eight seconds on screen" rather than "eight seconds since the last frame that
+   * re-asserted this" - and re-assertion is constant, since the condition behind a warning is
+   * usually true on every frame. Two guards upstream already absorb most of it ({@link set}
+   * returns early for an identical message from the same source, and `AppOrchestrator` dedupes
+   * its warning text before that), and this is the one that has to hold when they do not.
+   */
+  #retime(): void {
+    const banner = this.#banner;
+    const wanted = banner !== null && autoHidesFromBanner(banner) ? messageKey(banner) : null;
+    if (wanted === this.#timing) return;
+
+    this.#cancelTimer?.();
+    this.#cancelTimer = null;
+    this.#timing = null;
+    if (wanted === null) return;
+
+    this.#timing = wanted;
+    this.#cancelTimer = this.#schedule(() => {
+      this.#expireBanner(wanted);
+    }, this.#bannerTimeoutMs);
+  }
+
+  #expireBanner(key: string): void {
+    // A timeout that fired after being superseded has nothing to say about what is on screen now.
+    if (this.#timing !== key) return;
+    this.#timing = null;
+    this.#cancelTimer = null;
+    this.#timedOut.add(key);
+    // Recomputed rather than assigning `#banner = null` directly, so the hide travels the same
+    // path and reaches the same listeners as every other change to what the user sees.
+    this.#recompute();
+  }
+}
+
+/**
+ * Whether this alert gives the screen back on its own (#59).
+ *
+ * `error` and `fatal` never do. The harm they name is that the app looks like it is working when
+ * it is not, and a banner the user has stopped seeing is how that starts.
+ */
+function autoHidesFromBanner(alert: Alert): boolean {
+  if (alert.sticky === true) return false;
+  return alert.severity === 'warning' || alert.severity === 'info';
+}
+
+/** Two alerts the user could not tell apart on screen. */
+function isSameMessage(a: Alert | null, b: Alert | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.severity === b.severity && a.cause === b.cause;
+}
+
+/** {@link isSameMessage} as a string, for the timed-out set. */
+function messageKey(alert: Alert): string {
+  // Newline-separated because `severity` is one of four fixed words and cannot contain one, so
+  // no cause can forge a different severity's key.
+  return `${alert.severity}\n${alert.cause}`;
+}
+
+/**
+ * What each surface should be showing right now (#41, #59).
+ *
+ * Pure, and separate from `index.ts`'s `renderStatus`, because the thing worth pinning in a test
+ * is exactly this split: **the tray reads {@link ErrorReporter.top} and the overlay reads
+ * {@link ErrorReporter.banner}**. Wired the other way round, or wired to one of them twice, the
+ * app would either keep obstructing the screen or lose the message entirely once the banner
+ * timed out - and the second is invariant 4 broken by the fix for #59.
+ *
+ * Takes the two views rather than the reporter itself so a test can hand it a pair of literals,
+ * and so nothing here can accidentally reach for a third piece of state.
+ */
+export interface AlertSurfaces {
+  /** The tray's `error` slot - the one that turns the icon red. */
+  readonly trayError: string | null;
+  /** The tray's `warning` slot - the tooltip and a disabled menu row. */
+  readonly trayWarning: string | null;
+  /** What the overlay banner draws, or `null` for nothing. */
+  readonly overlayAlert: Pick<Alert, 'severity' | 'cause' | 'remedy'> | null;
+}
+
+export function alertSurfaces(views: {
+  readonly top: Alert | null;
+  readonly banner: Alert | null;
+}): AlertSurfaces {
+  const { top, banner } = views;
+  const severe = top !== null && (top.severity === 'fatal' || top.severity === 'error');
+  return {
+    trayError: severe && top !== null ? describeAlert(top) : null,
+    trayWarning: !severe && top !== null ? describeAlert(top) : null,
+    overlayAlert:
+      banner === null ? null : { severity: banner.severity, cause: banner.cause, remedy: banner.remedy },
+  };
 }
 
 function compareAlerts(a: Alert, b: Alert): number {
