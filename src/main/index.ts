@@ -280,6 +280,12 @@ async function bootstrap(): Promise<void> {
     logger,
     monitors,
     picker: windows,
+    // #61. `dismiss()` clears the overlay window directly and never touches the pipeline, so
+    // without this its memory of what is on screen - `#displayed`, and #36's stability baseline -
+    // would survive a dismiss and could suppress the very next Translate once as "unchanged".
+    onDismissed: () => {
+      textPipeline?.pipeline.resetScene('dismissed');
+    },
   });
 
   const modes = orchestrator;
@@ -396,6 +402,11 @@ function startTray(modes: AppOrchestrator): void {
       onToggleOverlay: () => {
         modes.toggleOverlay();
       },
+      // Clears the boxes without touching the mode (#61) - not the same item as "Show overlay"
+      // above, which hides the window instead.
+      onDismiss: () => {
+        modes.dismiss();
+      },
       onOpenSettings: () => {
         modes.openSettings();
       },
@@ -506,6 +517,9 @@ function applyHotkeys(): void {
     },
     toggleOverlay: () => {
       modes.toggleOverlay();
+    },
+    dismiss: () => {
+      modes.dismiss();
     },
   });
 

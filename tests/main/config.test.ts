@@ -98,6 +98,26 @@ describe('ConfigService.load', () => {
     expect(service.issues).toEqual([]);
   });
 
+  /**
+   * #61's own acceptance criterion, and the single most important check this issue adds: every
+   * config already on disk was written before the `modes` section existed, so it has no `modes`
+   * key at all. `configOverrideSchema` is partial per section precisely so that is fine - but the
+   * claim is worth a real file and a real load rather than trust, because the trap right next to
+   * it (CLAUDE.md's "renaming a config key is a migration, not a rename") is exactly this schema
+   * rejecting a whole file over one missing or misnamed section.
+   */
+  it('loads a config with no "modes" section at all, and defaults snapshotHoldMs to 0', async () => {
+    const filePath = tempConfigPath();
+    writeConfig(filePath, JSON.stringify({ capture: { intervalActive: 1234 } }));
+
+    const service = await ConfigService.load({ filePath });
+
+    expect(service.issues).toEqual([]);
+    expect(service.current.modes.snapshotHoldMs).toBe(0);
+    // The rest of the file still applied - a new section did not somehow reject the old ones.
+    expect(service.current.capture.intervalActive).toBe(1234);
+  });
+
   it('keeps the whole default config and names the bad field when a value fails the schema', async () => {
     const filePath = tempConfigPath();
     // One good field and one bad one: the good one must NOT be applied either.
