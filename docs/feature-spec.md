@@ -58,12 +58,12 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
 
 | ID | Feature | P | Src | รายละเอียด |
 |----|---------|---|-----|-----------|
-| G1 | **Global hotkey** | P0 | 🔴 | toggle auto / snapshot ครั้งเดียว / เลือก region ใหม่ / ซ่อน-แสดง overlay |
+| G1 | **Global hotkey** | P0 | 🔴 | Auto on/off · Translate once · เลือก region ใหม่ · ซ่อน-แสดง overlay — **config key ยังเป็น `hotkeys.snapshot`** และห้ามเปลี่ยน (ดู G4) |
 | G2 | Hotkey ตั้งค่าได้ | P1 | 🔴 | เปลี่ยน binding + detect ชนกับโปรแกรมอื่น |
-| G3 | Auto mode (loop) | P0 | 🔵 | **โหมดหลัก** — วนจับตาม adaptive interval |
-| G4 | Snapshot mode | P0 | 🔴 | จับครั้งเดียว ค้างไว้จน dismiss — โหมดรอง สำหรับอ่านเอกสาร (ต้นทุนแทบศูนย์ เพราะเป็นแค่ tick เดียว) |
-| G5 | Pause / Resume | P0 | 🔴 | หยุด pipeline จริง ไม่ใช่แค่ซ่อน overlay |
-| G6 | System tray | P0 | 🔵 | toggle overlay + menu: Select Region, Snapshot, Auto on/off, Settings, Quit |
+| G3 | **Auto** (loop) | P0 | 🔵 | **โหมดหลัก** — วนจับตาม adaptive interval · หนึ่งในสองโหมดที่ผู้ใช้เลือก |
+| G4 | **Translate once** | P0 | 🔴 | จับครั้งเดียว **ค้างไว้จน dismiss** — อีกโหมดที่ผู้ใช้เลือก · กดตอนอยู่ Auto แล้ว**หยุด loop** ([#60](https://github.com/zsitthiporn/textlens/issues/60) ย้อนข้อตกลงของ #34 โดยเจตนา ดู design doc §2.1) · ~~ชื่อ `Snapshot`~~ — คำนั้นไม่โผล่ใน UI แล้ว แต่**ชื่อภายในและ config key ยังเป็น `snapshot` ทั้งหมด** เพราะ schema เป็น `strictObject` การ rename key ทำให้ config ของผู้ใช้ถูกปฏิเสธทั้งไฟล์ |
+| G5 | Pause / Resume | P0 | 🔴 | หยุด pipeline จริง ไม่ใช่แค่ซ่อน overlay · **เป็นสถานะของ Auto ไม่ใช่โหมดที่สาม** (#60) — ปุ่มเดียวกันกดซ้ำ |
+| G6 | System tray | P0 | 🔵 | toggle overlay + menu: **Auto / Translate once** (ติ๊กว่าอันไหน active), Select Region, Show overlay, Restart capture engine, Settings, Quit |
 
 ### 1.3 OCR
 
@@ -216,8 +216,9 @@ Source — 🔵 = แกะจาก reference / 🟢 = improvement ของเ
   → hotkey เลือก region: เลือกจอ + ลากกรอบคลุมช่อง subtitle
   → hotkey เปิด auto mode
   → subtitle เปลี่ยน → กล่องคำแปลไทยโผล่ใต้ข้อความอังกฤษแต่ละก้อน ไม่กระพริบ
-  → hotkey pause / ซ่อน overlay
-  → hotkey snapshot: แปลครั้งเดียวค้างไว้ (โหมดอ่านเอกสาร)
+  → hotkey ปิด Auto / ซ่อน overlay
+  → hotkey Translate once: แปลจังหวะนี้แล้ว **ค้างไว้** — loop หยุด ไม่มี tick ไหนมาทับ (#60)
+  → กลับ Auto: hotkey เดิม (Control+Alt+A) หรือคลิก Auto ใน tray
   → เปลี่ยน setting มีผลทันที
   → engine ล่ม → เห็นข้อความบอก ไม่ใช่เงียบ
 ```

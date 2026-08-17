@@ -31,6 +31,7 @@
 
 import type { ConfigOverride } from '../../shared/config-schema.js';
 import { acceleratorFromKeyStroke } from '../../shared/accelerator.js';
+import { describeMode, MODE_NAMES, type UserMode } from '../../shared/mode-presentation.js';
 
 import './settings.css';
 import type {
@@ -164,9 +165,17 @@ const CAPTURE_FIELDS: readonly NumberField[] = [
   },
 ];
 
+/**
+ * The shortcut rows' names, which are the mode names plus the two actions that are not modes.
+ *
+ * `snapshot` is the config key and cannot move - the schema is a `strictObject`, so renaming it
+ * rejects the user's entire file rather than one field. The *label* comes from
+ * `shared/mode-presentation.ts` so that this row, the header buttons and the tray all say the same
+ * words; #60 exists because they did not.
+ */
 const HOTKEY_LABELS: Readonly<Record<string, string>> = {
-  toggleAuto: 'Start / pause translating',
-  snapshot: 'Translate once',
+  toggleAuto: `${MODE_NAMES.auto} on / off`,
+  snapshot: MODE_NAMES.once,
   selectRegion: 'Choose a region',
   toggleOverlay: 'Show / hide the boxes',
 };
@@ -222,17 +231,30 @@ export function mountSettings(root: HTMLElement): void {
     void bridge?.command(command);
   };
 
-  for (const [label, command] of [
-    ['Start / pause', 'toggleAuto'],
-    ['Translate once', 'snapshot'],
-    ['Show / hide boxes', 'toggleOverlay'],
-  ] as const) {
-    const button = element('button', 'ghost', label);
+  // -- mode selector (#60) -------------------------------------------------
+  //
+  // Two buttons, not three. Auto and Translate once are the entire choice; pausing is Auto
+  // switched off, so it is the same button clicked again rather than a peer of the other two -
+  // which is what made this row and the tray menu read as unrelated scattered controls. The label
+  // and the active flag both come from `shared/mode-presentation.ts`, so this window and the tray
+  // cannot drift apart again.
+  const modeChoiceButtons = new Map<UserMode, HTMLButtonElement>();
+  for (const choice of describeMode('idle').choices) {
+    const button = element('button', 'ghost mode-choice', choice.label);
     button.addEventListener('click', () => {
-      send(command);
+      send(choice.command);
     });
+    modeChoiceButtons.set(choice.mode, button);
     modeButtons.append(button);
   }
+
+  // Deliberately outside the pair above. Hiding the boxes is not a mode: capture, OCR and
+  // translation all carry on (#34), so presenting it as a third choice would say the opposite.
+  const overlayButton = element('button', 'ghost', 'Show / hide boxes');
+  overlayButton.addEventListener('click', () => {
+    send('toggleOverlay');
+  });
+  modeButtons.append(overlayButton);
 
   // -- first-run prompt (#51) ---------------------------------------------
   //
@@ -642,8 +664,20 @@ export function mountSettings(root: HTMLElement): void {
   function render(next: SettingsState): void {
     state = next;
 
-    modeLabel.textContent = next.mode;
+    // The pill reads in the user's words; `data-mode` keeps the internal name, because the
+    // stylesheet keys its colours on it and because that is the word a bug report should carry.
+    const presentation = describeMode(next.mode);
+    modeLabel.textContent = presentation.label;
     modeLabel.dataset['mode'] = next.mode;
+    for (const choice of presentation.choices) {
+      const button = modeChoiceButtons.get(choice.mode);
+      if (button === undefined) continue;
+      button.textContent = choice.label;
+      button.dataset['active'] = String(choice.active);
+      // For the same reason the tray uses a checkbox: "which one am I in" has to be readable, and
+      // a screen reader gets it from here rather than from the colour.
+      button.setAttribute('aria-pressed', String(choice.active));
+    }
 
     if (next.alert === null) {
       alertBox.hidden = true;

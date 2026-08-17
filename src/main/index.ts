@@ -393,9 +393,6 @@ function startTray(modes: AppOrchestrator): void {
       onToggleAuto: () => {
         modes.toggleAuto();
       },
-      onPause: () => {
-        modes.pause();
-      },
       onToggleOverlay: () => {
         modes.toggleOverlay();
       },

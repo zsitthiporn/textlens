@@ -105,6 +105,16 @@ interface FakeSidecar extends CaptureSidecar {
   readonly state: string;
   /** Push an event as the sidecar would. */
   emit<K extends 'ack' | 'error' | 'frame' | 'nochange' | 'exit'>(event: K, payload: SidecarClientEvents[K]): void;
+  /**
+   * Fire one turn of the capture loop's timer.
+   *
+   * Emits a `frame` **only while the loop is running**, which is what `CaptureLoop` does: `stop`
+   * disposes the timer, so a stopped loop produces nothing at all. This is what makes "the held
+   * frame is not overwritten" an assertion about behaviour rather than about a boolean - the
+   * default interval is 800ms and a user reading a held translation is looking at the screen for
+   * far longer than that.
+   */
+  tick(): void;
   /** Stop accepting commands, as a dead process does. */
   die(): void;
   readonly kinds: string[];
@@ -152,6 +162,10 @@ function fakeSidecar(options: FakeSidecarOptions = {}): FakeSidecar {
       return sent.map((command) => command.cmd);
     },
     emit,
+    tick() {
+      if (!alive || !capturing) return;
+      emit('frame', frameEvent());
+    },
     die() {
       alive = false;
     },
@@ -570,17 +584,38 @@ describe('AppOrchestrator: hiding the overlay is not pausing', () => {
 });
 
 describe('AppOrchestrator: snapshot', () => {
-  it('during auto: captures once and ends in auto, still running', async () => {
+  /**
+   * **#60, and the reversal of #34.**
+   *
+   * The two assertions this replaced said the mode stays `auto` and the loop keeps running, which
+   * is what #34 asked for and what the module doc argued for at length. What nobody had written
+   * down was the price: the loop is still running, so the tick 800ms later replaces the frame the
+   * user pressed the key to hold. "Translate once" therefore held nothing at all from the mode
+   * users are in essentially all the time - and feature spec G4 has said "จับครั้งเดียว ค้างไว้จน
+   * dismiss" since before either issue.
+   *
+   * `stop` before `snapshot` is the mechanism, and the order is asserted rather than inferred.
+   */
+  it('during auto: stops the loop, so no later tick can overwrite the held frame', async () => {
     const h = harness();
     await h.orchestrator.initialize();
+    const frames: number[] = [];
+    h.sidecar.on('frame', (frame) => {
+      frames.push(frame.seq);
+    });
 
     h.orchestrator.snapshot();
+    const held = frames.at(-1);
+    h.sidecar.tick();
+    h.sidecar.tick();
 
-    expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure', 'start', 'snapshot']);
-    expectConverged(h, 'auto');
+    expect(held).toBeDefined();
+    expect(frames.at(-1)).toBe(held);
+    expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure', 'start', 'stop', 'snapshot']);
+    expectConverged(h, 'snapshot');
   });
 
-  it('during pause: captures once and stays paused, still stopped', async () => {
+  it('during pause: captures once and holds it too, still stopped', async () => {
     const h = harness();
     await h.orchestrator.initialize();
     h.orchestrator.pause();
@@ -588,8 +623,8 @@ describe('AppOrchestrator: snapshot', () => {
     h.orchestrator.snapshot();
 
     expect(h.sidecar.kinds.at(-1)).toBe('snapshot');
-    // The one that matters: a snapshot must not restart the loop it was taken from.
-    expectConverged(h, 'paused');
+    // The one that matters either way: a snapshot must not restart the loop it was taken from.
+    expectConverged(h, 'snapshot');
   });
 
   it('from idle: enters the resting snapshot mode with nothing running', async () => {
@@ -679,7 +714,15 @@ describe('AppOrchestrator: rapid switching', () => {
     expect(h.sidecar.kinds).toEqual(['stop']);
   });
 
-  it('interleaved snapshots and toggles converge', async () => {
+  /**
+   * The convergence property, restated for #60's model: a snapshot is now a transition like any
+   * other, so the machine ends wherever the **last** press asked for and the sidecar agrees.
+   *
+   * It used to end `paused` here, because a snapshot from `auto` or `paused` left the mode where
+   * it found it. Now the final press is a Translate once, so that is where it rests - which is the
+   * same property (final intent wins, one command per real change) asserted against the new rule.
+   */
+  it('interleaved snapshots and toggles converge on the last press', async () => {
     const h = harness();
     await h.orchestrator.initialize();
 
@@ -691,8 +734,26 @@ describe('AppOrchestrator: rapid switching', () => {
     h.orchestrator.toggleOverlay();
     h.orchestrator.snapshot();
 
-    expectConverged(h, 'paused');
+    expectConverged(h, 'snapshot');
     expect(h.orchestrator.overlayVisible).toBe(false);
+  });
+
+  /** The other half of the same property: the last press being a toggle resumes the loop. */
+  it('a Translate once followed by Auto is capturing again', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+
+    h.orchestrator.snapshot();
+    expectConverged(h, 'snapshot');
+    h.orchestrator.toggleAuto();
+
+    expectConverged(h, 'auto');
+    const frames: number[] = [];
+    h.sidecar.on('frame', (frame) => {
+      frames.push(frame.seq);
+    });
+    h.sidecar.tick();
+    expect(frames).toHaveLength(1);
   });
 
   it('hotkeys hammered during startup are applied once, after configure', async () => {

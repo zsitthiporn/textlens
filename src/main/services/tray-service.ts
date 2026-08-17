@@ -28,6 +28,8 @@
 
 import path from 'node:path';
 
+import { describeMode } from '../../shared/mode-presentation.js';
+
 import type { AppMode } from './app-orchestrator.js';
 import { nullLogger, type Logger } from './logger.js';
 
@@ -151,9 +153,24 @@ export interface TrayState {
  */
 export interface TrayActions {
   readonly onSelectRegion: () => void;
+  /**
+   * "Translate once" - one frame, held (G4).
+   *
+   * Named for the wire command rather than the label, like every other internal identifier here:
+   * the config key `hotkeys.snapshot` cannot move (renaming it rejects the user's whole file), so
+   * the internal name and the shown name are deliberately allowed to differ, in exactly one
+   * direction and in exactly one place - {@link import('../../shared/mode-presentation.js')}.
+   */
   readonly onSnapshot: () => void;
+  /**
+   * Switch Auto on, or off again (#60).
+   *
+   * There is no separate `onPause` any more. Pausing is Auto switched off - the same click, the
+   * same item - and a menu that offered both made two names for one thing, which is the shape of
+   * the confusion #60 was filed about. `AppOrchestrator.pause()` still exists for the settings
+   * window's `pause` command; it is only the tray that stopped needing two entries.
+   */
   readonly onToggleAuto: () => void;
-  readonly onPause: () => void;
   readonly onToggleOverlay: () => void;
   readonly onOpenSettings: () => void;
   readonly onQuit: () => void;
@@ -330,9 +347,18 @@ export class TrayService {
    * The menu, as a template. Public so a test can assert its shape and fire an item without
    * needing Electron to have built anything.
    *
-   * `Auto` is a checkbox because #33 asks for the current state to be visible in the menu,
-   * and `Pause` is disabled outside `auto` for the same reason: pause means "stop capturing",
-   * and offering it when nothing is capturing invites the user to conclude it did not work.
+   * ## Two mode items, not a checkbox and a scattering of buttons (#60)
+   *
+   * This used to offer `Snapshot`, an `Auto` checkbox and a separate `Pause` button, which is
+   * three entries for two ideas and one of them under a name no other surface used. Now the top
+   * of the menu is the choice itself: **Auto** and **Translate once**, checked to show which one
+   * the app is resting in, either reachable in one click. Pausing is Auto switched off, so it is
+   * the same item clicked again and the label says `Auto (paused)` - the only thing that tells
+   * `paused` apart from `idle` in a menu, since both have a stopped loop.
+   *
+   * Checkboxes rather than radio items because {@link TrayMenuItem} does not model `'radio'` and
+   * Electron manages a radio group's checked state itself, which nothing in these tests could
+   * verify. `checked` here means "this is the mode you are in", which is a fact this file knows.
    *
    * Every `click` goes through {@link #run}. Electron invokes these from its own menu
    * machinery, which has nowhere to put a throw except the main process's uncaught handler.
@@ -359,17 +385,21 @@ export class TrayService {
       items.push({ label: truncate(`· ${this.#state.warning}`, 60), enabled: false }, { type: 'separator' });
     }
 
+    const presentation = describeMode(mode);
+    const clicks = { toggleAuto: this.#actions.onToggleAuto, snapshot: this.#actions.onSnapshot };
+
     items.push(
-      { label: 'Select Region…', click: guard('selectRegion', this.#actions.onSelectRegion) },
-      { label: 'Snapshot', click: guard('snapshot', this.#actions.onSnapshot) },
+      // First, because this is the question the user opened the tray to answer.
+      ...presentation.choices.map(
+        (choice): TrayMenuItem => ({
+          label: choice.label,
+          type: 'checkbox',
+          checked: choice.active,
+          click: guard(choice.command, clicks[choice.command]),
+        }),
+      ),
       { type: 'separator' },
-      {
-        label: 'Auto',
-        type: 'checkbox',
-        checked: mode === 'auto',
-        click: guard('toggleAuto', this.#actions.onToggleAuto),
-      },
-      { label: 'Pause', enabled: mode === 'auto', click: guard('pause', this.#actions.onPause) },
+      { label: 'Select Region…', click: guard('selectRegion', this.#actions.onSelectRegion) },
       { type: 'separator' },
       {
         label: 'Show overlay',
@@ -451,6 +481,10 @@ export class TrayService {
  * Mode and overlay visibility are both in there because they are the pair users confuse:
  * #34 is emphatic that hiding the overlay is not pausing, and a tooltip that only reported
  * one of them would make a hidden overlay in `auto` look identical to `paused`.
+ *
+ * The mode is named the way the menu names it (#60), not by its internal word: a tooltip reading
+ * `snapshot` next to a menu item reading `Translate once` is the mismatch this issue is about, and
+ * the tooltip is the surface a user hovers precisely when they are unsure what state they are in.
  */
 export function describeState(state: TrayState): string {
   if (state.error !== null) return truncate(`Textlens — error: ${state.error}`, 127);
@@ -459,7 +493,7 @@ export function describeState(state: TrayState): string {
   // warning means everything is working and the result is probably wrong. Showing the second
   // in place of the first would hide the more urgent of the two.
   const warning = state.warning === null || state.warning === undefined ? '' : ` — ${state.warning}`;
-  return truncate(`Textlens — ${state.mode}${hidden}${warning}`, 127);
+  return truncate(`Textlens — ${describeMode(state.mode).label}${hidden}${warning}`, 127);
 }
 
 function truncate(text: string, max: number): string {
