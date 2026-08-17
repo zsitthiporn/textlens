@@ -244,6 +244,40 @@ function frameEvent(): SidecarClientEvents['frame'] {
   };
 }
 
+/**
+ * A `ScheduleTimer` a test can fire by hand, the same shape `error-reporter.test.ts` uses for
+ * `#59`'s banner timeout - a test that waits out a real hold is a test nobody runs (#61).
+ */
+function fakeTimers(): {
+  readonly schedule: ScheduleTimer;
+  /** Timers still waiting to fire. */
+  readonly live: readonly { readonly delayMs: number }[];
+  /** Let every waiting timer's delay elapse, in the order they were scheduled. */
+  elapse(): void;
+} {
+  const scheduled: { handler: () => void; delayMs: number; cancelled: boolean }[] = [];
+  const schedule: ScheduleTimer = (handler, delayMs) => {
+    const entry = { handler, delayMs, cancelled: false };
+    scheduled.push(entry);
+    return () => {
+      entry.cancelled = true;
+    };
+  };
+  return {
+    schedule,
+    get live() {
+      return scheduled.filter((entry) => !entry.cancelled);
+    },
+    elapse() {
+      for (const entry of [...scheduled]) {
+        if (entry.cancelled) continue;
+        entry.cancelled = true;
+        entry.handler();
+      }
+    },
+  };
+}
+
 interface FakeWindows {
   setOverlayVisible(visible: boolean): boolean;
   openSettings(): unknown;
@@ -337,6 +371,9 @@ function harness(
     config?: Config;
     registry?: MonitorRegistry;
     picker?: RegionPickerWindows;
+    /** Injectable timer behind `modes.snapshotHoldMs` (#61). Real `setTimeout` when omitted. */
+    schedule?: ScheduleTimer;
+    onDismissed?: () => void;
   } = {},
 ): Harness {
   const sidecar = fakeSidecar(options);
@@ -351,6 +388,8 @@ function harness(
     listMonitorsTimeoutMs: 20,
     ...(options.registry === undefined ? {} : { monitors: options.registry }),
     ...(options.picker === undefined ? {} : { picker: options.picker }),
+    ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
+    ...(options.onDismissed === undefined ? {} : { onDismissed: options.onDismissed }),
   });
   return { orchestrator, sidecar, windows, config, lines };
 }
@@ -683,6 +722,171 @@ describe('AppOrchestrator: snapshot', () => {
     h.orchestrator.toggleAuto();
 
     expectConverged(h, 'auto');
+  });
+});
+
+/**
+ * #61: `dismiss` closes the gap G4 named - "จับครั้งเดียว ค้างไว้จน dismiss" - and
+ * `modes.snapshotHoldMs` is the same ending on a timer. Every hold-expiry test uses a fake
+ * `schedule`; a test that waited out a real hold would be a test nobody runs.
+ */
+describe('AppOrchestrator: dismiss', () => {
+  it('clears the overlay without changing mode, and sends nothing to the sidecar', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+    const before = h.sidecar.sent.length;
+    h.windows.clears.length = 0;
+
+    h.orchestrator.dismiss();
+
+    expect(h.windows.clears).toEqual(['dismiss']);
+    expect(h.orchestrator.mode).toBe('snapshot');
+    // Never paused (that would misreport which mode was chosen, #60) and never idle (that means
+    // no sidecar is configured, which dismissing does not change).
+    expect(h.sidecar.sent).toHaveLength(before);
+  });
+
+  it('is harmless with nothing displayed - still sends nothing to the sidecar', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    expectConverged(h, 'auto');
+    const before = h.sidecar.sent.length;
+
+    h.orchestrator.dismiss();
+    h.orchestrator.dismiss();
+
+    expect(h.sidecar.sent).toHaveLength(before);
+    expect(h.orchestrator.mode).toBe('auto');
+  });
+
+  it('tells onDismissed, so the pipeline forgets what was on screen', async () => {
+    let dismissed = 0;
+    const h = harness({ onDismissed: () => { dismissed += 1; } });
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+
+    h.orchestrator.dismiss();
+
+    expect(dismissed).toBe(1);
+  });
+});
+
+describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () => {
+  function withHold(ms: number): Config {
+    return { ...CONFIGURED_CONFIG, modes: { snapshotHoldMs: ms } };
+  }
+
+  it('does not arm a timer at the default of 0 - held until dismissed', async () => {
+    const timers = fakeTimers();
+    const h = harness({ schedule: timers.schedule });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.snapshot();
+
+    expect(timers.live).toHaveLength(0);
+  });
+
+  it('clears itself after snapshotHoldMs, through the same path dismiss uses', async () => {
+    const timers = fakeTimers();
+    const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+    await h.orchestrator.initialize();
+
+    h.orchestrator.snapshot();
+    expect(timers.live.map((entry) => entry.delayMs)).toEqual([5_000]);
+    h.windows.clears.length = 0;
+
+    timers.elapse();
+
+    // The exact same call `dismiss()` makes - not a parallel implementation that happens to look
+    // similar.
+    expect(h.windows.clears).toEqual(['dismiss']);
+    expect(h.orchestrator.mode).toBe('snapshot');
+  });
+
+  it('does not arm a hold for a deferred snapshot that fires after the mode already left snapshot', async () => {
+    // #pendingSnapshot can survive a mode change while the sidecar is not configured yet: the
+    // user presses Translate once, then Auto, before `configure` lands. When the deferred
+    // `snapshot` command finally goes out (inside `initialize`), the mode is `auto` - and a timer
+    // armed against that would later blank live content it was never meant to touch.
+    const timers = fakeTimers();
+    const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+    h.orchestrator.snapshot();
+    h.orchestrator.toggleAuto();
+
+    await h.orchestrator.initialize();
+
+    expect(h.orchestrator.mode).toBe('auto');
+    expect(timers.live).toHaveLength(0);
+  });
+
+  /**
+   * (f), case by case: "this is the part most likely to be silently wrong", so each of the four
+   * gets its own test rather than one combined one.
+   */
+  describe('the timer never outlives what it was timing', () => {
+    it('case 1: pressing Translate once again restarts the countdown for the new frame', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      expect(timers.live).toHaveLength(1);
+
+      h.orchestrator.snapshot();
+
+      // The first timer is gone, not still ticking alongside a second one - a naive
+      // implementation that forgot to cancel would leave two live here.
+      expect(timers.live.map((entry) => entry.delayMs)).toEqual([5_000]);
+      h.windows.clears.length = 0;
+      timers.elapse();
+      // And exactly one dismiss comes out the other end, not two.
+      expect(h.windows.clears).toEqual(['dismiss']);
+    });
+
+    it('case 2: switching to Auto cancels it', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      expect(timers.live).toHaveLength(1);
+
+      h.orchestrator.toggleAuto();
+
+      expect(timers.live).toHaveLength(0);
+      h.windows.clears.length = 0;
+      timers.elapse();
+      // Nothing left to fire - a stale timer must not blank the Auto content that followed.
+      expect(h.windows.clears).toEqual([]);
+    });
+
+    it('case 3: dismissing by hand cancels it', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      expect(timers.live).toHaveLength(1);
+
+      h.orchestrator.dismiss();
+
+      expect(timers.live).toHaveLength(0);
+      h.windows.clears.length = 0;
+      timers.elapse();
+      // The manual dismiss already cleared the screen; the timer that would have repeated the
+      // same clear later must not still be live to do it again.
+      expect(h.windows.clears).toEqual([]);
+    });
+
+    it('case 4: disposing the orchestrator cancels it', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      expect(timers.live).toHaveLength(1);
+
+      h.orchestrator.dispose();
+
+      expect(timers.live).toHaveLength(0);
+    });
   });
 });
 
