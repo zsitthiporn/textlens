@@ -572,11 +572,18 @@ export class AppOrchestrator {
   }
 
   /**
-   * Capture one frame now (G4).
+   * Capture one frame now and hold it - "Translate once" (G4).
    *
-   * From `auto` or `paused` the mode does not move - see the module doc. From `idle` this
-   * becomes the document-reading mode `snapshot`, and the frame stays on screen until
-   * something else moves the machine.
+   * **A mode, entered from wherever the user was, including `auto`.** That last word is #60's
+   * reversal of #34; the module doc records the rule it replaces and the evidence that moved it.
+   * The mechanism is entirely in {@link #apply}'s ordering: the mode is no longer `auto`, so the
+   * loop is stopped first and the `snapshot` command is sent last, leaving no tick to overwrite
+   * the frame. Returning to `auto` - the tray's Auto item, `Control+Alt+A`, {@link toggleAuto} or
+   * {@link resume} - starts it again.
+   *
+   * Still synchronous, and that is not incidental: the assignment and the `#apply` below are the
+   * whole transition, so hammering the key is a sequence of assignments rather than a race (see
+   * the module doc's "Why rapid mode switching cannot corrupt anything").
    *
    * A press that arrives before the sidecar is configured is **held**, not dropped:
    * {@link #apply} fires it as soon as `configure` lands. Dropping it would leave the app
@@ -587,7 +594,7 @@ export class AppOrchestrator {
    */
   snapshot(): void {
     const previous = this.#mode;
-    this.#mode = previous === 'idle' ? 'snapshot' : previous;
+    this.#mode = 'snapshot';
     this.#pendingSnapshot = true;
 
     this.#log.info('snapshot requested', { mode: this.#mode, from: previous });
@@ -825,8 +832,11 @@ export class AppOrchestrator {
       }
     }
 
-    // Last, so the loop is already stopped when a snapshot taken from `paused` or `snapshot`
-    // fires - otherwise the very next tick would overwrite the frame the user asked to hold.
+    // Last, and since #60 this ordering is the whole of "Translate once holds". `snapshot()` sets
+    // the mode to `snapshot` from anywhere, so the block above has already sent `stop` by the time
+    // this runs; the frame that comes back is the last one the sidecar will produce until the user
+    // asks for `auto` again. Sent first instead, the tick 800ms later would replace it - which is
+    // precisely what the app did before, from the mode users spend all their time in.
     if (this.#pendingSnapshot) {
       this.#pendingSnapshot = false;
       this.#sidecar.send({ cmd: 'snapshot' });

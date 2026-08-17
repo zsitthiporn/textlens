@@ -584,29 +584,19 @@ describe('AppOrchestrator: hiding the overlay is not pausing', () => {
 });
 
 describe('AppOrchestrator: snapshot', () => {
-  it('during auto: captures once and ends in auto, still running', async () => {
-    const h = harness();
-    await h.orchestrator.initialize();
-
-    h.orchestrator.snapshot();
-
-    expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure', 'start', 'snapshot']);
-    expectConverged(h, 'auto');
-  });
-
   /**
-   * **The behaviour #60 reverses, recorded before it is reversed.**
+   * **#60, and the reversal of #34.**
    *
-   * The test above asserts the *mode* does not move, which is what #34 asked for and what the
-   * module doc argues. This one asserts what that costs the user, which is the thing nobody wrote
-   * down: the loop is still running, so the very next tick - 800ms by default - replaces the frame
-   * they pressed the key to hold. "Translate once" therefore holds nothing at all from the mode
-   * the user is actually in almost all of the time.
+   * The two assertions this replaced said the mode stays `auto` and the loop keeps running, which
+   * is what #34 asked for and what the module doc argued for at length. What nobody had written
+   * down was the price: the loop is still running, so the tick 800ms later replaces the frame the
+   * user pressed the key to hold. "Translate once" therefore held nothing at all from the mode
+   * users are in essentially all the time - and feature spec G4 has said "จับครั้งเดียว ค้างไว้จน
+   * dismiss" since before either issue.
    *
-   * Kept as a failing-if-reintroduced record rather than deleted in the next commit, so the
-   * reversal is a diff somebody can read rather than a claim in a message.
+   * `stop` before `snapshot` is the mechanism, and the order is asserted rather than inferred.
    */
-  it('during auto: the next tick overwrites the frame the user asked to hold', async () => {
+  it('during auto: stops the loop, so no later tick can overwrite the held frame', async () => {
     const h = harness();
     await h.orchestrator.initialize();
     const frames: number[] = [];
@@ -617,13 +607,15 @@ describe('AppOrchestrator: snapshot', () => {
     h.orchestrator.snapshot();
     const held = frames.at(-1);
     h.sidecar.tick();
+    h.sidecar.tick();
 
     expect(held).toBeDefined();
-    expect(frames.at(-1)).not.toBe(held);
-    expect(h.sidecar.capturing).toBe(true);
+    expect(frames.at(-1)).toBe(held);
+    expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure', 'start', 'stop', 'snapshot']);
+    expectConverged(h, 'snapshot');
   });
 
-  it('during pause: captures once and stays paused, still stopped', async () => {
+  it('during pause: captures once and holds it too, still stopped', async () => {
     const h = harness();
     await h.orchestrator.initialize();
     h.orchestrator.pause();
@@ -631,8 +623,8 @@ describe('AppOrchestrator: snapshot', () => {
     h.orchestrator.snapshot();
 
     expect(h.sidecar.kinds.at(-1)).toBe('snapshot');
-    // The one that matters: a snapshot must not restart the loop it was taken from.
-    expectConverged(h, 'paused');
+    // The one that matters either way: a snapshot must not restart the loop it was taken from.
+    expectConverged(h, 'snapshot');
   });
 
   it('from idle: enters the resting snapshot mode with nothing running', async () => {
@@ -722,7 +714,15 @@ describe('AppOrchestrator: rapid switching', () => {
     expect(h.sidecar.kinds).toEqual(['stop']);
   });
 
-  it('interleaved snapshots and toggles converge', async () => {
+  /**
+   * The convergence property, restated for #60's model: a snapshot is now a transition like any
+   * other, so the machine ends wherever the **last** press asked for and the sidecar agrees.
+   *
+   * It used to end `paused` here, because a snapshot from `auto` or `paused` left the mode where
+   * it found it. Now the final press is a Translate once, so that is where it rests - which is the
+   * same property (final intent wins, one command per real change) asserted against the new rule.
+   */
+  it('interleaved snapshots and toggles converge on the last press', async () => {
     const h = harness();
     await h.orchestrator.initialize();
 
@@ -734,8 +734,26 @@ describe('AppOrchestrator: rapid switching', () => {
     h.orchestrator.toggleOverlay();
     h.orchestrator.snapshot();
 
-    expectConverged(h, 'paused');
+    expectConverged(h, 'snapshot');
     expect(h.orchestrator.overlayVisible).toBe(false);
+  });
+
+  /** The other half of the same property: the last press being a toggle resumes the loop. */
+  it('a Translate once followed by Auto is capturing again', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+
+    h.orchestrator.snapshot();
+    expectConverged(h, 'snapshot');
+    h.orchestrator.toggleAuto();
+
+    expectConverged(h, 'auto');
+    const frames: number[] = [];
+    h.sidecar.on('frame', (frame) => {
+      frames.push(frame.seq);
+    });
+    h.sidecar.tick();
+    expect(frames).toHaveLength(1);
   });
 
   it('hotkeys hammered during startup are applied once, after configure', async () => {
