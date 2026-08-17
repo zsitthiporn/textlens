@@ -248,9 +248,12 @@ interface FakeWindows {
   setOverlayVisible(visible: boolean): boolean;
   openSettings(): unknown;
   bumpOverlayEpoch(reason: string): void;
+  clearOverlay(reason: string): void;
   readonly calls: boolean[];
   /** Every epoch bump, with the reason. #35's "region changed → cache cleared" is asserted here. */
   readonly epochBumps: string[];
+  /** Every `clearOverlay` call, with the reason (#61). */
+  readonly clears: string[];
   visible: boolean;
   refuse: boolean;
   settingsOpened: number;
@@ -260,6 +263,7 @@ function fakeWindows(): FakeWindows {
   const windows: FakeWindows = {
     calls: [],
     epochBumps: [],
+    clears: [],
     visible: true,
     refuse: false,
     settingsOpened: 0,
@@ -275,6 +279,9 @@ function fakeWindows(): FakeWindows {
     },
     bumpOverlayEpoch(reason) {
       windows.epochBumps.push(reason);
+    },
+    clearOverlay(reason) {
+      windows.clears.push(reason);
     },
   };
   return windows;

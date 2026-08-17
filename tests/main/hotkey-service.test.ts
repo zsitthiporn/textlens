@@ -93,13 +93,14 @@ function noopHandlers(): HotkeyHandlers {
     snapshot: () => {},
     selectRegion: () => {},
     toggleOverlay: () => {},
+    dismiss: () => {},
   };
 }
 
 const DEFAULT_HOTKEYS = DEFAULT_CONFIG.hotkeys;
 
 describe('HotkeyService.register', () => {
-  it('binds all four actions and reports no failure', () => {
+  it('binds all five actions and reports no failure', () => {
     const shortcuts = fakeRegistrar();
     const service = new HotkeyService({ shortcuts });
 
@@ -111,9 +112,10 @@ describe('HotkeyService.register', () => {
       'snapshot',
       'selectRegion',
       'toggleOverlay',
+      'dismiss',
     ]);
     expect(service.failures).toEqual([]);
-    expect([...shortcuts.live.keys()]).toHaveLength(4);
+    expect([...shortcuts.live.keys()]).toHaveLength(5);
   });
 
   it('routes each accelerator to its own handler', () => {
@@ -133,14 +135,18 @@ describe('HotkeyService.register', () => {
       toggleOverlay: () => {
         calls.push('toggleOverlay');
       },
+      dismiss: () => {
+        calls.push('dismiss');
+      },
     });
 
     shortcuts.press(DEFAULT_HOTKEYS.snapshot ?? '');
     shortcuts.press(DEFAULT_HOTKEYS.toggleOverlay ?? '');
+    shortcuts.press(DEFAULT_HOTKEYS.dismiss ?? '');
 
     // Order and identity both matter: a service that bound every key to the last handler in
     // the loop would still fire something for each press.
-    expect(calls).toEqual(['snapshot', 'toggleOverlay']);
+    expect(calls).toEqual(['snapshot', 'toggleOverlay', 'dismiss']);
   });
 
   it('names the clashing hotkey when another program owns the key, and keeps the rest', () => {
@@ -156,8 +162,8 @@ describe('HotkeyService.register', () => {
     expect(failure?.action).toBe('snapshot');
     expect(failure?.accelerator).toBe(taken);
     expect(failure?.reason).toBe('conflict');
-    // Losing one key must not cost the user the other three.
-    expect(results.filter((result) => result.ok)).toHaveLength(3);
+    // Losing one key must not cost the user the other four.
+    expect(results.filter((result) => result.ok)).toHaveLength(4);
 
     // #32: "แจ้งผู้ใช้ระบุตัวที่ชน ไม่ล้มเงียบ" - the log must name it, not just count it.
     const logged = lines.find((line) => line.level === 'error');
@@ -175,7 +181,7 @@ describe('HotkeyService.register', () => {
 
     expect(results[0]).toMatchObject({ action: 'toggleAuto', reason: 'invalid' });
     expect(results[0]?.detail).toContain('Invalid accelerator');
-    expect(results.filter((result) => result.ok)).toHaveLength(3);
+    expect(results.filter((result) => result.ok)).toHaveLength(4);
   });
 
   it('refuses a misspelled modifier instead of letting Electron silently rebind it', () => {
@@ -205,7 +211,7 @@ describe('HotkeyService.register', () => {
     const results = service.register({ ...DEFAULT_HOTKEYS, snapshot: 'Foo+Bar+A' }, noopHandlers());
 
     expect(results[1]).toMatchObject({ action: 'snapshot', reason: 'invalid' });
-    expect(shortcuts.live.size).toBe(3);
+    expect(shortcuts.live.size).toBe(4);
   });
 
   it('accepts every modifier Electron documents, in any case, and a bare key on purpose', () => {
@@ -220,6 +226,7 @@ describe('HotkeyService.register', () => {
         // A deliberate single-key binding is the user's call - what the check above catches is
         // a bare key the user did not ask for.
         toggleOverlay: 'F9',
+        dismiss: 'Control+Alt+D',
       },
       noopHandlers(),
     );
@@ -265,7 +272,7 @@ describe('HotkeyService.register', () => {
     // back to the user as a problem they need to fix.
     expect(service.failures).toEqual([]);
     expect(lines.some((line) => line.level === 'error')).toBe(false);
-    expect([...shortcuts.live.keys()]).toHaveLength(3);
+    expect([...shortcuts.live.keys()]).toHaveLength(4);
   });
 
   it('releases the previous accelerators when called again', () => {
@@ -280,7 +287,7 @@ describe('HotkeyService.register', () => {
     expect(shortcuts.unregistered).toContain('Control+Alt+A');
     expect(shortcuts.isRegistered('Control+Alt+A')).toBe(false);
     expect(shortcuts.isRegistered('Control+Alt+Z')).toBe(true);
-    expect([...shortcuts.live.keys()]).toHaveLength(4);
+    expect([...shortcuts.live.keys()]).toHaveLength(5);
   });
 });
 
@@ -293,7 +300,7 @@ describe('HotkeyService.unregisterAll', () => {
     service.unregisterAll();
 
     expect(shortcuts.live.size).toBe(0);
-    expect(shortcuts.unregistered).toHaveLength(4);
+    expect(shortcuts.unregistered).toHaveLength(5);
     expect(service.registrations).toEqual([]);
   });
 
@@ -320,7 +327,7 @@ describe('HotkeyService.unregisterAll', () => {
 
     expect(() => service.unregisterAll()).not.toThrow();
 
-    expect(failing).toHaveBeenCalledTimes(4);
+    expect(failing).toHaveBeenCalledTimes(5);
   });
 });
 

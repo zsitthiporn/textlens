@@ -206,6 +206,16 @@ export class WindowManager {
    */
   #overlayEpoch = 0;
   /**
+   * Counts down for every synthetic "clear the screen" payload {@link clearOverlay} sends (#61).
+   *
+   * Negative and monotonic in its own direction, so a diagnostic reading `OverlayRenderPayload.seq`
+   * can tell a manual clear apart from a real frame - the sidecar's own `seq` is always positive.
+   * The renderer never orders by this field (`contract.ts` documents why: ordering is `id`'s job),
+   * so this only has to be a value that is never mistaken for a real one, not one that means
+   * anything in sequence.
+   */
+  #clearSeq = 0;
+  /**
    * Monotonic id for every payload message sent (#52).
    *
    * Never reset, including when the overlay is replaced: an ack that arrives from a document that
@@ -630,6 +640,26 @@ export class WindowManager {
   bumpOverlayEpoch(reason: string): void {
     this.#overlayEpoch += 1;
     this.#log.debug('overlay epoch bumped', { epoch: this.#overlayEpoch, reason });
+  }
+
+  /**
+   * Blank the overlay right now - "dismiss", and a `modes.snapshotHoldMs` expiry, which is the
+   * same call (#61: `AppOrchestrator.dismiss` is the only caller of both).
+   *
+   * **Bumping the epoch is not enough on its own**, and that matters more here than anywhere else
+   * it is called: {@link bumpOverlayEpoch} only changes how the *next* payload that arrives is
+   * interpreted (`overlay.ts`'s `adopt` reads it inside `draw`, which only runs when a payload
+   * lands) - and in `snapshot` mode, the case this exists for, the capture loop is stopped, so
+   * there may be no next payload, ever, until the user asks for something else. So this also sends
+   * an empty payload directly, over the exact channel `sendOverlayPayload` already uses for every
+   * real frame. Nothing new was built for the renderer side of this: `renderEntries` already
+   * retires every box it is not handed, because that is what an ordinary frame with fewer entries
+   * than the last one already does.
+   */
+  clearOverlay(reason: string): void {
+    this.bumpOverlayEpoch(reason);
+    this.#clearSeq -= 1;
+    this.sendOverlayPayload({ seq: this.#clearSeq, complete: true, entries: [], degraded: false });
   }
 
   /**

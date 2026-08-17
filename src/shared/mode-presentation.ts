@@ -84,6 +84,16 @@ export const MODE_NAMES = {
 /** What Auto is called while it is switched off. See {@link ModeChoice.label}. */
 export const PAUSED_LABEL = `${MODE_NAMES.auto} (paused)`;
 
+/**
+ * The one name for the action that clears a held Translate once without leaving it (#61).
+ *
+ * Not a third {@link ModeChoice}: dismiss never changes which of the two the app is resting in, so
+ * it does not belong in {@link describeMode}'s pair. It is here anyway, next to `MODE_NAMES`,
+ * because the tray and the settings window each show a row for it and #60 was filed exactly
+ * because two surfaces naming the same thing drifted into different words.
+ */
+export const DISMISS_LABEL = 'Dismiss';
+
 /** What the app is called before anything has been chosen. Not a mode the user can select. */
 export const NOT_STARTED_LABEL = 'not started';
 

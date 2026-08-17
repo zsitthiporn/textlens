@@ -158,6 +158,7 @@ function recordingActions(): { actions: TrayActions; fired: string[] } {
       onSnapshot: push('snapshot'),
       onToggleAuto: push('toggleAuto'),
       onToggleOverlay: push('toggleOverlay'),
+      onDismiss: push('dismiss'),
       onOpenSettings: push('openSettings'),
       onQuit: push('quit'),
       onRestartSidecar: push('restartSidecar'),
@@ -327,6 +328,8 @@ describe('TrayService menu', () => {
       // surface used that word for.
       'Auto',
       'Translate once',
+      // #61, directly under the choice it belongs to.
+      'Dismiss',
       'Select Region…',
       'Show overlay',
       // #40/#41. The way back out of the supervisor's give-up state, and the only one: the alert
@@ -373,6 +376,36 @@ describe('TrayService menu', () => {
       { label: 'Auto', checked: false },
       { label: 'Translate once', checked: false },
     ]);
+  });
+
+  /**
+   * #61. Disabled outside `snapshot` because there is nothing a dismiss reads as clearing while
+   * Auto keeps redrawing or before a region exists - `mode` is a fact `TrayState` already carries,
+   * so this needed no new plumbing to know it.
+   */
+  it('only enables Dismiss while a Translate once is what could be held', () => {
+    const { platform, service } = build();
+    service.create();
+
+    const dismissEnabled = (mode: AppMode): boolean | undefined => {
+      service.update(state({ mode }));
+      return item(latest(platform), 'Dismiss').enabled;
+    };
+
+    expect(dismissEnabled('snapshot')).toBe(true);
+    expect(dismissEnabled('auto')).toBe(false);
+    expect(dismissEnabled('paused')).toBe(false);
+    expect(dismissEnabled('idle')).toBe(false);
+  });
+
+  it('routes the Dismiss item to onDismiss', () => {
+    const { platform, service, fired } = build();
+    service.create();
+    service.update(state({ mode: 'snapshot' }));
+
+    item(latest(platform), 'Dismiss').click?.();
+
+    expect(fired).toEqual(['dismiss']);
   });
 
   it('does not use the word Snapshot anywhere in the menu', () => {

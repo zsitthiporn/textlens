@@ -28,7 +28,7 @@
 
 import path from 'node:path';
 
-import { describeMode } from '../../shared/mode-presentation.js';
+import { DISMISS_LABEL, describeMode } from '../../shared/mode-presentation.js';
 
 import type { AppMode } from './app-orchestrator.js';
 import { nullLogger, type Logger } from './logger.js';
@@ -172,6 +172,11 @@ export interface TrayActions {
    */
   readonly onToggleAuto: () => void;
   readonly onToggleOverlay: () => void;
+  /**
+   * Clear the boxes on screen without changing mode (#61). Not `onToggleOverlay`: that hides the
+   * window and leaves the pipeline running, so unhiding shows whatever arrived while it was gone.
+   */
+  readonly onDismiss: () => void;
   readonly onOpenSettings: () => void;
   readonly onQuit: () => void;
   /**
@@ -398,6 +403,12 @@ export class TrayService {
           click: guard(choice.command, clicks[choice.command]),
         }),
       ),
+      // Directly under the choice it belongs to (#61): this clears a held Translate once without
+      // leaving it, so it reads as part of that choice rather than as an unrelated action further
+      // down the menu. Disabled outside `snapshot` - there is nothing a dismiss could clear in
+      // Auto (the loop keeps redrawing) or before a region is configured, and `mode` is a fact this
+      // service already carries in `TrayState`, so no new plumbing was needed to know it.
+      { label: DISMISS_LABEL, enabled: mode === 'snapshot', click: guard('dismiss', this.#actions.onDismiss) },
       { type: 'separator' },
       { label: 'Select Region…', click: guard('selectRegion', this.#actions.onSelectRegion) },
       { type: 'separator' },

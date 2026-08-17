@@ -58,6 +58,20 @@
  * item. That is the trade #60 made knowingly - a mode you can leave by accident is worth less than
  * a frame that stays on screen.
  *
+ * ## `dismiss` ends a hold; it does not undo it (#61)
+ *
+ * #60 built "held", and left "จน dismiss" unbuilt - there was no way to end a hold except leaving
+ * `snapshot` entirely. {@link AppOrchestrator.dismiss} closes that: it clears whatever the overlay
+ * is showing and leaves `#mode` exactly where it was, so a dismissed Translate once is still
+ * Translate once, ready to be pressed again - never `paused` (that would misreport which mode was
+ * chosen, since #60 made `paused` Auto's own state) and never `idle` (that means no sidecar is
+ * configured, which dismissing does not change).
+ *
+ * `modes.snapshotHoldMs` is the same ending on a timer: non-zero, {@link #scheduleSnapshotHold}
+ * arms a countdown the moment the `snapshot` command actually goes out, and its expiry calls
+ * `dismiss()` - not a copy of what it does. One path, so a hand-pressed dismiss and an expired
+ * hold can never drift apart about what "cleared" means.
+ *
  * ## Why rapid mode switching cannot corrupt anything
  *
  * Every transition updates {@link AppOrchestrator.mode} **synchronously** and then runs
@@ -87,8 +101,11 @@ import type { PresentableMode } from '../../shared/mode-presentation.js';
 import type { AckEvent, MonitorInfo, Rect, SidecarCommand } from '../../shared/protocol.js';
 import { toPhysicalRegion } from '../utils/coordinates.js';
 // Type-only, and one direction: this file names the conditions, `error-reporter.ts` decides how
-// one of them is shown. Importing the value would be a cycle waiting to happen.
-import type { Alert } from './error-reporter.js';
+// one of them is shown. Importing the value would be a cycle waiting to happen. `CancelTimer` /
+// `ScheduleTimer` are the injectable-timer shape that file introduced for the banner timeout
+// (#59); the hold timer below (#61) reuses the same two types rather than declaring a second,
+// identical pair.
+import type { Alert, CancelTimer, ScheduleTimer } from './error-reporter.js';
 import { nullLogger, type Logger } from './logger.js';
 import type { PairableDisplay } from './monitor-service.js';
 import {
@@ -153,6 +170,15 @@ export interface OverlayWindows {
    * cache while the old region's frames were still arriving.
    */
   bumpOverlayEpoch(reason: string): void;
+  /**
+   * Blank whatever the overlay is showing, right now (#61).
+   *
+   * Not the same thing as {@link bumpOverlayEpoch}: bumping the epoch only changes how the *next*
+   * payload is interpreted, and in `snapshot` mode - the case this exists for - the capture loop
+   * is stopped, so there may never be a next payload to carry it. This has to make the screen
+   * empty on its own. See `AppOrchestrator.dismiss` and `WindowManager.clearOverlay`.
+   */
+  clearOverlay(reason: string): void;
 }
 
 /** The part of `ConfigService` the mode machine reads and, since #29, writes. */
@@ -227,9 +253,44 @@ export interface AppOrchestratorOptions {
   readonly idleWarningMs?: number;
   /** Injectable clock, so the idle warning is testable without waiting out a real interval. */
   readonly now?: () => number;
+  /**
+   * Injectable timer behind `modes.snapshotHoldMs` (#61), the same shape `error-reporter.ts` uses
+   * for its banner timeout. Tests pass one they can fire by hand rather than waiting out a real
+   * hold.
+   */
+  readonly schedule?: ScheduleTimer;
+  /**
+   * Told immediately after {@link AppOrchestrator.dismiss} actually clears the screen - by the
+   * user, or by an expired hold (#61).
+   *
+   * Optional so the many tests here that do not care about it need not supply one. `index.ts`
+   * wires it to `TextPipeline.resetScene`: the clear this class issues goes straight to the
+   * window and never through the pipeline, so without this hook the pipeline's own memory of
+   * what is on screen - `#displayed`, and #36's stability baseline - would survive a dismiss.
+   * Left alone that is a real bug, not a cosmetic one: on a screen that has not changed, a second
+   * dismiss-then-snapshot inside #36's `frames` window would be read as "nothing changed" and
+   * suppressed, leaving Translate once pressed twice in a row showing nothing on an empty screen -
+   * invariant 4 broken inside the very feature that exists to keep it.
+   */
+  readonly onDismissed?: () => void;
 }
 
 const DEFAULT_LIST_MONITORS_TIMEOUT_MS = 2_000;
+
+/**
+ * The real-timer default behind `modes.snapshotHoldMs` (#61), the same shape as
+ * `error-reporter.ts`'s own default for its banner timeout - `setTimeout` plus `unref()`, for the
+ * same reason that file gives: a pending hold timer must never be the reason `app.quit()` waits
+ * around for a cosmetic countdown to finish. Not imported from there because that function is not
+ * exported - the two files each own a private default behind the same public `ScheduleTimer` shape.
+ */
+function scheduleWithTimeout(handler: () => void, delayMs: number): CancelTimer {
+  const timer = setTimeout(handler, delayMs);
+  timer.unref();
+  return () => {
+    clearTimeout(timer);
+  };
+}
 
 /**
  * What {@link AppStatus.error} says when the sidecar died on its own.
@@ -361,6 +422,15 @@ export class AppOrchestrator {
   /** A region picker is open. Guards against a second hotkey press opening a second one. */
   #picking = false;
   #disposed = false;
+  readonly #schedule: ScheduleTimer;
+  readonly #onDismissed: (() => void) | null;
+  /**
+   * Cancels the pending `modes.snapshotHoldMs` timer, or `null` when nothing is counting down
+   * (#61). Never left dangling: every place the countdown could stop meaning what it meant when it
+   * was started - a fresh snapshot, leaving `snapshot` mode, a dismiss, disposal - cancels this
+   * first. See {@link #cancelHold}.
+   */
+  #holdCancel: CancelTimer | null = null;
 
   constructor(options: AppOrchestratorOptions) {
     this.#sidecar = options.sidecar;
@@ -372,6 +442,8 @@ export class AppOrchestrator {
     this.#picker = options.picker ?? null;
     this.#idleWarningMs = options.idleWarningMs ?? DEFAULT_IDLE_WARNING_MS;
     this.#now = options.now ?? Date.now;
+    this.#schedule = options.schedule ?? scheduleWithTimeout;
+    this.#onDismissed = options.onDismissed ?? null;
 
     this.#unsubscribes.push(
       this.#sidecar.on('ack', (ack) => {
@@ -634,6 +706,31 @@ export class AppOrchestrator {
   }
 
   /**
+   * Clear whatever the overlay is showing, **without** touching the mode (#61).
+   *
+   * Not `toggleOverlay`, which #34 is emphatic only hides the *window*: capture, OCR and
+   * translation carry on underneath it. This does the opposite - it never touches visibility and
+   * never sends anything to the sidecar - it empties the picture the window is drawing. After it
+   * runs the user is exactly where they were: still Translate once (or Auto, or wherever they
+   * were), with nothing on screen, free to press the same action again.
+   *
+   * **The one path both a hand-pressed dismiss and an expired `modes.snapshotHoldMs` use.** Every
+   * caller - the hotkey, the tray, {@link #scheduleSnapshotHold}'s own timeout - reaches the
+   * screen through this single method, so there is exactly one way it goes empty on its own
+   * rather than two implementations that have to be kept agreeing forever.
+   *
+   * Harmless with nothing displayed: this never reads or writes `#mode`, and it never calls
+   * `#apply` or touches `#sidecar`, so a dismiss on an empty screen sends nothing anywhere - it is
+   * simply a clear that had nothing to clear.
+   */
+  dismiss(): void {
+    this.#cancelHold();
+    this.#windows.clearOverlay('dismiss');
+    this.#onDismissed?.();
+    this.#log.info('dismissed', { mode: this.#mode });
+  }
+
+  /**
    * Show or hide the boxes **without** touching the pipeline (#34: "ซ่อน overlay ≠ pause").
    *
    * Nothing in this method reaches the sidecar, which is the entire point: capture, OCR and
@@ -805,6 +902,9 @@ export class AppOrchestrator {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    // A pending hold has nothing left to time once this object stops reacting to anything (#61,
+    // case 4 of "the timer must never outlive what it was timing").
+    this.#cancelHold();
     for (const off of this.#unsubscribes) off();
     this.#unsubscribes.length = 0;
     this.#listeners.clear();
@@ -816,6 +916,12 @@ export class AppOrchestrator {
 
   #transition(next: AppMode, reason: string): void {
     if (this.#mode === next) return;
+    // Leaving `snapshot` for anything else (#61, case 2 of "the timer must never outlive what it
+    // was timing" - "the user switches to Auto"). A hold timer counting down against a frame that
+    // is no longer the held snapshot must not fire later and blank whatever this mode is showing
+    // instead - `paused`'s frozen boxes included, which this also protects even though only Auto
+    // is named in the issue.
+    if (this.#mode === 'snapshot') this.#cancelHold();
     const previous = this.#mode;
     this.#mode = next;
     this.#log.info('mode changed', { from: previous, to: next, reason });
@@ -871,7 +977,46 @@ export class AppOrchestrator {
     if (this.#pendingSnapshot) {
       this.#pendingSnapshot = false;
       this.#sidecar.send({ cmd: 'snapshot' });
+      // #61: arm (or re-arm) the automatic clear for the frame this command is about to produce.
+      this.#scheduleSnapshotHold();
     }
+  }
+
+  /**
+   * (Re)start the countdown to an automatic {@link dismiss}, if `modes.snapshotHoldMs` asks for
+   * one (#61).
+   *
+   * Called from exactly one place: the line in {@link #apply} that just sent the `snapshot`
+   * command this timer is timing. That is deliberate and it is what makes case 1 of "the timer
+   * must never outlive what it was timing" - pressing Translate once again while a hold is already
+   * counting down - correct for free: every `snapshot()` press re-enters this method through
+   * `#apply`, which cancels whatever was running and starts a fresh `snapshotHoldMs` from zero for
+   * the new frame, rather than letting the old countdown reach the new one.
+   *
+   * **Gated on `#mode` at the moment the command is actually sent, not at the moment `snapshot()`
+   * was called.** `#pendingSnapshot` can survive a mode change while the sidecar was not yet
+   * configured - `snapshot()` can be pressed, then `toggleAuto()`, before `configure` ever lands -
+   * and when the deferred `snapshot` command finally goes out here the mode may already be `auto`.
+   * Arming a timer in that case would leave it counting down against `auto`'s live content and
+   * blank a frame the user never asked to hold, which is exactly the failure case 1 exists to
+   * name from a different angle.
+   */
+  #scheduleSnapshotHold(): void {
+    this.#cancelHold();
+    if (this.#mode !== 'snapshot') return;
+    const holdMs = this.#config.current.modes.snapshotHoldMs;
+    if (holdMs <= 0) return;
+    this.#holdCancel = this.#schedule(() => {
+      this.#holdCancel = null;
+      this.#log.info('snapshot hold expired; clearing it the same way a dismiss would', { holdMs });
+      this.dismiss();
+    }, holdMs);
+  }
+
+  /** Cancel the pending hold timer, if any. Calling it with nothing pending is harmless. */
+  #cancelHold(): void {
+    this.#holdCancel?.();
+    this.#holdCancel = null;
   }
 
   /**
