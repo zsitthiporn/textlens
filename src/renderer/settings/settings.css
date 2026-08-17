@@ -83,6 +83,17 @@ body {
   gap: 8px;
 }
 
+/*
+ * Which of the two modes is live (#60). The choice is only a choice if the window says which one
+ * is selected - two identical ghost buttons are the "guess from controls scattered about" this
+ * issue was filed to end.
+ */
+button.mode-choice[data-active='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 button {
   font: inherit;
   color: inherit;

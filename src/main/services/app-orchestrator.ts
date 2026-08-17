@@ -62,6 +62,7 @@
  */
 
 import type { CaptureConfig, Config, ConfigOverride } from '../../shared/config-schema.js';
+import type { PresentableMode } from '../../shared/mode-presentation.js';
 import type { AckEvent, MonitorInfo, Rect, SidecarCommand } from '../../shared/protocol.js';
 import { toPhysicalRegion } from '../utils/coordinates.js';
 // Type-only, and one direction: this file names the conditions, `error-reporter.ts` decides how
@@ -82,7 +83,16 @@ import {
 import type { SidecarClientEvents } from './sidecar-client.js';
 import type { RegionPickOutcome, RegionPickRequest } from './window-manager.js';
 
-export const APP_MODES = ['idle', 'auto', 'paused', 'snapshot'] as const;
+/**
+ * The internal modes. **Four, and the user sees two** - `shared/mode-presentation.ts` owns that
+ * mapping, and the `satisfies` below is the drift guard: a fifth mode added here fails to compile
+ * until somebody has decided what a user would call it.
+ *
+ * The union stayed four after #60 on purpose. It is load-bearing for the tray's icon files, for
+ * the sidecar reconcile in {@link AppOrchestrator.#apply} and for `SidecarSupervisor`'s
+ * "the user paused, leave it dead" rule - none of which are naming questions.
+ */
+export const APP_MODES = ['idle', 'auto', 'paused', 'snapshot'] as const satisfies readonly PresentableMode[];
 
 export type AppMode = (typeof APP_MODES)[number];
 

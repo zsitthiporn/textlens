@@ -157,7 +157,6 @@ function recordingActions(): { actions: TrayActions; fired: string[] } {
       onSelectRegion: push('selectRegion'),
       onSnapshot: push('snapshot'),
       onToggleAuto: push('toggleAuto'),
-      onPause: push('pause'),
       onToggleOverlay: push('toggleOverlay'),
       onOpenSettings: push('openSettings'),
       onQuit: push('quit'),
@@ -208,7 +207,7 @@ describe('TrayService.create', () => {
     const { platform, service } = build();
 
     expect(service.create()).toBe(true);
-    expect(platform.handle?.tooltip).toBe('Textlens — idle');
+    expect(platform.handle?.tooltip).toBe('Textlens — not started');
     expect(platform.menus).toHaveLength(1);
   });
 
@@ -315,7 +314,7 @@ describe('TrayService menu', () => {
     return menu;
   }
 
-  it('offers every action the issue names', () => {
+  it('offers every action the issue names, with the two modes first', () => {
     const { platform, service } = build();
     service.create();
     const labels = latest(platform)
@@ -323,10 +322,12 @@ describe('TrayService menu', () => {
       .filter((label): label is string => label !== undefined);
 
     expect(labels).toEqual([
-      'Select Region…',
-      'Snapshot',
+      // #60. The choice the user came to make, at the top and in two entries rather than a
+      // checkbox plus a separate `Pause` button plus an item called `Snapshot` that no other
+      // surface used that word for.
       'Auto',
-      'Pause',
+      'Translate once',
+      'Select Region…',
       'Show overlay',
       // #40/#41. The way back out of the supervisor's give-up state, and the only one: the alert
       // that reports it names this item as the remedy.
@@ -334,6 +335,59 @@ describe('TrayService menu', () => {
       'Settings…',
       'Quit',
     ]);
+  });
+
+  /**
+   * #60's first acceptance criterion: open the tray and see which mode you are in.
+   *
+   * `paused` is the state that criterion is hardest on, and it is the reason the Auto item's label
+   * moves. Both `paused` and `idle` have a stopped loop and neither is `snapshot`, so a menu that
+   * showed only checkmarks would draw them identically - and `paused` is the one the user chose.
+   */
+  it('shows which of the two modes the app is in, including Auto switched off', () => {
+    const { platform, service } = build();
+    service.create();
+
+    const modeItems = (mode: AppMode): { label?: string; checked?: boolean }[] => {
+      service.update(state({ mode }));
+      return latest(platform)
+        .filter((entry) => entry.type === 'checkbox' && entry.label !== 'Show overlay')
+        .map((entry) => ({ label: entry.label, checked: entry.checked }));
+    };
+
+    expect(modeItems('auto')).toEqual([
+      { label: 'Auto', checked: true },
+      { label: 'Translate once', checked: false },
+    ]);
+    expect(modeItems('paused')).toEqual([
+      { label: 'Auto (paused)', checked: true },
+      { label: 'Translate once', checked: false },
+    ]);
+    expect(modeItems('snapshot')).toEqual([
+      { label: 'Auto', checked: false },
+      { label: 'Translate once', checked: true },
+    ]);
+    // Nothing chosen yet. `idle` is never offered as a choice - it is only ever the answer to
+    // "which is active", and the answer is neither.
+    expect(modeItems('idle')).toEqual([
+      { label: 'Auto', checked: false },
+      { label: 'Translate once', checked: false },
+    ]);
+  });
+
+  it('does not use the word Snapshot anywhere in the menu', () => {
+    // The config key `hotkeys.snapshot` stays exactly as it is - renaming it would have the schema
+    // reject the user's whole file. This is the other half of that bargain: the internal name never
+    // reaches a surface a user reads.
+    const { platform, service } = build();
+    service.create();
+    for (const mode of ['idle', 'auto', 'paused', 'snapshot'] as const) {
+      service.update(state({ mode }));
+      const labels = latest(platform)
+        .map((entry) => entry.label ?? '')
+        .join(' | ');
+      expect(labels).not.toMatch(/snapshot/i);
+    }
   });
 
   it('leaves the restart item out when nothing supervises the sidecar', () => {
@@ -369,45 +423,40 @@ describe('TrayService menu', () => {
     service.create();
     const menu = latest(platform);
 
-    for (const label of ['Select Region…', 'Snapshot', 'Auto', 'Pause', 'Show overlay', 'Settings…', 'Quit']) {
+    for (const label of [
+      'Auto',
+      'Translate once',
+      'Select Region…',
+      'Show overlay',
+      'Settings…',
+      'Quit',
+    ]) {
       item(menu, label).click?.();
     }
 
     expect(fired).toEqual([
-      'selectRegion',
-      'snapshot',
       'toggleAuto',
-      'pause',
+      // Still the internal name, and that is the point: only the label moved.
+      'snapshot',
+      'selectRegion',
       'toggleOverlay',
       'openSettings',
       'quit',
     ]);
   });
 
-  it('checks Auto only in auto mode', () => {
-    const { platform, service } = build();
-    service.create();
-
-    const checked = (mode: AppMode): boolean | undefined => {
-      service.update(state({ mode }));
-      return item(latest(platform), 'Auto').checked;
-    };
-
-    expect(checked('auto')).toBe(true);
-    expect(checked('paused')).toBe(false);
-    expect(checked('snapshot')).toBe(false);
-    expect(checked('idle')).toBe(false);
-  });
-
-  it('enables Pause only when something is capturing', () => {
-    const { platform, service } = build();
+  it('switches Auto back on from paused through the same item that switched it off', () => {
+    // #60's "paused is a state of Auto, not a peer of it". There is no `Pause` entry any more,
+    // because pausing and resuming were always the same intent expressed twice.
+    const { platform, service, fired } = build();
     service.create();
 
     service.update(state({ mode: 'auto' }));
-    expect(item(latest(platform), 'Pause').enabled).toBe(true);
-
+    item(latest(platform), 'Auto').click?.();
     service.update(state({ mode: 'paused' }));
-    expect(item(latest(platform), 'Pause').enabled).toBe(false);
+    item(latest(platform), 'Auto (paused)').click?.();
+
+    expect(fired).toEqual(['toggleAuto', 'toggleAuto']);
   });
 
   it('mirrors overlay visibility in the Show overlay checkbox', () => {
@@ -453,15 +502,19 @@ describe('TrayService menu', () => {
 });
 
 describe('describeState', () => {
-  it('names the mode', () => {
-    expect(describeState(state({ mode: 'auto' }))).toBe('Textlens — auto');
+  it('names the mode the way the menu names it', () => {
+    // #60: not `snapshot`. The tooltip is what a user hovers when they are unsure what state the
+    // app is in, so it is the last place that should use a word no other surface shows them.
+    expect(describeState(state({ mode: 'auto' }))).toBe('Textlens — Auto');
+    expect(describeState(state({ mode: 'snapshot' }))).toBe('Textlens — Translate once');
+    expect(describeState(state({ mode: 'idle' }))).toBe('Textlens — not started');
   });
 
   it('distinguishes a hidden overlay from a paused pipeline', () => {
     // The pair users confuse, and the reason both are in the tooltip: without the suffix,
     // auto-with-the-overlay-hidden would read exactly like paused.
-    expect(describeState(state({ mode: 'auto', overlayVisible: false }))).toBe('Textlens — auto, overlay hidden');
-    expect(describeState(state({ mode: 'paused' }))).toBe('Textlens — paused');
+    expect(describeState(state({ mode: 'auto', overlayVisible: false }))).toBe('Textlens — Auto, overlay hidden');
+    expect(describeState(state({ mode: 'paused' }))).toBe('Textlens — Auto (paused)');
   });
 
   it('reports an error instead of the mode', () => {

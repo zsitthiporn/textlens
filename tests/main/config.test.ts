@@ -175,6 +175,37 @@ describe('ConfigService.load', () => {
     expect(service.issues[0]?.kind).toBe('unreadable');
     expect(lines.some((line) => line.level === 'error')).toBe(true);
   });
+
+  /**
+   * The half of #60 that is easiest to break and hardest to notice.
+   *
+   * #60 renamed what the user *reads* - the tray said `Snapshot`, the settings window said
+   * `Translate once`, and the two are now one word everywhere. The key on disk deliberately did
+   * **not** move, and this is why: every schema here is a `strictObject`, so a config file holding
+   * a key the schema no longer knows is rejected **in full**. Not the one field - the file. A user
+   * who had ever bound this shortcut would lose their region, their intervals, their font size and
+   * everything else, at the moment they installed a release whose only change was a label.
+   *
+   * So this test is not about hotkeys. It is the assertion that a labelling change stayed a
+   * labelling change, and it fails the instant somebody "finishes the rename" in the schema.
+   */
+  it('still loads a config that binds hotkeys.snapshot, which #60 did not rename', async () => {
+    const filePath = tempConfigPath();
+    writeConfig(
+      filePath,
+      JSON.stringify({
+        hotkeys: { snapshot: 'Control+Alt+S' },
+        capture: { intervalActive: 1234 },
+      }),
+    );
+
+    const service = await ConfigService.load({ filePath });
+
+    expect(service.current.hotkeys.snapshot).toBe('Control+Alt+S');
+    // And the rest of the file came with it, which is the thing a rejection would have taken away.
+    expect(service.current.capture.intervalActive).toBe(1234);
+    expect(service.issues).toEqual([]);
+  });
 });
 
 describe('ConfigService.set', () => {
