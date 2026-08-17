@@ -221,8 +221,11 @@ export interface AppStatus {
   readonly overlayVisible: boolean;
   readonly error: string | null;
   /**
-   * A standing condition the user should act on, currently only #30's "text is touching the
-   * edge of your region".
+   * A standing condition the user should act on. Four of them ride this one channel now: #30's
+   * "text is touching the edge of your region", #31's "your saved region no longer applies", #50's
+   * "auto mode has found nothing for a while", and #51's "no region has been chosen at all". See
+   * {@link describeAppWarning} for how they differ once they reach the user - since #59 they do
+   * not all behave the same way on the banner, and that file is where the distinction is made.
    *
    * Separate from `error` because they behave in opposite ways. An error is cleared by the next
    * frame that arrives, on the reasoning that a frame is evidence the failure is over. This is
@@ -355,14 +358,24 @@ export const NO_REGION_WARNING =
  * the same reason `SIDECAR_EXIT_ERROR` is exported rather than matched on. A future warning
  * cannot acquire the exemption by wording itself similarly, and a reworded {@link
  * NO_REGION_WARNING} cannot silently lose it, because both sides move together in one file.
+ *
+ * **The remedy has the same first-run problem the timeout did (#64).** All four used to share one
+ * sentence ending "...to **change** what is being captured", which is fine advice for #30, #31 and
+ * #50 - something was chosen, and this is how to choose differently - and wrong for #51: nothing
+ * has been chosen yet, so "change" names an act with no object. `firstRun` below is the same
+ * identity check `sticky` already uses, read once and spent on both, so the remedy and the timeout
+ * exemption cannot disagree about which case a given warning is.
  */
 export function describeAppWarning(warning: string | null): Omit<Alert, 'source'> | null {
   if (warning === null) return null;
+  const firstRun = warning === NO_REGION_WARNING;
   return {
     severity: 'warning',
     cause: warning,
-    remedy: 'use the tray menu → "Select Region…" to change what is being captured',
-    sticky: warning === NO_REGION_WARNING,
+    remedy: firstRun
+      ? 'use the tray menu → "Select Region…" to choose what Textlens should capture'
+      : 'use the tray menu → "Select Region…" to change what is being captured',
+    sticky: firstRun,
   };
 }
 
