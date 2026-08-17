@@ -219,14 +219,14 @@ export const captureOverrideSchema = z.strictObject(captureShape).partial().read
 // ---------------------------------------------------------------------------
 
 /**
- * The four actions that must be reachable without switching windows (issue #32 / M7-01,
- * feature G1).
+ * The actions that must be reachable without switching windows (issue #32 / M7-01, feature G1;
+ * `dismiss` added by #61).
  *
  * The reference project has no global hotkey at all - `grep globalShortcut` returns nothing -
  * in a tool whose main use case is a game running borderless fullscreen, where alt-tabbing to
  * click something is exactly what the user cannot do.
  */
-export const HOTKEY_ACTIONS = ['toggleAuto', 'snapshot', 'selectRegion', 'toggleOverlay'] as const;
+export const HOTKEY_ACTIONS = ['toggleAuto', 'snapshot', 'selectRegion', 'toggleOverlay', 'dismiss'] as const;
 
 export type HotkeyAction = (typeof HOTKEY_ACTIONS)[number];
 
@@ -248,6 +248,15 @@ const hotkeyShape = {
   selectRegion: acceleratorSchema,
   /** Hide/show the boxes **without** stopping capture - #34 is emphatic these differ. */
   toggleOverlay: acceleratorSchema,
+  /**
+   * Clear whatever is on screen, **without** changing mode (#61).
+   *
+   * Not `toggleOverlay`: that hides the window and leaves the pipeline running, so unhiding shows
+   * whatever arrived while it was hidden (#34). This empties the screen and leaves the app exactly
+   * where it was - still Translate once, ready to be pressed again - which is what a snapshot held
+   * with nothing left to show it needs. See `AppOrchestrator.dismiss`.
+   */
+  dismiss: acceleratorSchema,
 } as const;
 
 export const hotkeyConfigSchema = z.strictObject(hotkeyShape).readonly();
@@ -446,6 +455,37 @@ export const stabilityConfigSchema = z.strictObject(stabilityShape).readonly();
 export const stabilityOverrideSchema = z.strictObject(stabilityShape).partial().readonly();
 
 // ---------------------------------------------------------------------------
+// Modes - how a "Translate once" snapshot ends (issue #61, feature G4)
+// ---------------------------------------------------------------------------
+
+const modesShape = {
+  /**
+   * How long a "Translate once" snapshot stays on screen before it clears itself, in ms.
+   *
+   * **0, meaning held until the user dismisses it by hand.** That is feature spec G4's own
+   * wording - "จับครั้งเดียว ค้างไว้จน dismiss" - and #61 is explicit that this must stay what a
+   * user gets without touching this file at all: `AppOrchestrator.snapshot` already stops the
+   * capture loop so the held frame cannot be overwritten by the next tick (#60); this field only
+   * decides how long "held" lasts before the app clears it on its own, and zero means it does not.
+   *
+   * A value greater than zero clears the held translation through the **same path** `dismiss`
+   * itself uses - `AppOrchestrator.dismiss` is the only thing either one ever calls - so there is
+   * exactly one way the screen goes empty on its own, not a second one that has to be kept in sync
+   * with the first by hand.
+   *
+   * There is no wrong *number* here the way there is for `capture.diffThreshold`: any non-negative
+   * integer is a duration some user could reasonably want, from "clear it almost immediately" to
+   * "give me minutes to read it." The schema only rejects shapes that cannot mean a duration at
+   * all - negative, fractional, or not a number - which would otherwise reach a timer and either
+   * throw or silently coerce to something the user never chose.
+   */
+  snapshotHoldMs: z.number().int().nonnegative(),
+} as const;
+
+export const modesConfigSchema = z.strictObject(modesShape).readonly();
+export const modesOverrideSchema = z.strictObject(modesShape).partial().readonly();
+
+// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
@@ -454,6 +494,7 @@ const configShape = {
   hotkeys: hotkeyConfigSchema,
   render: renderConfigSchema,
   stability: stabilityConfigSchema,
+  modes: modesConfigSchema,
 } as const;
 
 /** Validates a complete config - the result of merging an override over the defaults. */
@@ -471,6 +512,7 @@ export const configOverrideSchema = z
     hotkeys: hotkeyOverrideSchema.optional(),
     render: renderOverrideSchema.optional(),
     stability: stabilityOverrideSchema.optional(),
+    modes: modesOverrideSchema.optional(),
   })
   .readonly();
 
@@ -480,6 +522,7 @@ export type CaptureConfig = z.infer<typeof captureConfigSchema>;
 export type HotkeyConfig = z.infer<typeof hotkeyConfigSchema>;
 export type RenderConfig = z.infer<typeof renderConfigSchema>;
 export type StabilityConfig = z.infer<typeof stabilityConfigSchema>;
+export type ModesConfig = z.infer<typeof modesConfigSchema>;
 export type Config = z.infer<typeof configSchema>;
 export type ConfigOverride = z.infer<typeof configOverrideSchema>;
 
@@ -516,6 +559,7 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     snapshot: 'Control+Alt+S',
     selectRegion: 'Control+Alt+R',
     toggleOverlay: 'Control+Alt+H',
+    dismiss: 'Control+Alt+D',
   },
   render: {
     anchorGrid: 8,
@@ -535,6 +579,9 @@ export const DEFAULT_CONFIG: Config = configSchema.parse({
     setThreshold: 0.9,
     maxNewLines: 0,
     frames: 2,
+  },
+  modes: {
+    snapshotHoldMs: 0,
   },
 });
 
