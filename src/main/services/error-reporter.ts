@@ -45,6 +45,24 @@
  * The clock is injected ({@link ErrorReporterOptions.schedule}) for the same reason it is
  * everywhere else in this codebase: a test that waits eight real seconds is a test nobody runs.
  *
+ * ## A logger that arrives late does not lose what happened before it (#62)
+ *
+ * `index.ts` constructs this class at module scope, before `createLogger` has resolved - see
+ * that file's own comment on why. Until now that meant every alert this class raised for the
+ * rest of the process's life went to {@link nullLogger}, because the constructor's `logger`
+ * option was never supplied: the two log lines {@link ErrorReporter.set} produces on a `top`
+ * change - `'all clear'` and `'user-facing alert'` - simply never reached a file. The tray, the
+ * banner and the settings window were all unaffected, because none of them read `#log`; only the
+ * log file was the gap, and it was the entire gap #41 exists to close on the log's side.
+ *
+ * {@link ErrorReporter.attachLogger} closes it without moving the construction. Every log line
+ * that would have been written before a logger exists is held in a small ring instead of being
+ * dropped, and `attachLogger` replays it, in order, into the logger it is given. Two things that
+ * makes safe: it is **idempotent** (a second call is a no-op, so nothing can double-flush or
+ * re-buffer once a real logger is attached), and it is **bounded**
+ * ({@link ERROR_REPORTER_LOG_BUFFER_LIMIT}) so that `bootstrap` throwing before it ever calls
+ * `attachLogger` leaves a small, fixed amount of memory behind rather than an unbounded one.
+ *
  * ## Pure, and Electron-free
  *
  * The `describe*` functions take plain data and return text. That is what lets #41's real
@@ -54,7 +72,7 @@
 
 import type { ConfigIssue } from './config.js';
 import type { HotkeyRegistration } from './hotkey-service.js';
-import { nullLogger, type Logger } from './logger.js';
+import { nullLogger, type LogFields, type Logger } from './logger.js';
 import type { SupervisorStatus } from './sidecar-supervisor.js';
 import type { EngineFailure } from './translator/index.js';
 
@@ -145,6 +163,19 @@ export function describeAlert(alert: Pick<Alert, 'cause' | 'remedy'>): string {
  */
 export const DEFAULT_BANNER_TIMEOUT_MS = 8_000;
 
+/**
+ * How many pre-{@link ErrorReporter.attachLogger} log lines are held (#62).
+ *
+ * There are {@link ALERT_SOURCES.length} sources, each producing at most one buffered line per
+ * distinct wording before the log exists - an ordinary boot does not come close to this. The
+ * bound exists for the path where it matters, not the path where it is used: `bootstrap` throwing
+ * before it ever calls `attachLogger` leaves this many lines in memory and not one more, rather
+ * than an unbounded amount. Lines past the limit are dropped - the earliest ones are kept, not the
+ * latest, because the earliest is the one a failure this early in the process most needs on
+ * record.
+ */
+export const ERROR_REPORTER_LOG_BUFFER_LIMIT = 32;
+
 /** Cancels a pending banner timeout. Calling it after the timeout fired must be harmless. */
 export type CancelTimer = () => void;
 
@@ -172,8 +203,15 @@ export interface ErrorReporterOptions {
   readonly schedule?: ScheduleTimer;
 }
 
+/** One line {@link ErrorReporter} would have logged, held until {@link ErrorReporter.attachLogger}. */
+interface BufferedLogLine {
+  readonly level: 'info' | 'warn';
+  readonly message: string;
+  readonly fields?: LogFields;
+}
+
 export class ErrorReporter {
-  readonly #log: Logger;
+  #log: Logger;
   readonly #alerts = new Map<AlertSource, Alert>();
   readonly #listeners = new Set<(top: Alert | null) => void>();
   readonly #bannerTimeoutMs: number;
@@ -193,11 +231,47 @@ export class ErrorReporter {
   #cancelTimer: CancelTimer | null = null;
   #top: Alert | null = null;
   #banner: Alert | null = null;
+  /**
+   * Whether {@link #log} is a real logger. `true` from the constructor when one was supplied
+   * there; flipped exactly once, by {@link attachLogger}. Gates {@link #logLine} between writing
+   * immediately and buffering (#62).
+   */
+  #logAttached: boolean;
+  /** Held log lines, oldest first. See {@link ERROR_REPORTER_LOG_BUFFER_LIMIT}. */
+  readonly #logBuffer: BufferedLogLine[] = [];
 
   constructor(options: ErrorReporterOptions = {}) {
+    this.#logAttached = options.logger !== undefined;
     this.#log = (options.logger ?? nullLogger()).child('alerts');
     this.#bannerTimeoutMs = options.bannerTimeoutMs ?? DEFAULT_BANNER_TIMEOUT_MS;
     this.#schedule = options.schedule ?? scheduleWithTimeout;
+  }
+
+  /**
+   * Give the reporter its real logger, and flush whatever it logged before it had one (#62).
+   *
+   * `index.ts` calls this the moment its own logger exists - see the module doc for what that
+   * closes. Every line this class would have logged up to now was instead appended to
+   * {@link #logBuffer}; this replays them, in order, into `logger.child('alerts')` before letting
+   * any future line through directly.
+   *
+   * **Idempotent, by design rather than by accident.** There is exactly one `RootLogger` per
+   * process, so a second call - whether from a caller invoking this twice or a test exercising
+   * both the unattached and the attached path against one instance - is a no-op: the first logger
+   * given keeps every line, both the buffered ones and everything since, and a second one supplied
+   * later is simply never used. Never calling this at all is equally harmless: the reporter keeps
+   * computing `top`, `banner` and `alerts` and keeps notifying subscribers exactly as before -
+   * logging was always the one thing that depended on this, nothing else did.
+   */
+  attachLogger(logger: Logger): void {
+    if (this.#logAttached) return;
+    this.#logAttached = true;
+    this.#log = logger.child('alerts');
+    for (const line of this.#logBuffer) {
+      if (line.level === 'info') this.#log.info(line.message, line.fields);
+      else this.#log.warn(line.message, line.fields);
+    }
+    this.#logBuffer.length = 0;
   }
 
   /**
@@ -282,9 +356,9 @@ export class ErrorReporter {
     // Logged on the alert changing, never on the banner hiding: a hide is not a new condition,
     // and a second line for it would read in the log exactly like the alert firing twice.
     if (topChanged) {
-      if (next === null) this.#log.info('all clear');
+      if (next === null) this.#logLine('info', 'all clear');
       else {
-        this.#log.warn('user-facing alert', {
+        this.#logLine('warn', 'user-facing alert', {
           source: next.source,
           severity: next.severity,
           text: describeAlert(next),
@@ -303,6 +377,24 @@ export class ErrorReporter {
         });
       }
     }
+  }
+
+  /**
+   * Write one of the two lines {@link #recompute} produces on a `top` change - or hold it, when
+   * nothing has called {@link attachLogger} yet (#62).
+   *
+   * The listener-threw line above does not go through this: it is not part of what an alert set
+   * before the logger exists needs preserved, and buffering it would hold onto an `Error`'s
+   * message for longer than the bound below can promise to keep it, for a condition (a subscriber
+   * throwing) unrelated to what #62 is about.
+   */
+  #logLine(level: 'info' | 'warn', message: string, fields?: LogFields): void {
+    if (this.#logAttached) {
+      if (level === 'info') this.#log.info(message, fields);
+      else this.#log.warn(message, fields);
+      return;
+    }
+    if (this.#logBuffer.length < ERROR_REPORTER_LOG_BUFFER_LIMIT) this.#logBuffer.push({ level, message, fields });
   }
 
   /**
