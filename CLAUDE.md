@@ -93,6 +93,7 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 - **capture loop เป็น interval-driven** ห้ามเปลี่ยนเป็น frame-driven (spike S2)
 - **`degraded` ได้รับการยกเว้นจาก identical-suppression** ไม่งั้น engine ล่ม = จอว่าง (design doc §7)
 - **endpoint ของ Google ต้องเป็น `translate_a/t?client=dict-chrome-ex`** — `translate_a/single?client=gtx` คืนผลไม่ตรงจำนวนแบบเงียบๆ
+- **`snapshot` จาก `auto` หยุด loop แล้วค้างเฟรม** (#60) — **นี่คือการย้อน #34 โดยเจตนา** #34 ให้ mode ไม่ขยับ ผลคือ tick ถัดไป (800ms) ทับเฟรมที่ผู้ใช้เพิ่งขอ จากโหมดที่ผู้ใช้อยู่ตลอดเวลา · เหตุผลที่ย้อน: `feature-spec.md` G4 เขียนว่า "จับครั้งเดียว **ค้างไว้จน dismiss**" มาตั้งแต่ก่อน #34 เกิด โค้ดจึงขัดกับ spec ที่อนุมัติแล้วของตัวเอง #60 คือการ**คืน** G4 ไม่ใช่การตัดสินใหม่ · ห้ามย้อนกลับไปโดยไม่อ่าน design doc §2.1 ก่อน
 
 ข้อควรรู้จาก S1 ที่กระทบการเขียนโค้ด:
 - ต้องมี **en-US OCR recognizer** ติดตั้งบนเครื่องผู้ใช้ ไม่งั้นใช้งานไม่ได้เลย → feature `O8` preflight check
@@ -104,6 +105,13 @@ Reference project ที่ศึกษา (`D:\Project\OtherSource\Translation-
 - **overlay ที่ถูก exclude จาก capture ยังคงกระตุ้นการส่งเฟรมอยู่** — จอนิ่ง + overlay นิ่ง = 3 เฟรมใน 13.2 วิ แต่จอนิ่ง + **overlay ขยับ** = 120 เฟรมใน 2.6 วิ (~46fps) ทุกเฟรมเนื้อหาเหมือนกันเป๊ะ
   → **capture loop ต้องเป็น interval-driven เท่านั้น** ถ้าเป็น frame-driven พอ M5 ใส่ crossfade เข้ามา overlay ของเราเองจะขับ capture+diff ที่ 60fps ตลอดเวลาโดยไม่เจออะไร กินคอร์ทิ้งแบบเงียบๆ
   → `CaptureService.WaitForFrame` ยังอยู่แต่ production ไม่ใช้แล้ว (เหลือไว้ให้ `CaptureProbe`) **อย่าเอากลับมาต่อ**
+
+ข้อควรรู้เรื่อง overlay ที่หาใหม่แพง:
+- **`bumpOverlayEpoch` ล้างจอไม่ได้ด้วยตัวเอง** — มันแค่เพิ่มเลข epoch ที่ `adopt()` อ่าน และ `adopt()` ถูกเรียกจาก `draw()` เท่านั้น (`overlay.ts:297`) แปลว่า**ต้องมี payload ตัวถัดไปมาถึงก่อน** ทุกอย่างจึงจะถูกล้าง
+  → ในโหมดที่ capture หยุดแล้ว (`snapshot`, `paused`) **ไม่มี payload ตัวถัดไป** การ bump epoch เฉยๆ จึงไม่เกิดอะไรขึ้นเลย — กล่องเดิมค้างอยู่บนจอต่อไป
+  → `resetScene` ก็ไม่ช่วย มันแตะแค่ความจำของ pipeline (`text-pipeline.ts`) ไม่เคยแตะจอ
+  → การล้างจริงต้อง**ส่ง payload ว่างผ่าน channel เดิม** (`WindowManager.clearOverlay`, #61) · ความเข้าใจผิดข้อนี้ถูกเขียนลง brief ของ #61 แล้ว worker หักล้างด้วยการอ่านโค้ด — ถ้าเชื่อตามจะได้ dismiss ที่ "ทำงาน" แต่จอไม่เปลี่ยน
+- **alert ที่ผู้ใช้เห็นไม่เข้า log** — `ErrorReporter` ถูกสร้างที่ module scope ก่อน logger มีอยู่ จึงได้ `nullLogger()` ถาวร **อย่าดีบั๊กพฤติกรรม banner จาก log file** มันไม่มีอยู่ตรงนั้น ([#62](https://github.com/zsitthiporn/textlens/issues/62))
 
 ---
 
