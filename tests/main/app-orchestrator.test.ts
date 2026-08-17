@@ -2146,4 +2146,26 @@ describe('AppOrchestrator: which warnings may leave the screen by themselves (#5
     // Sanity: the exemption is worth nothing if the timeout is not real.
     expect(DEFAULT_BANNER_TIMEOUT_MS).toBeGreaterThan(0);
   });
+
+  /**
+   * #64: "change what is being captured" names an act with no object for a user who has never
+   * chosen anything. Keyed on the same {@link NO_REGION_WARNING} identity `sticky` uses, so the
+   * two cannot disagree about which warning is the first-run one.
+   */
+  it('gives the first-run warning its own remedy, and leaves the other three alone', () => {
+    expect(describeAppWarning(NO_REGION_WARNING)?.remedy).toBe(
+      'use the tray menu → "Select Region…" to choose what Textlens should capture',
+    );
+    expect(describeAppWarning(NO_REGION_WARNING)?.remedy).not.toContain('change');
+
+    for (const warning of [
+      'text is touching the right edge of the region; widen it',
+      'DISPLAY1 was 1920x1080 when the region was saved',
+      'no change has been detected for over 25s',
+    ]) {
+      expect(describeAppWarning(warning)?.remedy).toBe(
+        'use the tray menu → "Select Region…" to change what is being captured',
+      );
+    }
+  });
 });

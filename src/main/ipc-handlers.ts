@@ -97,13 +97,18 @@ export interface SettingsConfigSource {
   reload(): Promise<void>;
 }
 
-/** The part of `AppOrchestrator` this needs. */
+/**
+ * The part of `AppOrchestrator` this needs.
+ *
+ * No `pause`/`resume` (#64): the only caller of either was the `'pause'`/`'resume'` branches
+ * `command` below used to have, and nothing ever sent those commands - see `contract.ts`'s
+ * `SettingsCommand` doc. `AppOrchestrator` still has both methods; this interface just no longer
+ * asks for them.
+ */
 export interface SettingsModeSource {
   readonly status: AppStatus;
   selectRegion(): Promise<void>;
   toggleAuto(): void;
-  pause(): void;
-  resume(): void;
   snapshot(): void;
   toggleOverlay(): void;
 }
@@ -343,12 +348,6 @@ export class SettingsIpc {
         return;
       case 'toggleAuto':
         modes.toggleAuto();
-        break;
-      case 'pause':
-        modes.pause();
-        break;
-      case 'resume':
-        modes.resume();
         break;
       case 'snapshot':
         modes.snapshot();

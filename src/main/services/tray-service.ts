@@ -136,8 +136,13 @@ export interface TrayState {
   /** The last thing that went wrong, or `null`. Non-null takes over the icon. */
   readonly error: string | null;
   /**
-   * Something the user should act on that is not a failure - currently only "text is touching
-   * the edge of your region" (#30).
+   * Something the user should act on that is not a failure. Four conditions ride this slot now -
+   * "text is touching the edge of your region" (#30), "your saved region no longer applies" (#31),
+   * "auto mode has found nothing for a while" (#50), and "no region has been chosen" (#51) - and
+   * `app-orchestrator.ts`'s `describeAppWarning` is where they stop being interchangeable: since
+   * #59 the tray keeps whichever one is standing regardless, but the overlay banner times the
+   * first three out and leaves the fourth up, because #51 is a state the app is resting in rather
+   * than an event that happened.
    *
    * Optional so that a caller which has no warning to give need not say so, and separate from
    * `error` because the two behave differently: an error takes over the icon and is cleared by
@@ -167,8 +172,11 @@ export interface TrayActions {
    *
    * There is no separate `onPause` any more. Pausing is Auto switched off - the same click, the
    * same item - and a menu that offered both made two names for one thing, which is the shape of
-   * the confusion #60 was filed about. `AppOrchestrator.pause()` still exists for the settings
-   * window's `pause` command; it is only the tray that stopped needing two entries.
+   * the confusion #60 was filed about. `AppOrchestrator.pause()`/`resume()` still exist as the
+   * mode machine's own API and are exercised directly in its tests, but #64 removed the settings
+   * window's `'pause'`/`'resume'` commands - nothing sent them, since the settings window's own
+   * mode row uses this same toggle - so the tray was already the only caller of "off again", and
+   * now it is the only caller of either direction.
    */
   readonly onToggleAuto: () => void;
   readonly onToggleOverlay: () => void;

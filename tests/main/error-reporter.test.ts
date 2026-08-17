@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConfigIssue } from '../../src/main/services/config.js';
 import {
   DEFAULT_BANNER_TIMEOUT_MS,
+  ERROR_REPORTER_LOG_BUFFER_LIMIT,
   ErrorReporter,
   alertSurfaces,
   describeAlert,
@@ -25,8 +26,42 @@ import {
   type ScheduleTimer,
 } from '../../src/main/services/error-reporter.js';
 import type { HotkeyRegistration } from '../../src/main/services/hotkey-service.js';
+import type { LogFields, Logger } from '../../src/main/services/logger.js';
 import type { SupervisorStatus } from '../../src/main/services/sidecar-supervisor.js';
 import type { EngineFailure } from '../../src/main/services/translator/index.js';
+
+/** A recorded call to `.info`/`.warn`/etc, with the `child()` scope it was made through. */
+interface RecordedLine {
+  readonly level: 'error' | 'warn' | 'info' | 'debug';
+  readonly scope: string;
+  readonly message: string;
+  readonly fields?: LogFields;
+}
+
+/**
+ * A {@link Logger} that records instead of discarding, so #62's claim - that a buffered line is
+ * written through `logger.child('alerts')`, the scope `index.ts`'s comment says to grep for - is
+ * something a test can check rather than something only a real log file proves.
+ */
+function recordingLogger(): { readonly lines: RecordedLine[]; readonly logger: Logger } {
+  const lines: RecordedLine[] = [];
+  const make = (scope: string): Logger => ({
+    error: (message, fields) => lines.push({ level: 'error', scope, message, fields }),
+    warn: (message, fields) => lines.push({ level: 'warn', scope, message, fields }),
+    info: (message, fields) => lines.push({ level: 'info', scope, message, fields }),
+    debug: (message, fields) => lines.push({ level: 'debug', scope, message, fields }),
+    sensitive: () => {},
+    isDebugEnabled: false,
+    level: 'info',
+    child: (childScope) => make(scope === '' ? childScope : `${scope}.${childScope}`),
+  });
+  return { lines, logger: make('') };
+}
+
+/** `text` off a buffered/flushed line's fields, the way `#recompute` writes it. */
+function fieldText(line: RecordedLine | undefined): string | undefined {
+  return (line?.fields as { text?: string } | undefined)?.text;
+}
 
 function supervisorStatus(over: Partial<SupervisorStatus>): SupervisorStatus {
   return {
@@ -327,6 +362,155 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     expect(surfaces.trayWarning).toContain('touching the right edge');
     expect(surfaces.trayError).toBeNull();
     expect(surfaces.overlayAlert).toBeNull();
+  });
+});
+
+/**
+ * #62: a logger that arrives after the reporter does must not lose what happened before it.
+ *
+ * `index.ts` constructs `ErrorReporter` at module scope, before `createLogger` has resolved, so
+ * for however long that takes every alert raised went to `nullLogger()` for good - the tray, the
+ * banner and the settings window were all fine, because none of them read the reporter's own log,
+ * but the log file itself never said what the user was looking at. These pin the fix: nothing is
+ * dropped, nothing is duplicated, and attaching twice or never is equally harmless.
+ */
+describe('ErrorReporter: a logger that arrives late does not lose what happened before it (#62)', () => {
+  it('buffers nothing observable while no logger has ever been given - `top`, `banner` and `alerts` still work', () => {
+    // The baseline this replaces: before #62, a reporter built the way `index.ts` builds one -
+    // `new ErrorReporter()`, no logger - had no seam at all through which a test, or `bootstrap`,
+    // could ever recover what it had logged; there was no `attachLogger` to call. This is the
+    // closest an automated test can get to that version without hand-editing the class back out
+    // for the run - the tautology check does the rest, by removing the flush itself.
+    const reporter = new ErrorReporter();
+    const seen: (string | null)[] = [];
+    reporter.subscribe((alert) => seen.push(alert?.cause ?? null));
+
+    reporter.set('sidecar', { severity: 'error', cause: 'no logger ever arrives', remedy: 'r' });
+    reporter.set('sidecar', null);
+
+    // Everything except the log line kept working with no logger at all - it always did.
+    expect(seen).toEqual(['no logger ever arrives', null]);
+    expect(reporter.top).toBeNull();
+  });
+
+  it('flushes the line a config-parse failure would have logged, the instant a logger is attached', () => {
+    // The case #62 names by name: a config file that will not parse, reported before `bootstrap`
+    // has a logger to give the reporter.
+    const reporter = new ErrorReporter();
+    reporter.set('config', {
+      severity: 'warning',
+      cause: 'config.json is not valid JSON, so Textlens is running on defaults',
+      remedy: 'fix or delete the file, then restart Textlens',
+    });
+    // The condition itself needed no logger - this was never the bug.
+    expect(reporter.top?.cause).toContain('not valid JSON');
+
+    const rec = recordingLogger();
+    reporter.attachLogger(rec.logger);
+
+    expect(rec.lines).toHaveLength(1);
+    expect(rec.lines[0]).toMatchObject({ level: 'warn', scope: 'alerts', message: 'user-facing alert' });
+    expect(fieldText(rec.lines[0])).toContain('not valid JSON');
+  });
+
+  it('flushes several buffered transitions in the order they happened, not just the last one', () => {
+    const reporter = new ErrorReporter();
+    reporter.set('config', { severity: 'warning', cause: 'first', remedy: 'r' });
+    // `fatal` outranks `warning`, so this is a second `top` change, not a replacement of the first.
+    reporter.set('ocr', { severity: 'fatal', cause: 'second', remedy: 'r' });
+    // Clearing the fatal one hands `top` back to the still-standing warning - a third change.
+    reporter.set('ocr', null);
+    // And clearing that is the fourth: silence.
+    reporter.set('config', null);
+
+    const rec = recordingLogger();
+    reporter.attachLogger(rec.logger);
+
+    expect(rec.lines.map((line) => line.message)).toEqual([
+      'user-facing alert',
+      'user-facing alert',
+      'user-facing alert',
+      'all clear',
+    ]);
+    expect(rec.lines.map((line) => fieldText(line))).toEqual([
+      expect.stringContaining('first'),
+      expect.stringContaining('second'),
+      expect.stringContaining('first'),
+      undefined,
+    ]);
+  });
+
+  it('logs immediately, with no buffering, once attached', () => {
+    const reporter = new ErrorReporter();
+    const rec = recordingLogger();
+    reporter.attachLogger(rec.logger);
+
+    reporter.set('config', { severity: 'warning', cause: 'after attach', remedy: 'r' });
+
+    expect(rec.lines).toHaveLength(1);
+    expect(fieldText(rec.lines[0])).toContain('after attach');
+  });
+
+  it('logs immediately when the constructor is given a logger directly, same as before #62', () => {
+    const rec = recordingLogger();
+    const reporter = new ErrorReporter({ logger: rec.logger });
+
+    reporter.set('config', { severity: 'warning', cause: 'straight through', remedy: 'r' });
+
+    expect(rec.lines).toHaveLength(1);
+    expect(rec.lines[0]?.scope).toBe('alerts');
+  });
+
+  it('is harmless to attach twice: the second logger gets nothing, the first keeps receiving', () => {
+    const reporter = new ErrorReporter();
+    reporter.set('config', { severity: 'warning', cause: 'buffered before either attach', remedy: 'r' });
+
+    const first = recordingLogger();
+    reporter.attachLogger(first.logger);
+    expect(first.lines).toHaveLength(1);
+
+    const second = recordingLogger();
+    reporter.attachLogger(second.logger);
+    expect(second.lines).toHaveLength(0);
+
+    // A transition after both attach attempts must still reach the logger that actually won.
+    reporter.set('config', null);
+
+    expect(second.lines).toHaveLength(0);
+    expect(first.lines).toHaveLength(2);
+    expect(first.lines[1]?.message).toBe('all clear');
+  });
+
+  it('is harmless to never attach at all: the reporter keeps working and keeps notifying subscribers', () => {
+    const reporter = new ErrorReporter();
+    const seen: (string | null)[] = [];
+    reporter.subscribe((alert) => seen.push(alert?.cause ?? null));
+
+    reporter.set('sidecar', { severity: 'error', cause: 'nothing ever attaches', remedy: 'r' });
+    reporter.set('sidecar', null);
+
+    expect(seen).toEqual(['nothing ever attaches', null]);
+    expect(reporter.top).toBeNull();
+  });
+
+  it('bounds the buffer: transitions past the limit are dropped, and the earliest ones survive', () => {
+    const reporter = new ErrorReporter();
+    const total = ERROR_REPORTER_LOG_BUFFER_LIMIT + 10;
+    for (let i = 0; i < total; i += 1) {
+      // A distinct cause every time - `set` returns early for a source repeating the same message,
+      // and this test needs every one of these to actually be a buffered line.
+      reporter.set('config', { severity: 'warning', cause: `distinct cause ${String(i)}`, remedy: 'r' });
+    }
+
+    const rec = recordingLogger();
+    reporter.attachLogger(rec.logger);
+
+    // Bounded, not merely "smaller than it would otherwise be": exactly the limit, never the total.
+    expect(rec.lines).toHaveLength(ERROR_REPORTER_LOG_BUFFER_LIMIT);
+    expect(fieldText(rec.lines[0])).toContain('distinct cause 0');
+    expect(fieldText(rec.lines[ERROR_REPORTER_LOG_BUFFER_LIMIT - 1])).toContain(
+      `distinct cause ${String(ERROR_REPORTER_LOG_BUFFER_LIMIT - 1)}`,
+    );
   });
 });
 

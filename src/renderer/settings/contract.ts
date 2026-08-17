@@ -194,13 +194,17 @@ export interface SettingsHotkeyResult {
  * One channel with a union rather than a channel each: every one of these is a fire-and-forget
  * request to something that already exists, and the state that comes back is the same push every
  * other change produces.
+ *
+ * **No `'pause'` or `'resume'` (#64).** They used to be routed here, but nothing in this window
+ * ever sent either: the mode row below sends `'toggleAuto'` for both directions, the same as the
+ * tray does since #60 removed its separate Pause item. `AppOrchestrator.pause()`/`resume()`
+ * themselves are unaffected - they are the mode machine's own API and stay exercised directly by
+ * its own tests - this only removes the two names nothing here could reach.
  */
 export type SettingsCommand =
   | 'selectRegion'
   | 'clearRegion'
   | 'toggleAuto'
-  | 'pause'
-  | 'resume'
   | 'snapshot'
   | 'toggleOverlay'
   | 'restartSidecar'

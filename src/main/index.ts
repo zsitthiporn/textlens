@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Main process entry point: wiring, and only wiring.
  *
  * Everything electron-specific is resolved here - `userData`, `isPackaged`,
@@ -99,6 +99,15 @@ let framesWithoutDisplay = 0;
  * Created before anything that can fail, and at module scope rather than inside `bootstrap`,
  * because the earliest thing worth reporting - a config file that would not parse - happens on the
  * first `await` in there.
+ *
+ * It is constructed with no logger, which used to mean every alert it ever raised went to
+ * `nullLogger()` for the process's whole life (#62) - the tray, the banner and the settings
+ * window were all fine, because none of them read the reporter's own log, but the log file itself
+ * never once said what the user was looking at. `reporter.attachLogger(logger)` below, called the
+ * moment `createLogger` resolves, is what catches it up: any alert this raises before that call -
+ * and, since it is idempotent, no matter how early or how often something tries to call it again -
+ * is held rather than dropped, and is written out in order the instant a real logger exists. See
+ * `error-reporter.ts`'s own module doc for the buffering.
  */
 const reporter = new ErrorReporter();
 /** The mode machine's last status, held so the tray can be written from one place. */
@@ -151,6 +160,11 @@ async function bootstrap(): Promise<void> {
     // `console: true` only in development - a packaged app has no console to read.
     console: !app.isPackaged,
   });
+  // #62. The earliest point a logger can exist, and therefore the earliest point `reporter` can
+  // stop buffering. Everything it was told before this line - and everything the module-scope
+  // comment above explains it exists to be able to receive early - is flushed into this logger,
+  // in order, before this call returns.
+  reporter.attachLogger(logger);
   const log = logger.child('app');
   log.info('starting', {
     version: app.getVersion(),
