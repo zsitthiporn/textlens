@@ -105,6 +105,16 @@ interface FakeSidecar extends CaptureSidecar {
   readonly state: string;
   /** Push an event as the sidecar would. */
   emit<K extends 'ack' | 'error' | 'frame' | 'nochange' | 'exit'>(event: K, payload: SidecarClientEvents[K]): void;
+  /**
+   * Fire one turn of the capture loop's timer.
+   *
+   * Emits a `frame` **only while the loop is running**, which is what `CaptureLoop` does: `stop`
+   * disposes the timer, so a stopped loop produces nothing at all. This is what makes "the held
+   * frame is not overwritten" an assertion about behaviour rather than about a boolean - the
+   * default interval is 800ms and a user reading a held translation is looking at the screen for
+   * far longer than that.
+   */
+  tick(): void;
   /** Stop accepting commands, as a dead process does. */
   die(): void;
   readonly kinds: string[];
@@ -152,6 +162,10 @@ function fakeSidecar(options: FakeSidecarOptions = {}): FakeSidecar {
       return sent.map((command) => command.cmd);
     },
     emit,
+    tick() {
+      if (!alive || !capturing) return;
+      emit('frame', frameEvent());
+    },
     die() {
       alive = false;
     },
@@ -578,6 +592,35 @@ describe('AppOrchestrator: snapshot', () => {
 
     expect(h.sidecar.kinds).toEqual(['listMonitors', 'configure', 'start', 'snapshot']);
     expectConverged(h, 'auto');
+  });
+
+  /**
+   * **The behaviour #60 reverses, recorded before it is reversed.**
+   *
+   * The test above asserts the *mode* does not move, which is what #34 asked for and what the
+   * module doc argues. This one asserts what that costs the user, which is the thing nobody wrote
+   * down: the loop is still running, so the very next tick - 800ms by default - replaces the frame
+   * they pressed the key to hold. "Translate once" therefore holds nothing at all from the mode
+   * the user is actually in almost all of the time.
+   *
+   * Kept as a failing-if-reintroduced record rather than deleted in the next commit, so the
+   * reversal is a diff somebody can read rather than a claim in a message.
+   */
+  it('during auto: the next tick overwrites the frame the user asked to hold', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    const frames: number[] = [];
+    h.sidecar.on('frame', (frame) => {
+      frames.push(frame.seq);
+    });
+
+    h.orchestrator.snapshot();
+    const held = frames.at(-1);
+    h.sidecar.tick();
+
+    expect(held).toBeDefined();
+    expect(frames.at(-1)).not.toBe(held);
+    expect(h.sidecar.capturing).toBe(true);
   });
 
   it('during pause: captures once and stays paused, still stopped', async () => {
