@@ -1555,10 +1555,18 @@ describe('AppOrchestrator: region edge warning', () => {
       // "uses the default eight seconds, not some other number" test uses for its timeout.
       expect(timers.live[0]?.delayMs).toBe(EDGE_WARNING_CLEAR_DELAY_MS);
 
+      // The timer body must reach subscribers itself - nothing else is going to notify for it,
+      // since the frame that armed the timer already returned `false` from `#checkRegionEdges`.
+      // The mirror of #59's own "tells subscribers when the banner goes, so the overlay is
+      // actually repainted".
+      const notified: Array<string | null> = [];
+      h.orchestrator.subscribe((status) => notified.push(status.warning));
+
       timers.elapse();
 
       // A condition that genuinely stopped does clear - once the window has passed, not never.
       expect(h.orchestrator.status.warning).toBeNull();
+      expect(notified).toEqual([null]);
     });
 
     it('reaches the user promptly on the very first dirty frame, with no delay at all', async () => {
