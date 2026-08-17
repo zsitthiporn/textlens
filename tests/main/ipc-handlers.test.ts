@@ -121,8 +121,6 @@ function rig(overrides: Partial<SettingsIpcOptions> = {}): Rig {
         await Promise.resolve();
       },
       toggleAuto: () => commands.push('toggleAuto'),
-      pause: () => commands.push('pause'),
-      resume: () => commands.push('resume'),
       snapshot: () => commands.push('snapshot'),
       toggleOverlay: () => commands.push('toggleOverlay'),
     },
@@ -451,8 +449,6 @@ describe('SettingsIpc: commands', () => {
   it.each([
     ['selectRegion', 'selectRegion'],
     ['toggleAuto', 'toggleAuto'],
-    ['pause', 'pause'],
-    ['resume', 'resume'],
     ['snapshot', 'snapshot'],
     ['toggleOverlay', 'toggleOverlay'],
     ['restartSidecar', 'restartSidecar'],
