@@ -32,6 +32,7 @@ import {
   describeAppWarning,
   type AppStatus,
 } from './services/app-orchestrator.js';
+import { startCacheCleanup } from './services/cache.js';
 import { ConfigService } from './services/config.js';
 import { DrawnPayloads } from './services/drawn-payloads.js';
 import {
@@ -91,6 +92,8 @@ let settingsIpc: SettingsIpc | null = null;
 let drawnPayloads: DrawnPayloads | null = null;
 let stopDrawnListener: (() => void) | null = null;
 let stopMetricsSummary: (() => void) | null = null;
+/** The interval half of #66's cache sweep. See `startCacheCleanup` (`cache.ts`). */
+let stopCacheCleanup: (() => void) | null = null;
 let shuttingDown = false;
 /** Frames dropped because their monitor is unpaired. Counted so the log can be rate-limited. */
 let framesWithoutDisplay = 0;
@@ -928,12 +931,22 @@ function startTextPipeline(metrics: MetricsRecorder): ComposedTextPipeline | nul
     },
   });
 
+  // #66. `TranslationCache.cleanup()` existed and was tested but nothing called it, so the cache
+  // file grew without a ceiling - the 14-day TTL only hid rows past their time, it never removed
+  // them. Run once now, before the first frame, so a long-idle previous session's dead rows are
+  // gone at the start of this one rather than adding to whatever this one produces; the interval
+  // is only for a session left open across days. See `startCacheCleanup`'s own doc for why a
+  // sweep that fails cannot take the cache - or startup - down with it.
+  stopCacheCleanup = startCacheCleanup(composed.cache, logger);
+
   log.info('translation pipeline ready', {
     engines: composed.translator.engineNames,
     // Evidence, not decoration: this line is how a real run proves which transport was injected.
     // Node's global `fetch` and Electron's `net.fetch` are different functions, and only the
     // latter reads the system proxy.
     transport: net.fetch === globalThis.fetch ? 'node-fetch' : 'electron-net',
+    // Read after the sweep above, so a cleanup that disabled the cache is reflected here rather
+    // than reporting a status that was already stale by the time this line was written.
     cache: composed.cache.status,
   });
 
@@ -1088,6 +1101,10 @@ async function shutdown(): Promise<void> {
     });
   }
 
+  // #66. Same reasoning as `stopMetricsSummary` above: an `unref`'d interval never keeps the
+  // process alive on its own, but a sweep that fired mid-shutdown would be touching a cache
+  // handle `close()` is about to drop. Stopped just ahead of it for that reason.
+  stopCacheCleanup?.();
   // After the sidecar, so no frame can arrive and find the cache handle already gone.
   textPipeline?.close();
   log?.info('translation cache closed');
