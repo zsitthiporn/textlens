@@ -8,11 +8,13 @@
  */
 
 import path from 'node:path';
+import { inspect } from 'node:util';
 
 import {
   Menu,
   Tray,
   app,
+  dialog,
   globalShortcut,
   ipcMain,
   nativeImage,
@@ -42,7 +44,7 @@ import {
   judgeTranslation,
 } from './services/error-reporter.js';
 import { HotkeyService } from './services/hotkey-service.js';
-import { createLogger, type RootLogger } from './services/logger.js';
+import { createLogger, type Logger, type RootLogger } from './services/logger.js';
 import { MetricsRecorder, startMetricsSummary } from './services/metrics.js';
 import { MonitorService } from './services/monitor-service.js';
 import { RecentOutputs } from './services/recent-outputs.js';
@@ -92,6 +94,184 @@ let stopMetricsSummary: (() => void) | null = null;
 let shuttingDown = false;
 /** Frames dropped because their monitor is unpaired. Counted so the log can be rate-limited. */
 let framesWithoutDisplay = 0;
+
+/**
+ * Failures nobody was waiting for (#67).
+ *
+ * Installed here - ahead of `ErrorReporter`, ahead of every `app.on`, and long before
+ * `app.whenReady()` - for the same reason #62 had to move the reporter to module scope: a handler
+ * that only exists after the moment it needed to fire has not been installed at all. Nothing above
+ * this line can throw. A great deal below it can.
+ *
+ * **What this runtime does unaided.** Measured on this machine rather than assumed, because the
+ * answer is not Node's documented one - Electron 43.4.0 / Node 24.18.1, main process, no handlers:
+ *
+ *   - an **unhandled rejection** prints the legacy `UnhandledPromiseRejectionWarning` to a stderr
+ *     that a packaged app has nobody attached to, and the process **carries on**. Electron turns
+ *     Node 24's own `--unhandled-rejections=throw` default back down to `warn`. So #67's "the app
+ *     hangs" is not a risk this file was running: it is already what happens.
+ *   - an **uncaught exception** raises Electron's stock "A JavaScript error occurred in the main
+ *     process" box, which blocks the message loop. A probe sat in that box past 20 seconds with
+ *     its own timers frozen, and never reached the line that would have reported what happens
+ *     once a user dismisses it.
+ *
+ * The two get **different answers**, and the asymmetry is the decision rather than an oversight:
+ *
+ * **`unhandledRejection` reports and lives.** A rejected promise nobody awaited unwound its own
+ * continuation and nothing else; the rest of the process was never on that stack. Here that is
+ * overwhelmingly one async path failing - a `fetch`, a `stop()`, a frame - and every deliberate
+ * `void` in this file is justified in a comment that says the promise "never rejects". If one of
+ * those claims turns out to be wrong, ending the user's session on the first frame is a worse
+ * answer than a log line and a session that continues. This keeps the measured behaviour above
+ * exactly as it is and adds only the report invariant 4 asks for.
+ *
+ * **`uncaughtException` reports and then dies.** A synchronous throw unwound an arbitrary stack, so
+ * something stopped halfway and left whatever it was mutating in a shape nobody designed: a
+ * sidecar spawned but never configured, a cache handle half-written, an overlay holding boxes it
+ * will never update again. This app's broken state is unusually bad - it is a click-through window
+ * that sits above everything the user does, so a wedged Textlens paints over the screen behind a
+ * tray that may no longer answer. Invariant 4 requires that no failure be silent; it does not
+ * require that the app survive one. The modal box means the user is told before the process
+ * leaves, and `app.exit(1)` keeps the disposition Node itself would have had.
+ */
+process.on('uncaughtException', (error: unknown) => {
+  reportFatal('uncaught exception', error);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  reportRejection(reason);
+});
+
+/** How long a crash report waits for the log to reach disk before leaving anyway. */
+const CRASH_FLUSH_TIMEOUT_MS = 2_000;
+
+/**
+ * Rejections raised before `createLogger` resolved, held until there is somewhere to put them.
+ *
+ * The same answer #62 reached for alerts, for the same reason: `src/main/` writes nothing to
+ * `console.*` - a packaged app has no console attached, so a line written there is not a report,
+ * it is the silence invariant 4 forbids wearing a disguise. Capped because a loop that rejects
+ * every tick must not become the memory leak that takes the app down on its own; the overflow is
+ * counted so the flushed line can say how much it is not showing.
+ */
+const pendingRejections: string[] = [];
+let droppedRejections = 0;
+const PENDING_REJECTION_LIMIT = 8;
+
+/** Set once a fatal report is under way. */
+let crashing = false;
+
+/**
+ * Log an unhandled rejection, and leave the process running.
+ *
+ * Split out from the listener so `bootstrap`'s flush and the listener share one description of
+ * what a rejection is worth saying about it.
+ */
+function reportRejection(reason: unknown): void {
+  const thrown = describeThrown(reason);
+  const log = logger?.child('app');
+  if (log === undefined) {
+    // Before `createLogger` resolved. With `bootstrap` now carrying its own `.catch` this window
+    // is very nearly empty, but "very nearly" is not a reason to drop the one report that would
+    // explain a startup nobody can otherwise account for.
+    if (pendingRejections.length < PENDING_REJECTION_LIMIT) pendingRejections.push(thrown.stack);
+    else droppedRejections += 1;
+    return;
+  }
+  log.error('unhandled promise rejection - the app is still running', {
+    name: thrown.name,
+    message: thrown.message,
+    stack: thrown.stack,
+  });
+}
+
+/** Drain {@link pendingRejections}. Called by `bootstrap` the moment a logger exists. */
+function flushPendingRejections(log: Logger): void {
+  if (pendingRejections.length === 0 && droppedRejections === 0) return;
+  log.error('unhandled promise rejections happened before the logger existed', {
+    count: pendingRejections.length,
+    dropped: droppedRejections,
+    stacks: [...pendingRejections],
+  });
+  pendingRejections.length = 0;
+  droppedRejections = 0;
+}
+
+/**
+ * Report a fatal failure to both surfaces that can still be trusted, then leave.
+ *
+ * Used by the `uncaughtException` handler and by `bootstrap`'s own `.catch`, because the two want
+ * exactly the same thing: the crash on disk if a disk is available, the crash on screen either
+ * way, and a process that does not sit there afterwards.
+ */
+function reportFatal(kind: string, error: unknown): void {
+  if (crashing) {
+    // A second fatal raised while reporting the first - and the likeliest cause of one is the
+    // logger or the dialog this function just used. There is nothing further to try, and looping
+    // is the single outcome this handler exists to remove.
+    app.exit(1);
+    return;
+  }
+  crashing = true;
+
+  const thrown = describeThrown(error);
+  try {
+    logger?.child('app').error(`fatal: ${kind}`, {
+      name: thrown.name,
+      message: thrown.message,
+      stack: thrown.stack,
+    });
+  } catch {
+    // A logger that throws while reporting a crash is precisely the case the box below exists
+    // for, so it must not be allowed to skip it. Swallowed rather than rethrown for a second
+    // reason: a throw raised from inside an `uncaughtException` handler is a hard exit, which
+    // would take the last remaining surface down with it and restore the silent death whole.
+  }
+
+  // Shown whether or not that line went anywhere, and this is the whole of #67's point 2: when the
+  // thing that failed *is* the log file, writing the report to the log file is not a report. With
+  // a logger the box can stay short and point at the file; without one the stack has no other home,
+  // so it goes in the box.
+  const detail =
+    logger === null ? `\n\n${thrown.stack}` : `\n\nThe details are in the log:\n${logger.directory}`;
+  try {
+    dialog.showErrorBox('Textlens has to close', `${thrown.message}${detail}`);
+  } catch {
+    // A dialog that cannot be raised must not stop the exit below. Nothing else is left to try.
+  }
+
+  // Bounded deliberately. `close()` resolving is the only proof the bytes reached the OS, but a
+  // crash whose cause was the log file would never resolve - and hanging is the failure this whole
+  // block exists to stop happening.
+  void Promise.race([
+    logger?.close() ?? Promise.resolve(),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, CRASH_FLUSH_TIMEOUT_MS);
+    }),
+  ])
+    .catch(() => undefined)
+    .finally(() => {
+      // Not `app.quit()`. That runs `before-quit`, which awaits the sidecar and disposes the very
+      // services the exception may have come out of; `exit` is the deliberate skip past all of it.
+      app.exit(1);
+    });
+}
+
+/** Flatten anything `throw` or `reject` can carry - they are not required to carry an `Error`. */
+function describeThrown(error: unknown): { name: string; message: string; stack: string } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack ?? `${error.name}: ${error.message}`,
+    };
+  }
+  // `throw 'a string'` and `Promise.reject({ code: 'ENOSPC' })` are both legal and both land here.
+  // `inspect` rather than `String`, which would render the second one as `[object Object]` and
+  // throw away the only field worth reading.
+  const message = typeof error === 'string' ? error : inspect(error, { depth: 2 });
+  return { name: 'NonError', message, stack: message };
+}
 
 /**
  * The user-facing error surface (issue M10-02 / #41).
@@ -166,6 +346,10 @@ async function bootstrap(): Promise<void> {
   // in order, before this call returns.
   reporter.attachLogger(logger);
   const log = logger.child('app');
+  // #67, and the same beat for the same reason: the reporter is not the only thing that has been
+  // holding something it could not write down. Drained before `starting` so the log reads in the
+  // order the events happened rather than the order the logger learned about them.
+  flushPendingRejections(log);
   log.info('starting', {
     version: app.getVersion(),
     // Not `level`: pino writes its own `level` field, and a duplicate key produces a
@@ -865,6 +1049,13 @@ async function shutdown(): Promise<void> {
 
   // Before the sidecar, so the icon disappears the moment the user asks rather than after
   // however long the child takes to exit.
+  //
+  // That order is only defensible because the quit below it cannot be skipped any more (#67).
+  // While `before-quit` ended in a bare `.then`, this line was the trap: it destroyed the app's
+  // one exit route - #56 is explicit that the tray *is* the only way out - and every step that
+  // could rescue the situation sat behind an `await` that a rejecting `sidecar.stop()` never got
+  // past. The user was left with a live process, no icon and a quit that had been cancelled.
+  // Keep this call before the awaits, and keep the `.finally` that pays for it.
   tray?.destroy();
   orchestrator?.dispose();
   // Before the windows go. A handler left attached to `ipcMain` outlives the window it served, and
@@ -879,8 +1070,23 @@ async function shutdown(): Promise<void> {
   supervisor?.dispose();
   log?.info('sidecar supervision stopped');
 
-  await sidecar?.stop();
-  log?.info('sidecar stopped', { running: sidecar?.isRunning ?? false });
+  // #67. Contained rather than propagated, and the containment is what puts the report on disk:
+  // everything that flushes the log lives below this line, so a `stop()` that rejects used to take
+  // `logger.close()` down with it and the session's last words - including why the shutdown went
+  // wrong - never left the buffer. A child that will not die politely is worth a line, not the
+  // rest of the shutdown.
+  try {
+    await sidecar?.stop();
+    log?.info('sidecar stopped', { running: sidecar?.isRunning ?? false });
+  } catch (error) {
+    const thrown = describeThrown(error);
+    log?.error('the sidecar did not stop cleanly; shutting down anyway', {
+      name: thrown.name,
+      message: thrown.message,
+      stack: thrown.stack,
+      running: sidecar?.isRunning ?? false,
+    });
+  }
 
   // After the sidecar, so no frame can arrive and find the cache handle already gone.
   textPipeline?.close();
@@ -895,6 +1101,35 @@ async function shutdown(): Promise<void> {
   log?.info('shutdown complete');
   await logger?.close();
 }
+
+/**
+ * The seam #67's regression test needs, and deliberately not one field wider.
+ *
+ * `shutdown()` reads module-scope singletons that only `bootstrap` ever assigns, so in a freshly
+ * imported module every one of them is `null` and the function cannot be made to fail - which
+ * makes the exact property this issue is about, *"a rejecting `sidecar.stop()` must still reach
+ * `app.quit()`"*, unprovable from outside. The alternative was threading a dependency record
+ * through `bootstrap` and all eleven singletons - a change to this file's whole shape, paid for by
+ * one test.
+ *
+ * The cost is honest and small: four assignments production never calls, shipped in
+ * `dist/main/index.js`. Nothing here *reads* state, so it cannot become a second way to drive the
+ * app - it can only substitute what `shutdown` is about to talk to. There is no `reset`, because
+ * the tests take a freshly imported module per case rather than sharing one.
+ */
+export const lifecycleTestSeam = {
+  install(parts: {
+    readonly sidecar?: Pick<SidecarClient, 'stop' | 'isRunning'>;
+    readonly logger?: Pick<RootLogger, 'child' | 'close' | 'directory'>;
+    readonly windows?: Pick<WindowManager, 'closeAll'>;
+    readonly tray?: Pick<TrayService, 'destroy'>;
+  }): void {
+    if (parts.sidecar !== undefined) sidecar = parts.sidecar as SidecarClient;
+    if (parts.logger !== undefined) logger = parts.logger as RootLogger;
+    if (parts.windows !== undefined) windows = parts.windows as WindowManager;
+    if (parts.tray !== undefined) tray = parts.tray as TrayService;
+  },
+};
 
 /**
  * Deliberately does not quit (#56).
@@ -927,12 +1162,44 @@ app.on('window-all-closed', () => {
 // `before-quit` is the last point at which async work can still be awaited. Cancel the
 // quit, shut down properly, then quit for real - otherwise the sidecar's shutdown races
 // the process exit and the last log lines never reach the disk.
+//
+// **`.finally`, not `.then` (#67).** `event.preventDefault()` above cancels this quit permanently,
+// so the second `app.quit()` is not a convenience - it is the only thing that ends the process
+// once this handler has run. Hung off `.then`, it inherited `shutdown()`'s success as a
+// precondition: any rejection in there skipped it, and the app stayed up with its tray already
+// destroyed and its quit already cancelled. Nothing reported that, either, because the rejection
+// went nowhere - which is the measured Electron behaviour recorded at the top of this file.
+// Shutting down untidily beats not shutting down.
 app.on('before-quit', (event) => {
   if (shuttingDown) return;
   event.preventDefault();
-  void shutdown().then(() => {
-    app.quit();
-  });
+  void shutdown()
+    .catch((error: unknown) => {
+      // The net under the steps that do not catch for themselves - the synchronous disposals, and
+      // `logger.close()` at the very end. Log only, no `reportFatal`: the user asked for this quit
+      // and is getting it, so raising a modal box on the way out would turn an untidy exit into an
+      // alarming one. A logger that has just failed to close may drop this line, which is exactly
+      // why the sidecar step catches its own failure while there is still a flush to come.
+      const thrown = describeThrown(error);
+      logger?.child('app').error('shutdown did not finish cleanly; quitting regardless', {
+        name: thrown.name,
+        message: thrown.message,
+        stack: thrown.stack,
+      });
+    })
+    .finally(() => {
+      app.quit();
+    });
 });
 
-void app.whenReady().then(bootstrap);
+// #67. `bootstrap` is ~200 lines with no try/catch of its own, and its first `await` is
+// `createLogger` - so the one failure it is most likely to have is also the one that arrives before
+// a log file, a window or a tray exists to say anything about it. Unhandled, that is an app the
+// user double-clicks and watches do nothing at all. `reportFatal` falls back to `showErrorBox`
+// precisely because the disk is the thing that may have failed.
+void app
+  .whenReady()
+  .then(bootstrap)
+  .catch((error: unknown) => {
+    reportFatal('startup failed', error);
+  });
