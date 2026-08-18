@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_LOG_LEVEL,
@@ -112,14 +112,60 @@ describe('log files', () => {
 
   it('does not write synchronously on the calling thread', async () => {
     const dir = tempDir();
-    const logger = await open({ directory: dir });
+    const logger = await open({ directory: dir, env: {} });
 
-    logger.info('first line');
+    // What this test guards: `logger.info(...)` must not perform a blocking write on the
+    // calling thread. The main process also runs the Node half of the capture loop, and
+    // the budget in design doc section 4 has no room for a disk write inside a frame.
+    //
+    // It used to assert `statSync(currentFile).size === 0` right after the call. That was
+    // a race, not a proof (issue #63): sonic-boom dispatches `fs.write` to the libuv
+    // threadpool from inside the calling stack, so the bytes can land before the very next
+    // statement runs without anything having blocked. Measured under contention: 2 of 150
+    // calls saw the full 66-byte line already on disk while zero synchronous fs calls had
+    // been made. The old assertion failed ~1 full-suite run in 5 for that reason alone.
+    //
+    // So census the syscalls instead of racing them. `blocking` names every fs entry point
+    // that would stall this thread; sonic-boom's sync mode reaches disk through `writeSync`,
+    // and adds `fsyncSync` on top when `fsync: true`.
+    //
+    // The window is the log call itself, which is what "on the calling thread" means and all
+    // this test has ever claimed. Verified boundary: `fsync: true` *without* sync mode is not
+    // caught here, because sonic-boom then runs `fsyncSync` inside the `fs.write` completion
+    // callback - it stalls the event loop later, not this stack. The old assertion did not
+    // catch that either, so nothing was lost; it is simply a different test to write.
+    const BLOCKING_FS_CALLS = [
+      'writeSync',
+      'writevSync',
+      'appendFileSync',
+      'writeFileSync',
+      'fsyncSync',
+      'fdatasyncSync',
+    ] as const;
 
-    // The call returned; the bytes are buffered, not pushed through fs. If this starts
-    // failing it means logging became blocking I/O on the main process, which the
-    // latency budget in design doc section 4 has no room for.
-    expect(fs.statSync(logger.currentFile).size).toBe(0);
+    // Spies go on after open() - the destination's own mkdir/open may legitimately be
+    // synchronous - and come off before close(), whose final flush is allowed to be. They
+    // call through, so this observes the real logger doing its real work.
+    const spies = BLOCKING_FS_CALLS.map((name) => ({ name, spy: vi.spyOn(fs, name) }));
+    const writeSpy = vi.spyOn(fs, 'write');
+
+    let blocking: string[] = [];
+    let asyncWrites = 0;
+    try {
+      logger.info('first line');
+
+      blocking = spies.filter(({ spy }) => spy.mock.calls.length > 0).map(({ name }) => name);
+      asyncWrites = writeSpy.mock.calls.length;
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    expect(blocking).toEqual([]);
+    // The positive control, and the reason the assertion above cannot pass vacuously: if
+    // the patching mechanism ever stops intercepting what the logger actually calls - a
+    // destructured `fs` import inside sonic-boom, a move to `fs/promises` - this fails
+    // loudly rather than letting the negative assertion succeed by seeing nothing at all.
+    expect(asyncWrites).toBeGreaterThan(0);
 
     await logger.close();
     expect(fs.statSync(logger.currentFile).size).toBeGreaterThan(0);
