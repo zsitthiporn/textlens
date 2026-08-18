@@ -291,3 +291,69 @@ export class TranslationCache {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Scheduled cleanup (#66)
+// ---------------------------------------------------------------------------
+
+/**
+ * How often the interval sweep runs, beyond the one at startup.
+ *
+ * The startup call does the real work for an ordinary session: whatever a previous run left past
+ * its TTL is gone within the first second of this one. The interval only matters for a process a
+ * user leaves open across multiple days, where nothing else would ever call `cleanup()` again. 6
+ * hours means a machine left running over a long weekend is still swept a handful of times rather
+ * than accumulating for the whole stretch. `cache_entries.expires_at` has **no index** - see
+ * `cleanup()` above - so this is deliberately not tuned tighter than that: a shorter interval would
+ * not shrink the table any faster (correctness already comes from the read-side filter), it would
+ * only run the same full-table scan more often.
+ */
+export const DEFAULT_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Run `cache.cleanup()` now, and again every `intervalMs` (#66).
+ *
+ * Mirrors `startMetricsSummary` (`metrics.ts`) on purpose - same shape, same reason the timer is
+ * `unref`'d: a pending sweep must never be why the process outlives `app.quit()`.
+ *
+ * The real `TranslationCache.cleanup()` never throws - every sqlite error it can hit is caught
+ * internally and turned into `#disable` (see the class doc's "Invariant 4" section), which is
+ * itself a serious outcome: it takes the *entire* cache out of service for the rest of the
+ * session, turning every remaining frame's lookup into a full 300-500ms translate round trip
+ * instead of a 0ms hit. `TranslationCache` already logs that transition itself, tagged
+ * `phase: 'cleanup'` when it happens here, so this function does not repeat it - only the
+ * successful count is this function's own line to log.
+ *
+ * The `try` below exists for a caller this function cannot see: `cache` is typed structurally
+ * (`Pick<TranslationCache, 'cleanup'>`), the same defensive stance `text-pipeline.ts` takes with
+ * `PipelineTranslator`, so a future substitute that *does* throw must still cost the cache for
+ * this sweep, never the app - and, at startup, never `bootstrap` itself.
+ */
+export function startCacheCleanup(
+  cache: Pick<TranslationCache, 'cleanup'>,
+  logger: Logger,
+  intervalMs = DEFAULT_CLEANUP_INTERVAL_MS,
+): () => void {
+  const log = logger.child('cache');
+
+  const sweep = (): void => {
+    try {
+      const removed = cache.cleanup();
+      log.info('cache cleanup swept expired rows', { removed });
+    } catch (err) {
+      // Not reachable through the real TranslationCache today - see the function doc. Kept as a
+      // net rather than trusted away, because `cache` is a structural type.
+      log.error('cache cleanup threw; continuing without this sweep', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  sweep();
+  const timer = setInterval(sweep, intervalMs);
+  timer.unref?.();
+
+  return () => {
+    clearInterval(timer);
+  };
+}

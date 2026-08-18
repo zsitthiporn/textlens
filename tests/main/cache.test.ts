@@ -25,7 +25,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { LogFields, Logger } from '../../src/main/services/logger.js';
 import {
+  DEFAULT_CLEANUP_INTERVAL_MS,
   TranslationCache,
+  startCacheCleanup,
   type CacheLookup,
   type CacheWrite,
 } from '../../src/main/services/cache.js';
@@ -360,5 +362,152 @@ describe('TranslationCache: corrupt or unopenable database (invariant 4)', () =>
     cache.set('a', 'en', 'th', 'google', 'b');
     expect(cache.get('a', 'en', 'th', 'google')).toBe('b');
     cache.close();
+  });
+
+  it('a connection that goes bad mid-session during cleanup() specifically - not just open() - disables the cache', () => {
+    // The existing corrupt-file cases above all fail at open(). This is the other half the class
+    // doc promises ("a connection can go bad mid-session too") and the one #66's cleanup() call
+    // newly exercises in a way nothing did before: a healthy cache whose *cleanup* query is what
+    // hits the sqlite error.
+    const dbPath = tempDbPath();
+    const { logger, lines } = collectingLogger();
+    const cache = new TranslationCache(dbPath, { logger });
+    cache.set('alive', 'en', 'th', 'google', 'มีชีวิต');
+    expect(cache.status).toBe('ready');
+
+    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(() => {
+      throw new Error('simulated sqlite failure mid-session');
+    });
+    try {
+      // The class's own contract (see cache.ts's Invariant 4 doc): this must not throw to the
+      // caller even though the query underneath it just did.
+      expect(() => cache.cleanup()).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(cache.status).toBe('disabled');
+    expect(lines.some((l) => l.level === 'error' && l.fields?.['phase'] === 'cleanup')).toBe(true);
+    // Reads keep working - as a clean miss, not a second failure.
+    expect(cache.get('alive', 'en', 'th', 'google')).toBeUndefined();
+    cache.close();
+  });
+});
+
+describe('startCacheCleanup (#66)', () => {
+  it('deletes rows past TTL from disk at startup, and logs how many it removed', () => {
+    // Physical proof, not the read-side filter `getBatch` already relies on: this is the thing
+    // #66 exists because nothing was doing - actual DELETE, actual bytes freed.
+    let now = 1_000_000;
+    const dbPath = tempDbPath();
+    const seed = new TranslationCache(dbPath, { ttlMs: 1_000, now: () => now });
+    seed.set('stale one', 'en', 'th', 'google', 'เก่า1');
+    seed.set('stale two', 'en', 'th', 'google', 'เก่า2');
+    now += 2_000; // past the 1000ms TTL for the two entries above
+    seed.set('fresh', 'en', 'th', 'google', 'ใหม่');
+    seed.close();
+
+    const cache = new TranslationCache(dbPath, { now: () => now });
+    const { logger, lines } = collectingLogger();
+    const stop = startCacheCleanup(cache, logger, 60_000);
+    stop();
+    cache.close();
+
+    const swept = lines.find((l) => l.message === 'cache cleanup swept expired rows');
+    expect(swept?.fields?.['removed']).toBe(2);
+
+    const check = new DatabaseSync(dbPath);
+    try {
+      const row = check.prepare('SELECT COUNT(*) as n FROM cache_entries').get() as
+        | Record<string, unknown>
+        | undefined;
+      expect(row?.['n']).toBe(1);
+    } finally {
+      check.close();
+    }
+  });
+
+  it('sweeps immediately, again every intervalMs, and stops when told (mirrors startMetricsSummary)', () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const fakeCache = { cleanup: (): number => { calls += 1; return 0; } };
+      const { logger, lines } = collectingLogger();
+
+      const stop = startCacheCleanup(fakeCache, logger, 1_000);
+      // Startup call happens synchronously, before any timer fires.
+      expect(calls).toBe(1);
+      expect(lines).toHaveLength(1);
+
+      vi.advanceTimersByTime(999);
+      expect(calls).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(calls).toBe(2);
+
+      vi.advanceTimersByTime(2_000);
+      expect(calls).toBe(4);
+
+      stop();
+      vi.advanceTimersByTime(10_000);
+      expect(calls).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a cache whose cleanup() disables mid-sweep does not crash the caller, and is logged distinctly from a clean sweep', () => {
+    // The trap the issue names: cleanup() failing must cost the cache, never startup. The real
+    // TranslationCache never throws (previous describe block), but this proves the wiring itself
+    // survives one that does - the same defensive stance text-pipeline.ts takes with
+    // PipelineTranslator, because `cache` here is a structural type, not a guarantee.
+    const { logger, lines } = collectingLogger();
+    const throwingCache = {
+      cleanup: (): number => {
+        throw new Error('boom');
+      },
+    };
+
+    let stop: (() => void) | undefined;
+    expect(() => {
+      stop = startCacheCleanup(throwingCache, logger, 1_000);
+    }).not.toThrow();
+
+    expect(lines.some((l) => l.level === 'error' && l.message.includes('threw'))).toBe(true);
+    // And a sweep that did *not* throw is never confused with one that did.
+    expect(lines.some((l) => l.message === 'cache cleanup swept expired rows')).toBe(false);
+
+    stop?.();
+  });
+
+  it('a mid-session cleanup-phase disable is logged by the cache itself, tagged by phase, and the sweep still logs cleanly', () => {
+    const dbPath = tempDbPath();
+    const { logger, lines } = collectingLogger();
+    const cache = new TranslationCache(dbPath, { logger });
+    cache.set('alive', 'en', 'th', 'google', 'มีชีวิต');
+
+    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(() => {
+      throw new Error('simulated sqlite failure mid-session');
+    });
+    let stop: (() => void) | undefined;
+    try {
+      stop = startCacheCleanup(cache, logger, 60_000);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(cache.status).toBe('disabled');
+    // TranslationCache's own #disable() logged this, tagged by which phase disabled it - proof
+    // that a cleanup-triggered disable is distinguishable in the log from an open/read/write one.
+    expect(lines.some((l) => l.level === 'error' && l.fields?.['phase'] === 'cleanup')).toBe(true);
+    // The sweep function itself did not treat the disable as a throw: `cleanup()` returned 0
+    // cleanly, so its own line still fired.
+    expect(lines.some((l) => l.message === 'cache cleanup swept expired rows')).toBe(true);
+
+    stop?.();
+    cache.close();
+  });
+
+  it('defaults to a 6-hour interval', () => {
+    expect(DEFAULT_CLEANUP_INTERVAL_MS).toBe(6 * 60 * 60 * 1000);
   });
 });
