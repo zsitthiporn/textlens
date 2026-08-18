@@ -2,7 +2,7 @@
 
 **แปลข้อความบนหน้าจอเป็นภาษาไทยแบบเรียลไทม์** — เลือกพื้นที่บนจอ แล้วคำแปลจะลอยขึ้นมาใต้ข้อความต้นฉบับ
 
-> 🚧 **สถานะ: กำลังวางราง** — scaffold ของ Electron และ .NET sidecar ขึ้นแล้ว ยังไม่มี pipeline ที่ใช้งานได้ ดู [Roadmap](#roadmap)
+> Pipeline วิ่งได้ครบเส้น (capture → OCR → แปล → overlay) มี installer ให้ build เอง — งานที่เหลือและสถานะล่าสุดดูที่ `gh issue list`
 
 ---
 
@@ -13,7 +13,7 @@
 คำแปลผูกกับตำแหน่งของข้อความเดิม เพื่อให้เทียบได้ว่า**ประโยคไหนแปลออกมาได้อะไร** ไม่ใช่แค่อ่านคำแปลรวมๆ
 
 **Use case หลัก**: subtitle / เกม / วิดีโอ ที่เนื้อหาเปลี่ยนตลอด
-**Use case รอง**: อ่านเอกสาร / เว็บ / UI โปรแกรมที่เนื้อหานิ่ง (Snapshot mode)
+**Use case รอง**: อ่านเอกสาร / เว็บ / UI โปรแกรมที่เนื้อหานิ่ง (Translate once mode)
 
 ---
 
@@ -35,7 +35,7 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 ```
 
 - **Electron** ได้ Chromium มาด้วย → ได้ ICU Thai line breaking ฟรี ซึ่งจำเป็นเพราะภาษาไทยไม่เว้นวรรคระหว่างคำ และได้ transparent click-through overlay ที่พิสูจน์แล้วว่าทำงานได้
-- **.NET sidecar** ได้ Windows Graphics Capture (เคารพ exclude-from-capture → กัน overlay อ่านตัวเอง — *รอยืนยันใน spike S2*) และ Windows.Media.Ocr (ไม่ต้อง bundle OCR model)
+- **.NET sidecar** ได้ Windows Graphics Capture (เคารพ exclude-from-capture → กัน overlay อ่านตัวเอง — ยืนยันแล้วใน [spike S2](docs/spikes/2026-08-16-s2-content-protection.md)) และ Windows.Media.Ocr (ไม่ต้อง bundle OCR model)
 
 รายละเอียดเต็มอยู่ใน [Architecture Design](docs/superpowers/specs/2026-08-15-textlens-design.md)
 
@@ -48,40 +48,33 @@ Textlens แบ่งเป็นสอง process ตามหลัก **"pixe
 | [feature-spec.md](docs/feature-spec.md) | Feature ทั้งหมดพร้อม priority (P0/P1/P2), MVP scope, improvement list |
 | [architecture design](docs/superpowers/specs/2026-08-15-textlens-design.md) | Component boundary, IPC contract, data flow, latency budget, error handling, testing |
 | [reference-analysis.md](docs/reference-analysis.md) | วิเคราะห์ open-source project ที่ทำเรื่องเดียวกัน — feature ที่แกะมา และจุดที่เราทำต่างออกไป |
+| [spike S1](docs/spikes/2026-08-15-s1-ocr-engine.md) | วัด Windows.Media.Ocr เทียบ PaddleOCR — เหตุผลที่เลือก OCR engine ตัวนี้ และตัวเลข latency ที่ budget อ้างถึง |
+| [spike S2](docs/spikes/2026-08-16-s2-content-protection.md) | ยืนยัน exclude-from-capture ทำงานจริง — และที่มาของกฎ "capture loop ต้องเป็น interval-driven" |
 
 ---
 
-## Roadmap
+## การใช้งาน
 
-| ระยะ | สถานะ |
-|---|---|
-| วิเคราะห์ reference project | ✅ เสร็จ |
-| Feature spec | ✅ เสร็จ |
-| Architecture design | ✅ เสร็จ |
-| [Spike S1](docs/spikes/2026-08-15-s1-ocr-engine.md) — Windows.Media.Ocr อ่านข้อความในเกมได้ดีพอไหม | ✅ **ผ่าน** — เร็วกว่า PaddleOCR 6 เท่า แม่นกว่าด้วย |
-| Spike S2 — ยืนยัน exclude-from-capture ทำงานจริง | ⬜ ถัดไป |
-| Spike S3 — Google endpoint ทนโหลด subtitle ไหม | ⬜ |
-| Implementation plan | ⬜ |
-| MVP | ⬜ |
-
-**MVP คือเส้นทางนี้วิ่งได้ครบ:**
+เส้นทางนี้วิ่งได้ครบแล้ว:
 
 ```
 เปิดโปรแกรม → tray ขึ้น
   → hotkey เลือก region: เลือกจอ + ลากกรอบคลุมช่อง subtitle
   → hotkey เปิด auto mode
   → subtitle เปลี่ยน → กล่องคำแปลไทยโผล่ใต้ข้อความอังกฤษ ไม่กระพริบ
-  → hotkey snapshot: แปลครั้งเดียวค้างไว้
+  → hotkey Translate once: แปลครั้งเดียวค้างไว้จน dismiss
   → เปลี่ยน setting มีผลทันที
   → engine ล่ม → เห็นข้อความบอก ไม่ใช่เงียบ
 ```
+
+งานที่เหลือและ backlog ดูที่ `gh issue list`
 
 ---
 
 ## Requirements
 
 - **Windows 10/11** (โปรเจกต์นี้ Windows-only โดยตั้งใจ เพื่อใช้ native API ที่ดีกว่า)
-- Node.js >= 20, npm >= 10
+- Node.js >= 22.12.0, npm >= 10
 - .NET SDK 10 (สำหรับ build sidecar)
 
 ---
@@ -94,9 +87,10 @@ use case หลักคือเกม borderless fullscreen ที่สลั
 | ค่าเริ่มต้น | ทำอะไร |
 |---|---|
 | `Control+Alt+A` | เปิด/ปิด auto mode |
-| `Control+Alt+S` | snapshot — แปลครั้งเดียวแล้วค้างไว้ |
+| `Control+Alt+S` | Translate once — แปลครั้งเดียวแล้วค้างไว้จน dismiss (config key ยังชื่อ `snapshot`) |
 | `Control+Alt+R` | เลือก region ใหม่ |
 | `Control+Alt+H` | ซ่อน/แสดง overlay (**ไม่ใช่** การหยุดจับภาพ) |
+| `Control+Alt+D` | dismiss — เคลียร์คำแปลที่ค้างบนจอ โดยไม่เปลี่ยนโหมด (ใช้ได้ทั้ง Auto และ Translate once) |
 
 เปลี่ยนได้ที่ `%APPDATA%\textlens\config.json` ใต้คีย์ `hotkeys` — ใส่ `null` เพื่อปิด hotkey นั้น
 เช่นเมื่อชนกับโปรแกรมอื่น:
@@ -131,6 +125,8 @@ npm run dev
 | คำสั่ง | ทำอะไร |
 |---|---|
 | `npm run build` | compile ทั้งหมด — `tsc` ทำ `src/main` + `src/preload` → `dist/`, Vite ทำ `src/renderer` → `dist/renderer/` |
+| `npm run build:sidecar` | publish `.NET` sidecar เป็น NativeAOT exe เดี่ยว (`scripts/build-sidecar.ps1`) — **rebuild ใหม่ทุกครั้งโดยตั้งใจ ไม่มี reuse-if-present** เพราะ exe เก่าพูดคนละ protocol กับ Node แล้วยังรันขึ้นเหมือนสำเร็จ แค่ไม่มีเฟรมส่งมาเลย |
+| `npm run package` | `build` + `build:sidecar` แล้วให้ `electron-builder` ทำ installer (`--win`) |
 | `npm run dev` | build แล้วเปิดแอป (ยังไม่มี HMR — renderer dev server จะมาทีหลัง) |
 | `npm start` | เปิดแอปจาก `dist/` ที่ build ไว้แล้ว |
 | `npm test` | unit test ด้วย vitest (`npm run test:watch` สำหรับ watch mode) |
