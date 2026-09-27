@@ -219,4 +219,53 @@ describe('startMetricsSummary', () => {
       vi.useRealTimers();
     }
   });
+
+  it('logs nothing for a window with no new samples, even right after a summary was logged (#76)', () => {
+    vi.useFakeTimers();
+    try {
+      const recorder = new MetricsRecorder();
+      const { logger, lines } = collectingLogger();
+      const stop = startMetricsSummary(recorder, logger, 1_000);
+
+      recorder.record('capture', 5);
+      vi.advanceTimersByTime(1_000);
+      expect(lines).toHaveLength(1);
+
+      // Window 2 gets no new samples. Before #76 was fixed this repeated window 1's line
+      // byte-for-byte, which is exactly what was observed live on an idle app.
+      vi.advanceTimersByTime(1_000);
+      expect(lines).toHaveLength(1);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports only the current window, not the session cumulative total (#76)', () => {
+    vi.useFakeTimers();
+    try {
+      const recorder = new MetricsRecorder();
+      const { logger, lines } = collectingLogger();
+      const stop = startMetricsSummary(recorder, logger, 1_000);
+
+      // Window 1: two ocr samples.
+      recorder.record('ocr', 50);
+      recorder.record('ocr', 60);
+      vi.advanceTimersByTime(1_000);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]?.fields?.['metrics']).toMatchObject([{ stage: 'ocr', count: 2 }]);
+
+      // Window 2: one new sample. If the recorder still carried window 1's samples this
+      // would report count: 3 with p50 60 (sorted [50, 60, 100]) instead of count: 1, p50 100.
+      recorder.record('ocr', 100);
+      vi.advanceTimersByTime(1_000);
+      expect(lines).toHaveLength(2);
+      expect(lines[1]?.fields?.['metrics']).toMatchObject([{ stage: 'ocr', count: 1, p50: 100 }]);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
