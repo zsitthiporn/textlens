@@ -1,5 +1,5 @@
 /**
- * Translation cache (issue #21 / M4-04, features K1 + K2).
+ * Translation cache (issue #21 / M4-04, features K1 + K2; key normalization narrowed by #87).
  *
  * A cache hit costs 0ms against a 300-500ms translate budget (design doc latency table), so this
  * sits directly in the hot path every frame that reaches the translate stage.
@@ -7,24 +7,43 @@
  * ## K2 - normalized cache key
  *
  * The reference project hashed raw OCR text, so a single wobbled character - `o` read as `O`, a
- * dropped space - missed the cache entirely even though the text meant the same thing. K2 hashes
- * `normalizeForComparison(text)` instead: NFC, lower case, punctuation/symbols stripped, whitespace
- * collapsed. `"Hello World"`, `"hello world!"` and `"Hello  World"` all hash to the same key. This
- * buys most of the benefit of the reference's fuzzy trigram cache (K4) without building the
- * trigram machinery they wrote and then switched off - see feature-spec.md 1.5.
+ * dropped space - missed the cache entirely even though the text meant the same thing. K2 hashes a
+ * normalized form of the text instead of the raw string, so `"Hello World"`, `"hello world"` and
+ * `"Hello  World"` all hash to the same key.
  *
- * `normalizeForComparison` is imported from `recent-outputs.ts` rather than re-implemented here.
- * That module already owns the answer to "is this the same string" for the feedback-loop dedup
- * layer, and `dedup.ts` already imports it for the same reason (matching output display against
- * recently-seen text). The cache is asking a related question - "have I already paid to translate
- * this" - with the same OCR-wobble tolerance, so reusing it means both stages agree on what counts
- * as "the same text" and a future tweak to the normalization rules cannot silently drift between
- * them. The K2 acceptance cases below are pinned as literal tests here, so if that assumption ever
- * stops holding, this suite - not just recent-outputs.test.ts - will say so.
+ * K2 originally reused `normalizeForComparison` from `recent-outputs.ts` wholesale for that
+ * normalization, including its `\p{P}\p{S}` strip - deleting *every* punctuation and symbol
+ * character, not just the OCR-wobbly ones. #87 found what that bought on top of the win above:
+ * `"Temperature -10"` collided with `"Temperature 10"`, `"Discount 50%"` with `"Discount 50"`,
+ * `"Cost: $5"` with `"Cost 5"`, `"Level +3"` with `"Level 3"`, and `"You are leaving."` with
+ * `"You are leaving?"` - pairs where the stripped character was not OCR noise, it was the entire
+ * difference in meaning. Whichever text reached the translator first silently served its
+ * translation to the other for up to the full 14-day TTL, with nothing in any log to say so.
  *
- * Text whose normalized form is empty (bare punctuation, whitespace) is never stored and never
- * looked up, for the same reason `RecentOutputs.remember` skips it: an empty key would make every
- * other empty-normalizing string collide with whatever was stored first.
+ * So the cache key now normalizes with its own function, `normalizeForCacheKey` (below): NFC,
+ * case-fold, collapse/trim whitespace - and nothing else. Signs, currency symbols, and terminal
+ * punctuation all survive into the key. The trade the user made in #87: apostrophes and other
+ * punctuation that OCR reads inconsistently frame to frame (`don't` read as `dont`) will miss the
+ * cache again, the same way the reference project's raw-text hash did. Accepted, because a cache
+ * miss costs one extra translate round trip and a silent wrong answer costs up to 14 days.
+ *
+ * `dedup.ts`, `recent-outputs.ts` and the rest of `text-pipeline.ts` are unaffected by this - they
+ * still key on `normalizeForComparison`, where OCR-wobble tolerance on punctuation is still the
+ * right call for that question (matching our own displayed text against a later noisy re-read of
+ * it, not distinguishing two different source meanings). The two normalizers are intentionally
+ * different functions with different jobs now; do not reunify them without re-reading #87.
+ *
+ * Text whose *cache-key* normalized form is empty - only whitespace, once trimmed and collapsed -
+ * is never stored and never looked up, for the same reason `RecentOutputs.remember` skips its own
+ * empty-normalizing strings: an empty key would make every other empty-normalizing string collide
+ * with whatever was stored first. Note this is narrower than before: bare punctuation such as
+ * `"!!!"` no longer normalizes to empty here - punctuation is exactly what this key now keeps, so
+ * `"!!!"` and `"???"` get their own (distinct) cache entries rather than colliding with nothing.
+ *
+ * Rows written under the old (pre-#87) key scheme do not error and are not migrated - they simply
+ * stop matching text whose normalized form used to strip something this function now keeps, and
+ * age out via TTL + #66's sweep like any other stale row. A row for text with no punctuation or
+ * symbols to strip hashes identically under both schemes and keeps hitting.
  *
  * ## Driver: node:sqlite
  *
@@ -56,7 +75,6 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { nullLogger, type Logger } from './logger.js';
-import { normalizeForComparison } from './recent-outputs.js';
 
 export interface CacheLookup {
   readonly text: string;
@@ -92,7 +110,18 @@ interface CacheRow {
 }
 
 /**
- * `sha256(normalizeForComparison(text))` combined with the three fields that make a translation
+ * The cache key's own normalization (#87) - deliberately narrower than `normalizeForComparison`
+ * (`recent-outputs.ts`). NFC, case-fold, whitespace runs collapsed and trimmed. Nothing else is
+ * stripped: punctuation, currency symbols, and signs all survive, because for a cache key they
+ * are frequently the entire difference in meaning (`"-10"` vs `"10"`, `"?"` vs `"."`) - see the
+ * module doc comment for the collision cases this was built to stop hitting.
+ */
+export function normalizeForCacheKey(text: string): string {
+  return text.normalize('NFC').toLowerCase().replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * `sha256(normalizeForCacheKey(text))` combined with the three fields that make a translation
  * specific to a context (K1: "src + tgt + engineName"). `undefined` when the text normalizes to
  * nothing - see the module doc comment.
  */
@@ -102,7 +131,7 @@ function computeCacheKey(
   tgtLang: string,
   engineName: string,
 ): string | undefined {
-  const normalized = normalizeForComparison(text);
+  const normalized = normalizeForCacheKey(text);
   if (normalized.length === 0) return undefined;
   const hash = createHash('sha256').update(normalized).digest('hex');
   return `${hash}|${srcLang}|${tgtLang}|${engineName}`;
