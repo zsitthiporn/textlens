@@ -123,15 +123,24 @@ public sealed class ChangeDetector
         get => threshold;
         set
         {
-            if (double.IsNaN(value) || value < 0 || value > 1)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(value),
-                    value,
-                    "diffThreshold is a fraction of pixels and must be within 0..1");
-            }
-
+            ValidateThreshold(value);
             threshold = value;
+        }
+    }
+
+    /// <summary>
+    /// The check <see cref="Threshold"/> applies, on its own, so a whole <c>configure</c>
+    /// payload can be validated before any of it is assigned.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Outside 0..1, or not a number.</exception>
+    public static void ValidateThreshold(double value)
+    {
+        if (double.IsNaN(value) || value < 0 || value > 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(value),
+                value,
+                "diffThreshold is a fraction of pixels and must be within 0..1");
         }
     }
 

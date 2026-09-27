@@ -43,6 +43,13 @@ public sealed class OcrService : IRecognizer, IDisposable
 
     private readonly OcrEngine engine;
 
+    // Held for the whole of Recognize and by Dispose. Dispose closes the bitmap that
+    // RecognizeAsync reads, so without this a Dispose from the stdin thread (a configure
+    // that swaps the recognizer, or shutdown) could free it under a recognition still
+    // running on a capture tick. Uncontended in practice: callers never overlap
+    // (single-threaded by contract, above), so the only other taker is Dispose.
+    private readonly object gate = new();
+
     private SoftwareBitmap? bitmap;
     private int bitmapWidth;
     private int bitmapHeight;
@@ -113,6 +120,14 @@ public sealed class OcrService : IRecognizer, IDisposable
     /// there is no offset to add and no scale arithmetic anywhere (invariants 1 and 3).
     /// </returns>
     public WireLine[] Recognize(ReadOnlySpan<byte> bgra, int width, int height)
+    {
+        lock (gate)
+        {
+            return RecognizeLocked(bgra, width, height);
+        }
+    }
+
+    private WireLine[] RecognizeLocked(ReadOnlySpan<byte> bgra, int width, int height)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -304,13 +319,17 @@ public sealed class OcrService : IRecognizer, IDisposable
 
     public void Dispose()
     {
-        if (disposed)
+        // Waits out a recognition in progress; see `gate`.
+        lock (gate)
         {
-            return;
-        }
+            if (disposed)
+            {
+                return;
+            }
 
-        disposed = true;
-        bitmap?.Dispose();
-        bitmap = null;
+            disposed = true;
+            bitmap?.Dispose();
+            bitmap = null;
+        }
     }
 }
