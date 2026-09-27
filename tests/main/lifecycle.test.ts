@@ -51,6 +51,11 @@ const harness = vi.hoisted(() => {
       listeners.set(event, registered);
       return app;
     },
+    // #86. Always the winner here: every test in this file exercises the bootstrap/shutdown
+    // paths that only run once the lock is held, and none of them is about the lock itself -
+    // that would need its own harness (a fresh `false` per import), which is out of scope for
+    // what this file is testing. `true` keeps every existing test's assumptions unchanged.
+    requestSingleInstanceLock: () => true,
     whenReady: () => ready,
     quit: () => {
       quitCalls += 1;
