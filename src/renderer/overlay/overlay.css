@@ -197,8 +197,10 @@ body {
   pointer-events: none;
 }
 
-/* Added by `setText`, after a forced reflow so that re-adding it restarts the fade rather than
-   being a no-op to the transition engine. */
+/* Removed by `setText` and re-added by `commitFade`, from the *next* write-only phase of
+   `renderEntries` (#81 F2) - `layout.ts`'s own forced reflow, already paid for by the measurement
+   pass, sits between the two writes so re-adding the class restarts the fade instead of being a
+   same-task no-op to the transition engine. */
 .box-out.fading {
   opacity: 0;
   transition: opacity var(--textlens-fade, 120ms) linear;

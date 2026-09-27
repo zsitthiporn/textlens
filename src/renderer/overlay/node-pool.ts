@@ -69,6 +69,18 @@ export interface PooledBox {
    *             measurement would return the taller of the two texts.
    */
   setText(text: string, fade: boolean): void;
+  /**
+   * Restart the crossfade `setText(text, true)` asked for, if any (issue #81 F2).
+   *
+   * Optional, and called - if present - once per box from the *second* write-only phase of
+   * {@link renderEntries}, after the single reflow that phase's read pass already forces for
+   * every box. `setText` itself must not read layout geometry to restart a CSS transition: doing
+   * so inside the first write-only phase would force one reflow per crossfading box, exactly the
+   * layout thrashing this module's three-phase split exists to prevent. A fake `PooledBox` that
+   * has no transition to restart, such as the ones in `tests/main/overlay/fakes.ts`, is free to
+   * omit this entirely.
+   */
+  commitFade?(): void;
   /** Carries `lang` (which drives Thai line breaking, H3) and `data-origin`. */
   setAttribute(name: string, value: string): void;
   getBoundingClientRect(): { readonly width: number; readonly height: number };

@@ -11,6 +11,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { clampToWindow, normalizeDrag, physicalSize } from '../../src/renderer/region-picker/drag.js';
+// #81 F6: read-only. `coordinates.ts` is main-process code but has no `electron` value import -
+// only `import type { Rect }` - so it is safe to load under this file's plain-node environment.
+import { toPhysicalRegion } from '../../src/main/utils/coordinates.js';
 
 describe('normalizeDrag', () => {
   it('produces the rectangle for a left-to-right, top-to-bottom drag', () => {
@@ -95,8 +98,22 @@ describe('physicalSize', () => {
   });
 
   it('rounds outward, matching toPhysicalRegion', () => {
-    // The number shown during the drag should be the number the region ends up being, not one
-    // pixel less.
-    expect(physicalSize({ x: 0, y: 0, width: 80.4, height: 80.4 }, 1.25)).toEqual([101, 101]);
+    // The number shown during the drag should be the number the region ends up being - checked
+    // against the real converter rather than a hand-picked constant, so the two cannot drift
+    // apart silently without a test noticing (#81 F6).
+    //
+    // windowOrigin and display.bounds are both zero here on purpose, not for brevity: at a
+    // non-zero offset `toPhysicalRegion`'s floor(left)/ceil(right) split does not generally equal
+    // `physicalSize`'s single `ceil(width * scale)` - they agree only when the left edge lands on
+    // an integer physical px, as it does at the origin. That gap is a real, separate question
+    // about `drag.ts` and is out of scope here; this test is only about the outward-rounding
+    // claim the two already agree on.
+    const selection = { x: 0, y: 0, width: 80.4, height: 80.4 };
+    const windowOrigin = { x: 0, y: 0 };
+    const display = { bounds: { x: 0, y: 0 }, scaleFactor: 1.25 };
+
+    const [, , physicalWidth, physicalHeight] = toPhysicalRegion(selection, windowOrigin, display);
+    expect(physicalSize(selection, 1.25)).toEqual([physicalWidth, physicalHeight]);
+    expect([physicalWidth, physicalHeight]).toEqual([101, 101]);
   });
 });
