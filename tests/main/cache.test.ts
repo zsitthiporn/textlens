@@ -1,11 +1,15 @@
 /**
- * Issue #21 / M4-04, features K1 (translation cache) + K2 (normalized cache key).
+ * Issue #21 / M4-04, features K1 (translation cache) + K2 (normalized cache key). Key
+ * normalization narrowed by #87 - see the collision table in that issue and in cache.ts's module
+ * doc.
  *
  * Three things get more scrutiny than "does get return what set stored":
  *
- *   - K2 itself: `"Hello World"`, `"hello world!"` and `"Hello  World"` must resolve to the
- *     exact same cache entry, because that is the entire benefit this feature buys over the
- *     reference project's raw-text hash.
+ *   - K2 itself: `"Hello World"`, `"hello world"` and `"Hello  World"` must resolve to the exact
+ *     same cache entry, because that is the entire benefit this feature buys over the reference
+ *     project's raw-text hash. But (#87) `"Hello World"` and `"Hello World!"` must NOT - the
+ *     exclamation mark is meaning, not OCR noise, and folding it away is exactly what silently
+ *     served a 14-day-stale wrong translation in the issue's collision table.
  *   - "one query, not fifty": a batch read of many lookups is proved with a spy on the sqlite
  *     driver's own `StatementSync.prototype.all`, not by eyeballing the `IN (...)` clause in
  *     cache.ts. A prepared-statement-per-lookup implementation would fail this loudly.
@@ -16,6 +20,7 @@
  * TTL tests use an injected clock (`now: () => number`), a plain counter - nothing here sleeps.
  */
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,10 +32,12 @@ import type { LogFields, Logger } from '../../src/main/services/logger.js';
 import {
   DEFAULT_CLEANUP_INTERVAL_MS,
   TranslationCache,
+  normalizeForCacheKey,
   startCacheCleanup,
   type CacheLookup,
   type CacheWrite,
 } from '../../src/main/services/cache.js';
+import { normalizeForComparison } from '../../src/main/services/recent-outputs.js';
 
 function collectingLogger(): {
   logger: Logger;
@@ -86,18 +93,46 @@ describe('TranslationCache: basic read/write', () => {
   });
 });
 
+describe('normalizeForCacheKey (#87)', () => {
+  it('folds case', () => {
+    expect(normalizeForCacheKey('Hello World')).toBe('hello world');
+  });
+
+  it('collapses internal whitespace runs and trims leading/trailing whitespace', () => {
+    expect(normalizeForCacheKey('  Hello   World  ')).toBe('hello world');
+  });
+
+  it('is NFC-normalized: precomposed and decomposed forms of the same character match', () => {
+    const precomposed = 'café'; // é as a single code point
+    const decomposed = 'café'; // e + combining acute accent
+    expect(precomposed).not.toBe(decomposed); // sanity: genuinely different code unit sequences
+    expect(normalizeForCacheKey(precomposed)).toBe(normalizeForCacheKey(decomposed));
+    expect(normalizeForCacheKey(precomposed)).toBe('café');
+  });
+
+  it('keeps punctuation, signs, and currency symbols - unlike normalizeForComparison', () => {
+    expect(normalizeForCacheKey('Temperature -10')).toBe('temperature -10');
+    expect(normalizeForCacheKey('Discount 50%')).toBe('discount 50%');
+    expect(normalizeForCacheKey('Cost: $5')).toBe('cost: $5');
+    expect(normalizeForCacheKey('Level +3')).toBe('level +3');
+    expect(normalizeForCacheKey('You are leaving?')).toBe('you are leaving?');
+  });
+
+  it('whitespace-only text normalizes to the empty string', () => {
+    expect(normalizeForCacheKey('   ')).toBe('');
+  });
+
+  it('bare punctuation does NOT normalize to the empty string (unlike normalizeForComparison)', () => {
+    expect(normalizeForCacheKey('!!!')).toBe('!!!');
+    expect(normalizeForComparison('!!!')).toBe(''); // the old behaviour, for contrast
+  });
+});
+
 describe('TranslationCache: K2 normalized key', () => {
   it('case difference resolves to the same entry', () => {
     const cache = new TranslationCache(tempDbPath());
     cache.set('Hello World', 'en', 'th', 'google', 'สวัสดีชาวโลก');
     expect(cache.get('hello world', 'en', 'th', 'google')).toBe('สวัสดีชาวโลก');
-    cache.close();
-  });
-
-  it('a trailing exclamation mark resolves to the same entry', () => {
-    const cache = new TranslationCache(tempDbPath());
-    cache.set('Hello World', 'en', 'th', 'google', 'สวัสดีชาวโลก');
-    expect(cache.get('hello world!', 'en', 'th', 'google')).toBe('สวัสดีชาวโลก');
     cache.close();
   });
 
@@ -108,14 +143,22 @@ describe('TranslationCache: K2 normalized key', () => {
     cache.close();
   });
 
-  it('text that normalizes to nothing is never stored and never hits', () => {
-    // "!!!" and "???" both normalize (strip punctuation) to the empty string. If they shared
-    // a key the way two real strings should, one would silently return the other's
-    // translation - the same trap RecentOutputs.remember() already guards against.
+  it('an NFC/NFD variant of the same text resolves to the same entry', () => {
     const cache = new TranslationCache(tempDbPath());
-    cache.set('!!!', 'en', 'th', 'google', 'should never be stored');
-    expect(cache.get('???', 'en', 'th', 'google')).toBeUndefined();
-    expect(cache.get('!!!', 'en', 'th', 'google')).toBeUndefined();
+    cache.set('café', 'en', 'th', 'google', 'translation of café');
+    expect(cache.get('café', 'en', 'th', 'google')).toBe('translation of café');
+    cache.close();
+  });
+
+  it('whitespace-only text is never stored and never hits', () => {
+    // Only whitespace normalizes to empty under the #87 key (bare punctuation no longer does -
+    // see the next describe block). If two different whitespace-only strings shared a key the
+    // way two real strings should, one would silently return the other's translation - the same
+    // trap RecentOutputs.remember() already guards against.
+    const cache = new TranslationCache(tempDbPath());
+    cache.set('   ', 'en', 'th', 'google', 'should never be stored');
+    expect(cache.get('    ', 'en', 'th', 'google')).toBeUndefined();
+    expect(cache.get('   ', 'en', 'th', 'google')).toBeUndefined();
     cache.close();
   });
 
@@ -136,6 +179,111 @@ describe('TranslationCache: K2 normalized key', () => {
 
     expect(cache.get('Hello', 'en', 'th', 'google')).toBe('สวัสดี (google)');
     expect(cache.get('Hello', 'en', 'th', 'deepl')).toBe('สวัสดี (deepl)');
+    cache.close();
+  });
+});
+
+describe('TranslationCache: punctuation and signs are meaningful, not noise (#87)', () => {
+  // The collision table from the issue, run for real against this cache. Each pair used to
+  // resolve to the same entry under K2's old `normalizeForComparison`-based key; whichever text
+  // reached the translator first silently served its translation to the other for up to the
+  // full TTL. Now: set one, look up the other, and it must be a clean miss - and the original
+  // text must still resolve to its own translation, proving the lookup path itself still works.
+  it.each<[string, string]>([
+    ['Temperature -10', 'Temperature 10'],
+    ['Discount 50%', 'Discount 50'],
+    ['Cost: $5', 'Cost 5'],
+    ['Level +3', 'Level 3'],
+    ['You are leaving.', 'You are leaving?'],
+  ])('%j and %j do not share a cache entry', (a, b) => {
+    const cache = new TranslationCache(tempDbPath());
+    cache.set(a, 'en', 'th', 'google', `translation of ${a}`);
+
+    expect(cache.get(b, 'en', 'th', 'google')).toBeUndefined();
+    expect(cache.get(a, 'en', 'th', 'google')).toBe(`translation of ${a}`);
+    cache.close();
+  });
+
+  it('bare punctuation strings do not share a cache entry with each other', () => {
+    // Companion to the "whitespace-only" case above: now that punctuation is kept, "!!!" and
+    // "???" are two distinct (non-empty) cache keys, not two aliases for "nothing".
+    const cache = new TranslationCache(tempDbPath());
+    cache.set('!!!', 'en', 'th', 'google', 'translation of !!!');
+    expect(cache.get('???', 'en', 'th', 'google')).toBeUndefined();
+    expect(cache.get('!!!', 'en', 'th', 'google')).toBe('translation of !!!');
+    cache.close();
+  });
+});
+
+describe('TranslationCache: rows keyed the old (pre-#87) way are simply misses', () => {
+  /**
+   * Writes a row the way `TranslationCache` used to before #87 - `sha256(normalizeForComparison
+   * (text))|src|tgt|engine` - directly via `node:sqlite`, bypassing the class entirely. This is
+   * what an on-disk DB from before this change actually looks like.
+   */
+  function seedOldStyleRow(
+    dbPath: string,
+    text: string,
+    srcLang: string,
+    tgtLang: string,
+    engineName: string,
+    translated: string,
+  ): void {
+    const oldNormalized = normalizeForComparison(text);
+    const oldKey = `${createHash('sha256').update(oldNormalized).digest('hex')}|${srcLang}|${tgtLang}|${engineName}`;
+
+    const seed = new DatabaseSync(dbPath);
+    try {
+      seed.exec(
+        `CREATE TABLE IF NOT EXISTS cache_entries (
+          cache_key TEXT PRIMARY KEY,
+          translated TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        )`,
+      );
+      seed
+        .prepare(
+          `INSERT INTO cache_entries (cache_key, translated, created_at, expires_at)
+           VALUES (?, ?, 0, ?)`,
+        )
+        .run(oldKey, translated, Number.MAX_SAFE_INTEGER);
+    } finally {
+      seed.close();
+    }
+  }
+
+  it('a row seeded under the old punctuation-stripping key is not found, does not throw, and does not disable the cache', () => {
+    const dbPath = tempDbPath();
+    const text = 'Cost: $5'; // old key hashed "cost 5" (stripped); new key hashes "cost: $5"
+    seedOldStyleRow(dbPath, text, 'en', 'th', 'google', 'stale translation under the old key scheme');
+
+    const { logger, lines } = collectingLogger();
+    const cache = new TranslationCache(dbPath, { logger });
+
+    expect(() => cache.get(text, 'en', 'th', 'google')).not.toThrow();
+    expect(cache.get(text, 'en', 'th', 'google')).toBeUndefined();
+
+    // An ordinary miss, not a corruption/error path - the cache stays fully usable.
+    expect(cache.status).toBe('ready');
+    expect(lines.some((l) => l.level === 'error')).toBe(false);
+
+    // And it keeps working going forward: a fresh write/read round-trips under the new key.
+    cache.set(text, 'en', 'th', 'google', 'new translation under the new key scheme');
+    expect(cache.get(text, 'en', 'th', 'google')).toBe('new translation under the new key scheme');
+
+    cache.close();
+  });
+
+  it('a row for text with nothing to strip hashes identically under both schemes and keeps hitting', () => {
+    // The migration cost is narrower than "every old row is unreachable": normalizeForComparison
+    // and normalizeForCacheKey agree whenever there is no punctuation/symbol for the old function
+    // to strip. This is the boundary of what #87 actually breaks.
+    const dbPath = tempDbPath();
+    seedOldStyleRow(dbPath, 'Hello World', 'en', 'th', 'google', 'สวัสดีชาวโลก');
+
+    const cache = new TranslationCache(dbPath);
+    expect(cache.get('Hello World', 'en', 'th', 'google')).toBe('สวัสดีชาวโลก');
     cache.close();
   });
 });
