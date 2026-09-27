@@ -183,6 +183,13 @@ public sealed class AdaptiveTimer
     public static bool ShouldRebuild(int currentMs, int desiredMs)
         => Math.Abs(desiredMs - currentMs) >= RebuildThresholdMs;
 
+    /// <summary>
+    /// The check <see cref="IntervalActive"/> and <see cref="IntervalIdle"/> apply, on its
+    /// own, so a whole <c>configure</c> payload can be validated before any of it is assigned.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not positive.</exception>
+    public static void ValidateInterval(int value, string parameterName) => _ = Positive(value, parameterName);
+
     private ActivityLevel Classify()
     {
         if (acceleratedRemaining > 0)

@@ -100,9 +100,22 @@ public sealed class CaptureLoop : IDisposable
     // command a human just typed has to happen.
     private readonly object workGate = new();
 
+    // timer, timerIntervalMs, timerGeneration and disposed are written only while holding
+    // workGate. The timer in particular: Stop used to swap it out from the stdin thread
+    // while a tick's Reschedule could be calling Change on it from a threadpool thread.
     private Timer? timer;
     private int timerIntervalMs;
+
+    // Which timer a callback belongs to. Bumped by every Stop, and handed to each timer as
+    // its state, so a callback the pool delivers after its timer was retired — dispatched
+    // already, not yet at the lock — recognises itself as stale and does nothing.
+    // Timer.Dispose alone cannot give that guarantee: it stops future firings, but neither
+    // recalls a callback already queued nor waits for one that is running.
+    private long timerGeneration;
+
     private long seq;
+    private int ticksSkipped;
+    private int ticksCompleted;
     private bool disposed;
 
     /// <param name="initialSeq">
@@ -138,10 +151,10 @@ public sealed class CaptureLoop : IDisposable
     public bool IsRunning => timer is not null;
 
     /// <summary>Ticks that fired while the previous one was still running, and were dropped.</summary>
-    public int TicksSkipped { get; private set; }
+    public int TicksSkipped => Volatile.Read(ref ticksSkipped);
 
     /// <summary>Ticks that ran to completion.</summary>
-    public int TicksCompleted { get; private set; }
+    public int TicksCompleted => Volatile.Read(ref ticksCompleted);
 
     /// <summary>Times the timer's period was reprogrammed. Kept low by the 200ms deadband.</summary>
     public int TimerRebuilds { get; private set; }
@@ -164,38 +177,70 @@ public sealed class CaptureLoop : IDisposable
     /// </summary>
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (timer is not null)
+        lock (workGate)
         {
-            return;
-        }
+            ObjectDisposedException.ThrowIf(disposed, this);
 
-        timerIntervalMs = schedule.CurrentIntervalMs;
-        // Periodic rather than one-shot-per-tick so that the "do not rebuild for a small
-        // change" rule has something to not rebuild. The overlap gate is what makes a
-        // periodic timer safe when a tick runs long.
-        timer = new Timer(_ => Tick(), null, timerIntervalMs, timerIntervalMs);
+            if (timer is not null)
+            {
+                return;
+            }
+
+            timerIntervalMs = schedule.CurrentIntervalMs;
+            // Periodic rather than one-shot-per-tick so that the "do not rebuild for a small
+            // change" rule has something to not rebuild. The overlap gate is what makes a
+            // periodic timer safe when a tick runs long.
+            timer = new Timer(OnTimer, timerGeneration, timerIntervalMs, timerIntervalMs);
+        }
     }
 
     /// <summary>
-    /// Stops polling. The timer is disposed rather than merely paused, so a stopped
-    /// sidecar genuinely costs nothing — which is what the acceptance criterion measures
-    /// with a CPU reading.
+    /// Stops polling, and returns only once no tick is running and none can start.
+    ///
+    /// <para><b>A barrier, not a request.</b> That is what lets <c>ack stopped</c> — and a
+    /// <c>configure</c> that rebuilds the loop — promise that nothing from this loop follows
+    /// it on stdout, and what makes it safe to dispose the source and recognizer the moment
+    /// this returns. Before it was a barrier, the reviewer saw a <c>frame</c> land 72ms
+    /// after <c>ack stopped</c>, and a <c>configure</c> dispose a capture session that a
+    /// tick was still inside.</para>
+    ///
+    /// <para><b>Cost:</b> the calling thread (the stdin thread) waits for at most the
+    /// remainder of one in-flight tick — the same wait <see cref="Snapshot"/> has always
+    /// taken. A tick that never returns would hang this exactly as it hangs a snapshot.</para>
+    ///
+    /// <para>The timer is disposed rather than merely paused, so a stopped sidecar genuinely
+    /// costs nothing — which is what the acceptance criterion measures with a CPU reading.</para>
     /// </summary>
-    public void Stop()
-    {
-        var stopping = timer;
-        timer = null;
-        stopping?.Dispose();
-    }
+    public void Stop() => Halt(dispose: false);
 
     /// <summary>
     /// Picks up an interval that changed outside a tick — that is, a <c>configure</c>
     /// arriving while the loop is running. Without this the new interval would not take
     /// hold until the next tick, which at deep idle can be six seconds away.
     /// </summary>
-    public void ApplySchedule() => Reschedule(schedule.CurrentIntervalMs);
+    public void ApplySchedule()
+    {
+        lock (workGate)
+        {
+            Reschedule(schedule.CurrentIntervalMs);
+        }
+    }
+
+    /// <summary>
+    /// Throws unless every value a <c>configure</c> carries for the loop is usable.
+    ///
+    /// <para>Separate from <see cref="ApplyConfiguration"/> so the dispatcher can check a
+    /// payload <i>before</i> it opens a capture session or a recognizer for it: a
+    /// <c>configure</c> that is going to be refused should be refused before it has cost
+    /// anything or touched anything.</para>
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">A value outside its range.</exception>
+    public static void ValidateConfiguration(double diffThreshold, int intervalActive, int intervalIdle)
+    {
+        ChangeDetector.ValidateThreshold(diffThreshold);
+        AdaptiveTimer.ValidateInterval(intervalActive, nameof(intervalActive));
+        AdaptiveTimer.ValidateInterval(intervalIdle, nameof(intervalIdle));
+    }
 
     /// <summary>
     /// Applies a new region. Clears the diff baseline and the interval history, because
@@ -219,7 +264,13 @@ public sealed class CaptureLoop : IDisposable
     /// let a tick run against the new threshold but the old region, and
     /// <see cref="Retarget"/> in particular reallocates the diff baseline that a
     /// concurrent <c>Compare</c> is reading.</para>
+    ///
+    /// <para>And all-or-nothing: every value is checked before any is assigned. Assigning
+    /// as it went, a payload with a bad <c>intervalIdle</c> used to land its threshold and
+    /// <c>intervalActive</c> and then be reported as <c>CONFIGURE_FAILED</c> — refused,
+    /// and half in effect.</para>
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">A value outside its range; nothing was applied.</exception>
     public void ApplyConfiguration(
         Rect region,
         double diffThreshold,
@@ -227,6 +278,8 @@ public sealed class CaptureLoop : IDisposable
         int intervalIdle,
         bool debugFrameEnabled)
     {
+        ValidateConfiguration(diffThreshold, intervalActive, intervalIdle);
+
         lock (workGate)
         {
             detector.Threshold = diffThreshold;
@@ -244,8 +297,37 @@ public sealed class CaptureLoop : IDisposable
     /// <para>Public so tests can drive the loop deterministically instead of waiting on a
     /// real timer.</para>
     /// </summary>
-    /// <returns><c>false</c> when the tick was skipped because another was already running.</returns>
-    public bool Tick()
+    /// <returns>
+    /// <c>false</c> when the tick was skipped because another was already running, or the
+    /// loop has been disposed.
+    /// </returns>
+    public bool Tick() => RunTick(firedBy: null);
+
+    /// <summary>
+    /// The timer's callback. <paramref name="state"/> is the generation of the timer that
+    /// fired, so a callback outliving its timer can tell (see <see cref="timerGeneration"/>).
+    /// </summary>
+    private void OnTimer(object? state)
+    {
+        try
+        {
+            RunTick((long)state!);
+        }
+        catch (Exception ex)
+        {
+            // Last resort, and the only one needed: RunOnce already turns every capture,
+            // diff and OCR failure into an error event. What it cannot catch is `emit`
+            // itself, and an emit that throws means stdout is gone — disposed at shutdown,
+            // or a broken pipe because Node went away. There is nobody left on stdout to
+            // tell, and an exception escaping a threadpool callback ends the process with a
+            // crash code where the protocol promises exit 0. stderr is the diagnostics
+            // channel, and the one that remains.
+            ReportUnemittable(ex);
+        }
+    }
+
+    /// <param name="firedBy">The generation of the timer that fired, or <c>null</c> for a direct call.</param>
+    private bool RunTick(long? firedBy)
     {
         // The non-overlap gate. CompareExchange rather than a lock: a tick that arrives
         // while one is running must be *dropped*, and a lock would queue it instead —
@@ -253,7 +335,7 @@ public sealed class CaptureLoop : IDisposable
         // time they run.
         if (Interlocked.CompareExchange(ref ticking, 1, 0) != 0)
         {
-            TicksSkipped++;
+            Interlocked.Increment(ref ticksSkipped);
             return false;
         }
 
@@ -261,10 +343,19 @@ public sealed class CaptureLoop : IDisposable
         {
             lock (workGate)
             {
+                // Checked under the lock, because that is where Stop draws its line: a
+                // callback that gets here after Stop released workGate belongs to a timer
+                // that no longer exists, and running it would put an event on stdout after
+                // `ack stopped` — or read a source that configure has just disposed.
+                if (disposed || (firedBy is { } generation && generation != timerGeneration))
+                {
+                    return false;
+                }
+
                 RunOnce();
+                ticksCompleted++;
             }
 
-            TicksCompleted++;
             return true;
         }
         finally
@@ -507,14 +598,39 @@ public sealed class CaptureLoop : IDisposable
 
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";
 
-    public void Dispose()
+    private static void ReportUnemittable(Exception ex)
     {
-        if (disposed)
+        try
         {
-            return;
+            Console.Error.WriteLine($"WARN: a capture tick could not emit its event: {Describe(ex)}");
+        }
+        catch
+        {
+            // stderr is gone as well. Nothing is left to tell, and nothing to tell it with.
+        }
+    }
+
+    /// <summary>
+    /// The one place the timer is retired. Taking <see cref="workGate"/> is the drain — a
+    /// tick holds it from capture to emit, so acquiring it means the in-flight tick, if
+    /// any, has finished — and bumping the generation while still holding it is what turns
+    /// away the callbacks the pool has already been handed.
+    /// </summary>
+    private void Halt(bool dispose)
+    {
+        Timer? retired;
+
+        lock (workGate)
+        {
+            retired = timer;
+            timer = null;
+            timerGeneration++;
+            disposed |= dispose;
         }
 
-        disposed = true;
-        Stop();
+        retired?.Dispose();
     }
+
+    /// <summary>Stops the loop with the same barrier as <see cref="Stop"/>. Idempotent.</summary>
+    public void Dispose() => Halt(dispose: true);
 }

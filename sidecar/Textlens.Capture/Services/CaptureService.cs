@@ -128,6 +128,13 @@ public sealed class CaptureService : IRegionSource, IDisposable
 
         session = framePool.CreateCaptureSession(item);
 
+        // The cursor is not text, and left in (the default) it is in every frame the diff
+        // and OCR see: moving the mouse across the region reads as a change and wakes the
+        // pipeline for nothing, and a pointer resting on a glyph can garble it. Available
+        // from 19041, the sidecar's floor, so no version probe is needed; unlike the border
+        // property below, it raises no consent prompt.
+        session.IsCursorCaptureEnabled = false;
+
         // Deliberately NOT touching GraphicsCaptureSession.IsBorderRequired or
         // GraphicsCaptureAccess.RequestAccessAsync: on current Windows builds the
         // borderless path can raise a system consent dialog, and a consent dialog is a
@@ -155,45 +162,51 @@ public sealed class CaptureService : IRegionSource, IDisposable
     /// <exception cref="ArgumentException">The region does not fit the display.</exception>
     public CapturedRegion? CaptureRegion(Rect region)
     {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (framePool is null || monitor is null)
-        {
-            throw new InvalidOperationException("Open has not been called");
-        }
-
-        // Reset before draining, never after: a frame that arrives during the copy must
-        // leave the event set, or the next Wait blocks until the frame after that.
-        frameAvailable.Reset();
-
-        using var frame = framePool.TryGetNextFrame();
-        if (frame is null)
-        {
-            return null;
-        }
-
-        var stopwatch = Stopwatch.StartNew();
-
-        var surfaceSize = frame.ContentSize;
-        if (!CaptureGeometry.TryResolve(region, surfaceSize.Width, surfaceSize.Height, out var box, out var error))
-        {
-            throw new ArgumentException(error, nameof(region));
-        }
-
+        // The whole call holds the gate, not just the copy, and Dispose takes the same gate:
+        // the frame pool, the D3D context and the staging texture are all released there,
+        // and a capture that was between TryGetNextFrame and Unmap when that happened would
+        // be calling through freed native pointers — potentially an access violation, which
+        // is not an exception anything could catch. Uncontended in practice: the capture
+        // loop never overlaps its ticks, so the only other taker is Dispose.
         lock (gate)
         {
+            ObjectDisposedException.ThrowIf(disposed, this);
+
+            if (framePool is null || monitor is null)
+            {
+                throw new InvalidOperationException("Open has not been called");
+            }
+
+            // Reset before draining, never after: a frame that arrives during the copy must
+            // leave the event set, or the next Wait blocks until the frame after that.
+            frameAvailable.Reset();
+
+            using var frame = framePool.TryGetNextFrame();
+            if (frame is null)
+            {
+                return null;
+            }
+
+            var stopwatch = Stopwatch.StartNew();
+
+            var surfaceSize = frame.ContentSize;
+            if (!CaptureGeometry.TryResolve(region, surfaceSize.Width, surfaceSize.Height, out var box, out var error))
+            {
+                throw new ArgumentException(error, nameof(region));
+            }
+
             CopyToBuffer(frame, box);
+
+            stopwatch.Stop();
+
+            return new CapturedRegion(
+                buffer.AsMemory(0, box.ByteCount),
+                box.Width,
+                box.Height,
+                monitor.Info,
+                new Rect(box.X, box.Y, box.Width, box.Height),
+                stopwatch.Elapsed.Ticks / (TimeSpan.TicksPerMillisecond / 1000));
         }
-
-        stopwatch.Stop();
-
-        return new CapturedRegion(
-            buffer.AsMemory(0, box.ByteCount),
-            box.Width,
-            box.Height,
-            monitor.Info,
-            new Rect(box.X, box.Y, box.Width, box.Height),
-            stopwatch.Elapsed.Ticks / (TimeSpan.TicksPerMillisecond / 1000));
     }
 
     private unsafe void CopyToBuffer(Direct3D11CaptureFrame frame, CropBox box)
@@ -426,33 +439,37 @@ public sealed class CaptureService : IRegionSource, IDisposable
 
     public void Dispose()
     {
-        if (disposed)
+        // Waits out a capture in progress; see CaptureRegion for why that is not optional.
+        lock (gate)
         {
-            return;
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+
+            if (framePool is not null)
+            {
+                framePool.FrameArrived -= OnFrameArrived;
+            }
+
+            session?.Dispose();
+            framePool?.Dispose();
+            session = null;
+            framePool = null;
+            item = null;
+            winrtDevice = null;
+
+            NativeMethods.Release(stagingTexture);
+            NativeMethods.Release(d3dContext);
+            NativeMethods.Release(d3dDevice);
+            stagingTexture = IntPtr.Zero;
+            d3dContext = IntPtr.Zero;
+            d3dDevice = IntPtr.Zero;
+
+            frameAvailable.Dispose();
+            buffer = [];
         }
-
-        disposed = true;
-
-        if (framePool is not null)
-        {
-            framePool.FrameArrived -= OnFrameArrived;
-        }
-
-        session?.Dispose();
-        framePool?.Dispose();
-        session = null;
-        framePool = null;
-        item = null;
-        winrtDevice = null;
-
-        NativeMethods.Release(stagingTexture);
-        NativeMethods.Release(d3dContext);
-        NativeMethods.Release(d3dDevice);
-        stagingTexture = IntPtr.Zero;
-        d3dContext = IntPtr.Zero;
-        d3dDevice = IntPtr.Zero;
-
-        frameAvailable.Dispose();
-        buffer = [];
     }
 }

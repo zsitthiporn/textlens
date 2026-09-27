@@ -163,50 +163,88 @@ public sealed class Dispatcher : IDisposable
     /// case while the user drags a selection — keeps both. That is also what makes
     /// "configure while running takes effect without a restart" true rather than merely
     /// technically true.</para>
+    ///
+    /// <para><b>All or nothing.</b> <c>CONFIGURE_FAILED</c> means nothing changed: the
+    /// pipeline that was running keeps running, on its old settings. Everything that can
+    /// fail — the values, the new capture session, the new recognizer — is done before
+    /// anything is torn down. The old order disposed first and opened second, so an
+    /// uninstalled <c>ocrLanguage</c> or an unknown <c>monitorId</c> left a disposed
+    /// recognizer or source wired in; reverting the setting then acked <c>running</c> over
+    /// a pipeline that failed every tick until the sidecar restarted.</para>
     /// </summary>
     private void Configure(ConfigureCommand configure)
     {
         var wasRunning = State == SidecarState.Running;
 
+        // Phase 1 — everything that can fail. Nothing the running loop uses is touched here.
+        CaptureLoop.ValidateConfiguration(configure.DiffThreshold, configure.IntervalActive, configure.IntervalIdle);
+
         var monitorChanged = !string.Equals(openMonitorId, configure.MonitorId, StringComparison.OrdinalIgnoreCase);
         var languageChanged = !string.Equals(openLanguage, configure.OcrLanguage, StringComparison.OrdinalIgnoreCase);
 
-        // Tear the loop down FIRST, and only then the things it is holding.
-        //
-        // Order is the whole point. The loop owns a live timer whose callback captures
-        // `source` and `recognizer`; disposing either of those while the loop still exists
-        // leaves a timer firing against disposed objects, which is an ObjectDisposedException
-        // per tick — a stream of CAPTURE_FAILED at the old interval, from a loop nobody
-        // holds a reference to any more, until the GC happens to finalize its timer.
-        // Nondeterministic, unbounded, and interleaved with the new loop's events.
-        var carriedSeq = loop?.LastSeq ?? 0;
+        IRegionSource? newSource = null;
+        IRecognizer? newRecognizer = null;
+        IFrameEncoder? newEncoder = null;
+        try
+        {
+            if (monitorChanged)
+            {
+                newSource = host.OpenSource(configure.MonitorId);
+            }
 
+            if (languageChanged)
+            {
+                newRecognizer = host.CreateRecognizer(configure.OcrLanguage);
+            }
+
+            if (monitorChanged || languageChanged)
+            {
+                newEncoder = host.CreateEncoder();
+            }
+        }
+        catch
+        {
+            // Whatever did open is ours to close; nothing else was touched.
+            (newRecognizer as IDisposable)?.Dispose();
+            (newSource as IDisposable)?.Dispose();
+            throw;
+        }
+
+        // Phase 2 — commit. Nothing below is expected to throw.
         if (monitorChanged || languageChanged)
         {
-            loop?.Dispose();
-            loop = null;
+            // The loop goes FIRST, and only then the things it is holding — and "goes"
+            // means drained, not merely told to stop. Dispose returns once the tick in
+            // flight, if any, has finished and no later one can start, so the source and
+            // recognizer below are disposed with nobody inside them, and nothing the old
+            // loop emits can land after this configure's ack.
+            var retiring = loop;
+            retiring?.Dispose();
+
+            // Read after the drain, never before: read first, the in-flight tick took the
+            // next number after we had copied it, and the new loop handed out the same one
+            // again. The protocol says a gap in `seq` means an event was lost, which is why
+            // the counter carries over at all rather than restarting at 1.
+            var carriedSeq = retiring?.LastSeq ?? 0;
+
+            if (monitorChanged)
+            {
+                (source as IDisposable)?.Dispose();
+                source = newSource;
+                openMonitorId = configure.MonitorId;
+            }
+
+            if (languageChanged)
+            {
+                (recognizer as IDisposable)?.Dispose();
+                recognizer = newRecognizer;
+                openLanguage = configure.OcrLanguage;
+            }
+
+            loop = new CaptureLoop(source!, recognizer!, emit, encoder: newEncoder, initialSeq: carriedSeq);
         }
 
-        if (monitorChanged)
-        {
-            (source as IDisposable)?.Dispose();
-            source = host.OpenSource(configure.MonitorId);
-            openMonitorId = configure.MonitorId;
-        }
-
-        if (languageChanged)
-        {
-            (recognizer as IDisposable)?.Dispose();
-            recognizer = host.CreateRecognizer(configure.OcrLanguage);
-            openLanguage = configure.OcrLanguage;
-        }
-
-        // Resuming the counter rather than restarting it: the protocol says a gap in `seq`
-        // means an event was lost, so a reconfigure that reset it to 1 would be a false
-        // report of exactly that.
-        loop ??= new CaptureLoop(source!, recognizer!, emit, encoder: host.CreateEncoder(), initialSeq: carriedSeq);
-
-        loop.ApplyConfiguration(
+        loop!.ApplyConfiguration(
             configure.Region,
             configure.DiffThreshold,
             configure.IntervalActive,
@@ -252,6 +290,10 @@ public sealed class Dispatcher : IDisposable
     {
         // Deliberately not an error when nothing is running: `stop` means "be stopped",
         // and making Node track whether it already sent one buys nothing.
+        //
+        // Stop is a barrier (it waits out the tick in flight), so the ack below is the last
+        // thing on stdout until the next start. #60's "stop, then snapshot" relies on that:
+        // a tick landing after the snapshot would overwrite the frame the user asked to hold.
         loop?.Stop();
         State = loop is null ? SidecarState.Idle : SidecarState.Stopped;
         emit(new AckEvent { Cmd = CommandKind.Stop, State = State });
@@ -284,6 +326,11 @@ public sealed class Dispatcher : IDisposable
         }
 
         disposed = true;
+
+        // Drains the tick in flight before returning (CaptureLoop.Stop), which matters twice
+        // at shutdown: the source and recognizer below are released with nobody inside them,
+        // and Program disposes stdout only after this — so no tick can write to a closed
+        // stream and turn a clean exit 0 into a crash.
         loop?.Dispose();
         (recognizer as IDisposable)?.Dispose();
         (source as IDisposable)?.Dispose();
