@@ -100,6 +100,63 @@ export function toLayoutEntries(message: OverlayRenderMessage): LayoutEntry[] {
   }));
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isFinitePoint(value: unknown): value is { readonly x: number; readonly y: number } {
+  if (typeof value !== 'object' || value === null) return false;
+  const point = value as Record<string, unknown>;
+  return isFiniteNumber(point.x) && isFiniteNumber(point.y);
+}
+
+function isValidRenderEntry(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.text !== 'string' || typeof entry.sourceText !== 'string') return false;
+
+  const bbox = entry.bbox;
+  if (typeof bbox !== 'object' || bbox === null) return false;
+  const rect = bbox as Record<string, unknown>;
+  return (
+    isFiniteNumber(rect.x) && isFiniteNumber(rect.y) && isFiniteNumber(rect.width) && isFiniteNumber(rect.height)
+  );
+}
+
+/**
+ * Whether `message` has the shape {@link toLayoutEntries} needs, checked before anything is
+ * mutated (issue #81 F3, invariant 4).
+ *
+ * `draw()` calls this *before* `adopt()`, not the other way round. Without this a malformed
+ * payload that also carried a new epoch would swap the epoch, rebuild the session and call
+ * `pool.hideAll()` - all before `toLayoutEntries` got the chance to throw on the same payload -
+ * so the screen was already wiped by the time the crash happened. Checked here, structurally,
+ * rather than left for `toLayoutEntries` to discover mid-`.map()`, so the caller can decide what
+ * "invalid" means (leave the current picture up, log once, never ack) instead of unwinding
+ * through a throw whose stack frame is mid-mutation.
+ *
+ * Deliberately does not accept a string that merely looks numeric (`'10'`): the JS `-` operator
+ * would coerce it and the arithmetic would happen to work for that one field, but that is a
+ * property of subtraction, not a property of the payload being well-formed - a sibling field that
+ * does not coerce cleanly would produce silent `NaN` geometry instead, so every numeric field is
+ * held to the same `typeof === 'number' && Number.isFinite` rule regardless of which one a given
+ * malformed payload happens to break.
+ */
+export function isValidRenderMessage(message: unknown): message is OverlayRenderMessage {
+  if (typeof message !== 'object' || message === null) return false;
+  const candidate = message as Record<string, unknown>;
+
+  if (!isFiniteNumber(candidate.id) || !isFiniteNumber(candidate.epoch)) return false;
+  if (!isFinitePoint(candidate.origin)) return false;
+
+  const payload = candidate.payload;
+  if (typeof payload !== 'object' || payload === null) return false;
+  const entries = (payload as Record<string, unknown>).entries;
+  if (!Array.isArray(entries)) return false;
+
+  return entries.every(isValidRenderEntry);
+}
+
 /** Minimal `performance`. The global satisfies it in both Chromium and Node. */
 export interface MarkRecorder {
   mark(name: string): unknown;
@@ -320,6 +377,9 @@ export function renderEntries<E extends PooledBox>(
   const widths: number[] = [];
   const boxes: (E | undefined)[] = [];
   const states: (SlotState | null)[] = [];
+  // #81 F2: which boxes asked to restart a crossfade this frame, so phase 4 can commit it after
+  // phase 2's reflow rather than `setText` forcing its own. Index-aligned with `boxes`.
+  const fades: boolean[] = [];
   let entering = 0;
   let crossfaded = 0;
 
@@ -334,6 +394,7 @@ export function renderEntries<E extends PooledBox>(
     states.push(state);
     if (box === undefined || entry === undefined) {
       widths.push(0);
+      fades.push(false);
       continue;
     }
 
@@ -347,6 +408,7 @@ export function renderEntries<E extends PooledBox>(
     const textChanged = box.text !== entry.text;
     const fade = fadeMs > 0 && state === 'holding' && textChanged;
     if (fade) crossfaded += 1;
+    fades.push(fade);
     box.setText(entry.text, fade);
 
     // H3. Chromium does break Thai on real word boundaries, and that is the reason this project
@@ -435,6 +497,11 @@ export function renderEntries<E extends PooledBox>(
   for (let index = 0; index < boxes.length; index += 1) {
     const box = boxes[index];
     if (box === undefined) continue;
+
+    // #81 F2: restart the crossfade `setText` asked for in phase 1, now that phase 2's read pass
+    // has already forced the one reflow that commits the removed `fading` class - the same style
+    // flush the "entering" opacity a few lines above rides on, reused rather than paid for twice.
+    if (fades[index] === true) box.commitFade?.();
 
     const position = outcome.positions[index] ?? null;
     if (position === null) {

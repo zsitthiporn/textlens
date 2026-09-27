@@ -44,7 +44,13 @@ import type {
   OverlayStatusMessage,
 } from './contract.js';
 import { createFrameScheduler } from './frame-scheduler.js';
-import { renderEntries, RenderSession, toLayoutEntries, type RenderStats } from './layout.js';
+import {
+  isValidRenderMessage,
+  renderEntries,
+  RenderSession,
+  toLayoutEntries,
+  type RenderStats,
+} from './layout.js';
 import { BoxPool, DEFAULT_POOL_CAPACITY, type PooledBox } from './node-pool.js';
 import { toBannerView, type BannerView } from './status.js';
 import { MinDisplayGate } from './transitions.js';
@@ -124,6 +130,7 @@ function createBox(): DomBox {
   element.append(incoming, outgoing);
 
   let current = '';
+  let pendingFade = false;
 
   return {
     element,
@@ -134,18 +141,29 @@ function createBox(): DomBox {
     setText(text: string, fade: boolean): void {
       if (fade && current !== '') {
         outgoing.textContent = current;
-        // Restart, rather than let a half-finished fade continue from wherever it got to. The
-        // class is removed and re-added around a forced reflow because re-adding it in the same
-        // task is a no-op to the transition engine - the computed value never changed.
+        // Restart, rather than let a half-finished fade continue from wherever it got to - but
+        // only the "remove" half, here. Re-adding the class in the same task is a no-op to the
+        // transition engine because the computed value never changed in between; that used to be
+        // fixed with a forced reflow (`outgoing.offsetWidth`) right here, which is exactly the
+        // layout thrashing M5-03 exists to prevent - one extra reflow per crossfading box, inside
+        // the write-only phase that is supposed to have none (#81 F2). `commitFade` re-adds the
+        // class from the *next* write-only phase instead, after `renderEntries`' own read pass has
+        // already forced the one reflow the frame needed anyway - the same trick already used a
+        // few lines below in `layout.ts` for a box's entering opacity.
         outgoing.classList.remove('fading');
-        void outgoing.offsetWidth;
-        outgoing.classList.add('fading');
+        pendingFade = true;
       } else {
         outgoing.textContent = '';
         outgoing.classList.remove('fading');
+        pendingFade = false;
       }
       incoming.textContent = text;
       current = text;
+    },
+    commitFade(): void {
+      if (!pendingFade) return;
+      pendingFade = false;
+      outgoing.classList.add('fading');
     },
     setAttribute(name: string, value: string): void {
       element.setAttribute(name, value);
@@ -294,6 +312,20 @@ function adoptConfig(incoming: OverlayRenderConfig): boolean {
 }
 
 function draw(message: OverlayRenderMessage): void {
+  // #81 F3, invariant 4: checked before `adopt()` runs, not after it fails. `adopt()` swaps the
+  // epoch, rebuilds the session and calls `pool.hideAll()` - none of that is reversible by a
+  // caught exception, so validating first is what makes "leave the current picture up" true
+  // rather than aspirational. Never acked to main: a payload that was not drawn must not be
+  // reported as drawn.
+  if (!isValidRenderMessage(message)) {
+    const rawId = (message as { id?: unknown } | null | undefined)?.id;
+    console.error(
+      `[textlens] overlay received a malformed render payload (id ${JSON.stringify(rawId)}); `
+        + 'ignoring it and leaving the current screen as is.',
+    );
+    return;
+  }
+
   adopt(message);
 
   const entries = toLayoutEntries(message);
@@ -419,10 +451,22 @@ window.textlensOverlay?.onPayload((message) => {
  * property lands.
  */
 window.textlensOverlay?.onRenderConfig((message) => {
-  if (adoptConfig(message.config)) {
-    session = newSession(config);
-    pool.hideAll();
-  }
+  if (!adoptConfig(message.config)) return;
+
+  session = newSession(config);
+  pool.hideAll();
+
+  // #81 F1: `hideAll()` just erased the picture the user was reading, and a payload only exists
+  // when there is text to draw - so on a still screen, or in `snapshot`/`paused` mode, nothing
+  // else will ever put it back (`window-manager.ts`'s `setOverlayRender` does not resend the
+  // payload either). Redraw immediately, mirroring the font-load recovery below.
+  //
+  // `lastMessage.config` is patched to the config just adopted, not left as whatever it was drawn
+  // under: `draw()` calls `adopt()` first, which calls `adoptConfig(message.config)` again, and an
+  // unpatched, stale config there would silently revert the font size this handler just applied.
+  if (lastMessage === null) return;
+  lastMessage = { ...lastMessage, config };
+  draw(lastMessage);
 });
 
 /**
