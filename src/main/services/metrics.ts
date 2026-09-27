@@ -51,7 +51,7 @@ export const STAGE_BUDGETS: Readonly<Record<PipelineStage, { readonly budgetMs: 
 
 export interface StageStats {
   readonly stage: PipelineStage;
-  /** Samples observed since the last reset - may exceed the number retained. */
+  /** Samples observed in the current summary window - may exceed the number retained. */
   readonly count: number;
   readonly p50: number;
   readonly p90: number;
@@ -206,7 +206,12 @@ export class MetricsRecorder {
     return stats;
   }
 
-  /** Drop every sample. Used when the pipeline restarts and old numbers stop meaning anything. */
+  /**
+   * Drop every sample and start a fresh window. `startMetricsSummary` calls this right
+   * after logging each summary, so the numbers in the next line describe only the next
+   * interval - not the session cumulative total. Also correct if the pipeline restarts
+   * and old numbers stop meaning anything, though nothing in `src/` needs that today.
+   */
   reset(): void {
     this.#rings.clear();
   }
@@ -248,6 +253,11 @@ function round1(value: number): number {
 /**
  * Log a summary every `intervalMs`. Returns the stopper.
  *
+ * Each line covers only the window since the previous one: the recorder is reset right
+ * after it is logged, so a window with no new samples logs nothing rather than repeating
+ * the previous line, and a window that did get samples reports only those, not the
+ * session cumulative total (#76).
+ *
  * The timer is unref'd: metrics must never be the reason the process stays alive.
  * The table goes in the message and the same numbers go in the fields, so the file is
  * both readable by a person and parseable by a script.
@@ -261,6 +271,9 @@ export function startMetricsSummary(
     const stats = recorder.snapshot();
     if (stats.length === 0) return;
     logger.info(recorder.format(), { metrics: stats });
+    // Synchronous from here to the reset: nothing recorded between the snapshot just
+    // logged and this call can be lost, because no sample source awaits between them.
+    recorder.reset();
   }, intervalMs);
   timer.unref?.();
 
