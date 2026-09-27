@@ -84,6 +84,12 @@ interface Rig {
   releaseAll(): void;
   at(ms: number): void;
   handle(frame: FrameEvent): Promise<OverlayPayload | undefined>;
+  /**
+   * Runs inside `onPayload`, before the payload is recorded. Returning `false` refuses it, the way
+   * `WindowManager` does while the overlay document is starting; a refused payload is not in
+   * `payloads`, because nobody saw it.
+   */
+  intercept(hook: ((payload: OverlayPayload) => boolean | void) | undefined): void;
 }
 
 function rig(): Rig {
@@ -103,17 +109,23 @@ function rig(): Rig {
   const logger = new RecordingLogger();
   const cache = new TranslationCache(':memory:', { logger });
   const payloads: OverlayPayload[] = [];
+  let hook: ((payload: OverlayPayload) => boolean | void) | undefined;
   const pipeline = new TextPipeline({
     translator: new FallbackTranslator([engine], { logger }),
     cache,
     logger,
     now: () => clock,
     onPayload: (payload) => {
+      if (hook?.(payload) === false) return false;
       payloads.push(payload);
+      return true;
     },
   });
 
   return {
+    intercept: (next) => {
+      hook = next;
+    },
     pipeline,
     engine,
     cache,
@@ -380,6 +392,340 @@ describe('P1: a block another frame is still translating is shared, not dropped 
 
     expect(shown(h.payloads.at(-1))).toEqual([th(HUD), th(B)]);
     expect(h.payloads.at(-1)?.entries.map((entry) => entry.origin)).toEqual(['engine', 'engine']);
+  });
+});
+
+describe('P1: a shared line stays visible while any frame holding it is in flight (#78, verifier V1)', () => {
+  /**
+   * The shape all three variants share. Frame A owns X and is held at the engine. Frame B sees X
+   * (shares it) and has a miss of its own, Y, so it is still in flight when A finishes. A then
+   * fails to deliver - overtaken, refused or fenced - and frame C starts while B is still waiting
+   * on Y. To C, X is a duplicate; if nothing still publishes it, C draws no box for X, delivers
+   * after B, and records X as shown. X is cached and the screen then reads as unchanged, so X is
+   * never drawn again.
+   */
+  const X = 'the northern gate is open and the guards have gone';
+  const Y = 'fall back to the river crossing at once';
+  const H = 'reinforcements are three minutes out';
+
+  /** Twelve more seconds of the same screen, long enough for dedup to readmit everything. */
+  async function hold(h: Rig, lines: readonly (readonly [string, number])[], from: number): Promise<void> {
+    for (let seq = 100, t = from; t <= from + 12_000; seq += 1, t += 800) {
+      h.at(t);
+      await h.handle(frame(lines, seq));
+    }
+  }
+
+  it('(a) the owner is overtaken by the progressive payload of a frame sharing its line', async () => {
+    const h = rig();
+    h.cache.set(H, 'en', 'th', 'google', 'TH-cached');
+    const screen = [[H, 0], [X, 120], [Y, 240]] as const;
+    h.gate(true);
+
+    const a = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.at(800);
+    const b = h.handle(frame(screen, 2));
+    await flush();
+    // B's progressive half, which is what overtakes A.
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached']);
+
+    h.release();
+    expect(await a).toBeUndefined();
+
+    h.at(1600);
+    const c = h.handle(frame(screen, 3));
+    await flush();
+    h.releaseAll();
+    await Promise.all([b, c]);
+
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached', th(X), th(Y)]);
+    await hold(h, screen, 2400);
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached', th(X), th(Y)]);
+  });
+
+  it('(b) the owner is refused by the renderer', async () => {
+    const h = rig();
+    const screen = [[X, 120], [Y, 240]] as const;
+    h.gate(true);
+
+    const a = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.at(800);
+    const b = h.handle(frame(screen, 2));
+    await flush();
+
+    h.intercept((payload) => payload.seq !== 1);
+    h.release();
+    expect(await a).toBeUndefined();
+    h.intercept(undefined);
+
+    h.at(1600);
+    const c = h.handle(frame(screen, 3));
+    await flush();
+    h.releaseAll();
+    await Promise.all([b, c]);
+
+    expect(shown(h.payloads.at(-1))).toEqual([th(X), th(Y)]);
+    await hold(h, screen, 2400);
+    expect(shown(h.payloads.at(-1))).toEqual([th(X), th(Y)]);
+  });
+
+  it('(c) the owner is fenced by a reset and the frame sharing its line started after it', async () => {
+    const h = rig();
+    const screen = [[X, 120], [Y, 240]] as const;
+    h.gate(true);
+
+    const a = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.pipeline.resetScene('dismissed');
+    h.at(800);
+    const b = h.handle(frame(screen, 2));
+    await flush();
+    expect(h.engine.calls.map((call) => call.texts)).toEqual([[X], [Y]]);
+
+    h.release();
+    expect(await a).toBeUndefined();
+
+    h.at(1600);
+    const c = h.handle(frame(screen, 3));
+    await flush();
+    h.releaseAll();
+    await Promise.all([b, c]);
+
+    expect(shown(h.payloads.at(-1))).toEqual([th(X), th(Y)]);
+    await hold(h, screen, 2400);
+    expect(shown(h.payloads.at(-1))).toEqual([th(X), th(Y)]);
+  });
+
+  it('control: the same screen with C arriving after B has delivered keeps X', async () => {
+    // Proves the three above fail on the gap and not on the scene: without the overlap, nothing
+    // in this sequence loses X.
+    const h = rig();
+    h.cache.set(H, 'en', 'th', 'google', 'TH-cached');
+    const screen = [[H, 0], [X, 120], [Y, 240]] as const;
+    h.gate(true);
+
+    const a = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.at(800);
+    const b = h.handle(frame(screen, 2));
+    await flush();
+    h.release();
+    expect(await a).toBeUndefined();
+    h.releaseAll();
+    await b;
+
+    h.at(1600);
+    await h.handle(frame(screen, 3));
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached', th(X), th(Y)]);
+    await hold(h, screen, 2400);
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached', th(X), th(Y)]);
+  });
+
+  it('a frame that starts while a payload is being handed over still sees that payload’s lines', async () => {
+    // The one place "released before delivering" and "released after" can be told apart: inside
+    // the delivery itself, which is synchronous. A frame is started from `onPayload` - not
+    // something production does, and that is the point: it is the latest possible moment, so if
+    // the lines are still published here they are published at every earlier one.
+    const h = rig();
+    let probe: Promise<OverlayPayload | undefined> | undefined;
+    h.intercept((payload) => {
+      if (probe === undefined && payload.seq === 1 && payload.complete) probe = h.handle(frame([[X, 120]], 2));
+    });
+    h.gate(true);
+
+    const a = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.releaseAll();
+    await a;
+
+    expect(shown(await probe)).toEqual([th(X)]);
+  });
+
+  const timer = (n: number): string => `mission timer ${String(n)} seconds remaining on the clock`;
+
+  /**
+   * The HUD chain, up to the retry. A timer that changes every second gives every frame a miss of
+   * its own, so each frame is still in flight when the next starts and a line they all see - X,
+   * untranslated because the engine was down - is held continuously. Frame 5 reads X afresh
+   * (dedup's window expired) and is left at the engine with it, with frame 4 still holding the
+   * degraded answer.
+   */
+  async function hudChainToRetry(h: Rig): Promise<Promise<OverlayPayload | undefined>[]> {
+    h.offline(true);
+    h.gate(true);
+
+    const frames: Promise<OverlayPayload | undefined>[] = [];
+    frames.push(h.handle(frame([[X, 120]], 1)));
+    await flush();
+    h.at(800);
+    frames.push(h.handle(frame([[timer(1), 0], [X, 120]], 2)));
+    await flush();
+    h.release(); // frame 1's X fails: degraded
+    await flush();
+    h.offline(false);
+
+    for (let n = 2, t = 1600; t <= 2400; n += 1, t += 800) {
+      h.at(t);
+      frames.push(h.handle(frame([[timer(n), 0], [X, 120]], n + 1)));
+      await flush();
+      h.release();
+      await flush();
+    }
+
+    h.at(3200);
+    frames.push(h.handle(frame([[timer(4), 0], [X, 120]], 5)));
+    await flush();
+    return frames;
+  }
+
+  it('a degraded line held across a chain of overlapping frames does not block its own retry', async () => {
+    // Rule (a) in `#share`. If a frame reading X afresh took the held degraded answer, X would never
+    // be retried while the timer runs: English, indefinitely, with the engine healthy.
+    const h = rig();
+    const frames = await hudChainToRetry(h);
+    expect(h.engine.calls.at(-1)?.texts).toEqual([timer(4), X]);
+
+    h.releaseAll();
+    await Promise.all(frames);
+    expect(shown(h.payloads.at(-1))).toEqual([th(timer(4)), th(X)]);
+    expect(h.payloads.at(-1)?.entries.map((entry) => entry.origin)).toEqual(['engine', 'engine']);
+  });
+
+  it('the retry replaces the stale answer, so a frame starting while it is out waits for it', async () => {
+    // Rule (b) in `#publish`, first half. Frame 6 starts while the retry is at the engine and sees X
+    // as a duplicate. Had the retry not replaced the degraded answer in `#inflight` - still held by
+    // frame 4 - frame 6 would take that over everything and paint the English back over the Thai.
+    const h = rig();
+    const frames = await hudChainToRetry(h);
+    h.at(4000);
+    frames.push(h.handle(frame([[timer(5), 0], [X, 120]], 6)));
+    await flush();
+
+    h.releaseAll();
+    await Promise.all(frames);
+    expect(shown(h.payloads.at(-1))).toEqual([th(timer(5)), th(X)]);
+  });
+
+  it('an answer read afresh replaces a stale held one even when its frame never waits', async () => {
+    // Rule (b), second half: `#publish` runs on every frame, not only the ones that wait. Frame 3
+    // below finds X in the cache and has nothing to wait for, so it delivers in the turn it started
+    // - and if it did not publish, the degraded X that frame 2 is still holding would stay the answer
+    // in `#inflight`, and frame 4 would take it and flip the box back to English.
+    const h = rig();
+    h.offline(true);
+    h.gate(true);
+    const one = h.handle(frame([[X, 120]], 1));
+    await flush();
+    h.at(800);
+    const two = h.handle(frame([[timer(1), 0], [X, 120]], 2));
+    await flush();
+    h.release(); // X fails: degraded, and frame 2 - still waiting on its timer - holds it
+    await flush();
+    expect(shown(h.payloads.at(-1))).toEqual([X]);
+
+    // X's translation has reached the cache by another route since; frame 2 is still out.
+    h.offline(false);
+    h.cache.set(X, 'en', 'th', 'google', 'TH-cached-X');
+    h.at(3200); // past dedup's window: X is read afresh
+    expect(shown(await h.handle(frame([[X, 120]], 3)))).toEqual(['TH-cached-X']);
+
+    h.at(4000);
+    await h.handle(frame([[X, 120]], 4));
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached-X']);
+
+    h.releaseAll();
+    await Promise.all([one, two]);
+    expect(shown(h.payloads.at(-1))).toEqual(['TH-cached-X']);
+  });
+
+  it.each([
+    ['dedup readmits it', (h: Rig): void => h.at(3900)],
+    ['the scene is reset', (h: Rig): void => h.pipeline.resetScene('mode changed to snapshot')],
+  ])(
+    'an answer that arrived while its frame still waits on a slower shared line is not requested again (%s)',
+    async (_label, reread) => {
+      // Frame 2 has X's answer but is still waiting on S, which frame 1 is translating. A frame that
+      // reads X afresh in that window passes over frame 2's settled answer (rule (a)) and asks the
+      // cache - so the answer has to be in the cache by then, not written after the shared wait.
+      const h = rig();
+      const S = 'reinforcements are three minutes out';
+      h.gate(true);
+
+      const one = h.handle(frame([[S, 0]], 1));
+      await flush();
+      h.at(800);
+      const two = h.handle(frame([[S, 0], [X, 120]], 2));
+      await flush();
+      expect(h.parked()).toBe(2);
+      h.release('newest'); // frame 2's own X answers; S is still out
+      await flush();
+
+      reread(h);
+      const three = h.handle(frame([[X, 120]], 3));
+      await flush();
+      expect(h.engine.calls.filter((call) => call.texts.includes(X))).toHaveLength(1);
+
+      h.releaseAll();
+      await Promise.all([one, two, three]);
+      expect(h.engine.calls.filter((call) => call.texts.includes(X))).toHaveLength(1);
+      expect(shown(h.payloads.at(-1))).toEqual([th(X)]);
+    },
+  );
+
+  it('a translator answering with a non-string cannot become an unhandled rejection', async () => {
+    // `FallbackTranslator` rejects non-string results, but `PipelineTranslator` is structural. The
+    // published answer is computed with `.trim()`, and a promise nobody awaits that throws there is
+    // an unhandled rejection - which Electron 43 only warns about, i.e. silence (CLAUDE.md, #67).
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      let release: (() => void) | undefined;
+      const translator: PipelineTranslator = {
+        engineNames: ['google'],
+        translate: async (texts): Promise<TranslationOutcome> => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return { texts: texts.map(() => 42 as unknown as string), engine: 'google', degraded: false, failures: [] };
+        },
+      };
+      const logger = new RecordingLogger();
+      const pipeline = new TextPipeline({
+        translator,
+        cache: new TranslationCache(':memory:', { logger }),
+        logger,
+        onPayload: () => {},
+      });
+
+      // Alone first - nobody else is waiting on the published answer - then with a frame sharing it.
+      const alone = pipeline.handleFrame(frame([[X, 120]], 1), DISPLAY);
+      await flush();
+      release?.();
+      expect(await alone).toBeUndefined();
+      await flush();
+      await flush();
+
+      pipeline.resetScene('capture region or monitor changed');
+      const owner = pipeline.handleFrame(frame([[Y, 120]], 2), DISPLAY);
+      await flush();
+      const sharer = pipeline.handleFrame(frame([[Y, 120]], 3), DISPLAY);
+      await flush();
+      release?.();
+      expect(await owner).toBeUndefined();
+      expect(await sharer).toBeUndefined();
+      await flush();
+      await flush();
+
+      expect(logger.lines.filter((line) => line.message.includes('frame failed in the text pipeline'))).toHaveLength(3);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
   });
 });
 
