@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  EDGE_SLOP_PX,
   EdgeWarningThrottle,
   MIN_REGION_PX,
   checkRegionSize,
@@ -21,6 +22,7 @@ import {
   effectiveDiffThreshold,
   findEdgeContact,
   padRegion,
+  snapToMonitorEdges,
 } from '../../src/main/services/region-guard.js';
 import { DEFAULT_CONFIG, type SavedRegion } from '../../src/shared/config-schema.js';
 import type { MonitorInfo, OcrLine, Rect } from '../../src/shared/protocol.js';
@@ -69,6 +71,73 @@ describe('padRegion', () => {
 
     expect(result[2]).toBeGreaterThanOrEqual(0);
     expect(result[3]).toBeGreaterThanOrEqual(0);
+  });
+});
+
+/**
+ * #80, L1: a region 1-2px short of the screen edge.
+ *
+ * `findEdgeContact`'s #59 rule is exact on purpose (see its test below at "stops one pixel short"),
+ * so a region that does not quite reach the edge is not pinned - and text at the very edge of the
+ * screen then sits inside `EDGE_SLOP_PX` of the region's edge and is reported as clipped. The fix
+ * is to close the gap where the wire region is built, not to loosen the rule.
+ */
+describe('snapToMonitorEdges (#80)', () => {
+  const WIDE: readonly [number, number] = [3440, 1440];
+
+  it('turns the live region into the whole monitor after padding', () => {
+    // The region every one of the day's 65 edge warnings came from, padded by the default 8.
+    const padded = padRegion([7, 9, 3430, 1421], 8, WIDE);
+    expect(padded).toEqual([0, 1, 3440, 1437]);
+
+    expect(snapToMonitorEdges(padded, WIDE)).toEqual([0, 0, 3440, 1440]);
+  });
+
+  it('closes a gap of exactly EDGE_SLOP_PX and leaves one pixel more alone', () => {
+    expect(EDGE_SLOP_PX).toBe(2);
+    expect(snapToMonitorEdges([2, 500, 600, 200], MONITOR)).toEqual([0, 500, 602, 200]);
+    expect(snapToMonitorEdges([3, 500, 600, 200], MONITOR)).toEqual([3, 500, 600, 200]);
+  });
+
+  it('moves each edge independently', () => {
+    const inner: Rect = [400, 400, 600, 200];
+    // left: 1px from 0
+    expect(snapToMonitorEdges([1, 400, 600, 200], MONITOR)).toEqual([0, 400, 601, 200]);
+    // top: 2px from 0
+    expect(snapToMonitorEdges([400, 2, 600, 200], MONITOR)).toEqual([400, 0, 600, 202]);
+    // right: ends at 1919, 1px short of 1920
+    expect(snapToMonitorEdges([1319, 400, 600, 200], MONITOR)).toEqual([1319, 400, 601, 200]);
+    // bottom: ends at 1078, 2px short of 1080
+    expect(snapToMonitorEdges([400, 878, 600, 200], MONITOR)).toEqual([400, 878, 600, 202]);
+    // and none of them when every gap is wider than the slop
+    expect(snapToMonitorEdges(inner, MONITOR)).toEqual(inner);
+  });
+
+  it('snaps a zero-padding drag that stopped on the last pixel the cursor can reach', () => {
+    // The picker's cursor stops at W - 1, so at scale 1 a drag to the right edge is 1px short and
+    // padding 0 leaves it there.
+    const lastPixel = padRegion([100, 100, 3339, 200], 0, WIDE);
+    expect(lastPixel[0] + lastPixel[2]).toBe(3439);
+
+    expect(snapToMonitorEdges(lastPixel, WIDE)).toEqual([100, 100, 3340, 200]);
+  });
+
+  it('leaves an edge already on the screen edge alone and does not clamp an overhang', () => {
+    expect(snapToMonitorEdges([0, 0, 1920, 1080], MONITOR)).toEqual([0, 0, 1920, 1080]);
+    // Past the monitor is `padRegion`'s to clamp, not this function's.
+    expect(snapToMonitorEdges([0, 900, 2000, 200], MONITOR)).toEqual([0, 900, 2000, 200]);
+  });
+
+  it('closes exactly the gap findEdgeContact would otherwise warn about', () => {
+    // The connection between the two, stated as behaviour: text at the very top of the screen,
+    // against a region 1px short of the top.
+    const oneShort: Rect = [0, 1, 3440, 1437];
+    const atTopOfScreen = [line(100, 0, 300, 20)];
+    expect(findEdgeContact(atTopOfScreen, oneShort, WIDE).edges).toEqual(['top']);
+
+    const snapped = snapToMonitorEdges(oneShort, WIDE);
+    // The bbox is region-relative, and the region moved up by 1px - so the same text is at y = 1.
+    expect(findEdgeContact([line(100, 1, 300, 20)], snapped, WIDE).edges).toEqual([]);
   });
 });
 
@@ -521,6 +590,22 @@ describe('EdgeWarningThrottle', () => {
 
     // Clipping starts again well inside the interval. It is reported at once, because the
     // problem going away and coming back is new information.
+    now = 20;
+    expect(throttle.shouldReport({ edges: ['right'], lines: 1 })).toBe(true);
+  });
+
+  it('re-arms on reset() without being handed a clean report (#80, F8)', () => {
+    // The orchestrator's path: it no longer feeds clean frames in, because a clean frame inside a
+    // flicker is not the condition ending. It calls reset() when the user-facing warning clears.
+    let now = 0;
+    const throttle = new EdgeWarningThrottle(30_000, () => now);
+    expect(throttle.shouldReport({ edges: ['right'], lines: 1 })).toBe(true);
+
+    now = 10;
+    // No clean report in between - still suppressed, which is the whole of F8.
+    expect(throttle.shouldReport({ edges: ['right'], lines: 1 })).toBe(false);
+
+    throttle.reset();
     now = 20;
     expect(throttle.shouldReport({ edges: ['right'], lines: 1 })).toBe(true);
   });

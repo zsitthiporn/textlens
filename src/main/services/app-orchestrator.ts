@@ -68,9 +68,11 @@
  * configured, which dismissing does not change).
  *
  * `modes.snapshotHoldMs` is the same ending on a timer: non-zero, {@link #scheduleSnapshotHold}
- * arms a countdown the moment the `snapshot` command actually goes out, and its expiry calls
- * `dismiss()` - not a copy of what it does. One path, so a hand-pressed dismiss and an expired
- * hold can never drift apart about what "cleared" means.
+ * arms a countdown when the snapshot's reply arrives - and restarts it when the translation is
+ * drawn - and its expiry calls `dismiss()` - not a copy of what it does. One path, so a
+ * hand-pressed dismiss and an expired hold can never drift apart about what "cleared" means. (It
+ * used to be armed when the command went out, which let a short hold expire before the frame it
+ * was timing had even arrived - #80.)
  *
  * ## Why rapid mode switching cannot corrupt anything
  *
@@ -117,6 +119,7 @@ import {
   decideDiffThreshold,
   findEdgeContact,
   padRegion,
+  snapToMonitorEdges,
 } from './region-guard.js';
 import type { SidecarClientEvents } from './sidecar-client.js';
 import type { RegionPickOutcome, RegionPickRequest } from './window-manager.js';
@@ -179,6 +182,16 @@ export interface OverlayWindows {
    * empty on its own. See `AppOrchestrator.dismiss` and `WindowManager.clearOverlay`.
    */
   clearOverlay(reason: string): void;
+  /**
+   * Subscribe to the renderer's confirmation that a payload was drawn (#52). Returns an unsubscribe.
+   *
+   * Read here for one thing only: restarting a running `modes.snapshotHoldMs` countdown from the
+   * moment a held snapshot's translation actually reaches the screen (#80, F2) - see
+   * {@link AppOrchestrator.snapshot}. `WindowManager.onOverlayDrawn` is this exact shape, so
+   * `index.ts` needs no wiring of its own. Optional so the tests that do not care about the hold
+   * need not supply one; without it the hold simply runs from the frame.
+   */
+  onOverlayDrawn?(listener: (id: number) => void): () => void;
 }
 
 /** The part of `ConfigService` the mode machine reads and, since #29, writes. */
@@ -373,6 +386,40 @@ const DEFAULT_IDLE_WARNING_MS = 25_000;
 export const EDGE_WARNING_CLEAR_DELAY_MS = 3_000;
 
 /**
+ * What the user is told while recognised text is against the region's edge (#30, #80).
+ *
+ * **One sentence, whichever edge it is.** The edge used to be part of the text - "touching the
+ * top edge", "touching the bottom edge" - and that made two sentences out of one condition. Text
+ * drifting from the top of a region to the bottom became a *different* warning, and a different
+ * warning is news to `ErrorReporter`: it replaced the old alert without a clear in between and
+ * brought back a banner the user had already let time out. 11 of the 48 edge alerts on the live app
+ * in one day were exactly that swap (#80, F1).
+ *
+ * Which edge is not lost, it moved: `#checkRegionEdges` logs the edge set, and its throttle reports
+ * a change of edge set at once, so the log still answers "which side" for anyone debugging it. What
+ * the user needs from the banner is that a region is clipping, and the remedy - redraw the region -
+ * is the same for all four sides.
+ */
+export const REGION_EDGE_WARNING = 'text is touching an edge of the region; widen it';
+
+/**
+ * How long a `snapshot` command may go unanswered before a new press stops waiting for it (#80, F3).
+ *
+ * The guard it bounds exists so that holding the key cannot queue one OCR per press behind the
+ * sidecar's `workGate` - Windows auto-repeats a held global hotkey, and the live app logged 46
+ * overlay toggles about 31ms apart from one held key the day this was found. But a guard that waits
+ * for a reply is only as good as the reply, and a sidecar that is alive and has stopped answering
+ * would otherwise turn every later press into a silent no-op, which invariant 4 forbids. Checked by
+ * the clock on the next press rather than by a timer, because the only moment it matters is when
+ * somebody asks again.
+ *
+ * Five seconds is about eight times the slowest snapshot the measurements allow for - two ~305ms
+ * OCRs back to back (a text-heavy 3440x1440 screen, with a tick of the same size already holding
+ * `workGate`) - so a reply this late is not a slow reply. Not measured end to end.
+ */
+export const SNAPSHOT_REPLY_STALE_MS = 5_000;
+
+/**
  * What the user is told while no capture region has been chosen (#51).
  *
  * The condition it names is a real one and it is not a matter of taste. With `region: null` the
@@ -489,6 +536,17 @@ export class AppOrchestrator {
   readonly #now: () => number;
   /** A snapshot was asked for and has not been sent yet - only possible before `configure`. */
   #pendingSnapshot = false;
+  /**
+   * A `snapshot` command was written and its reply has not arrived (#80, F3).
+   *
+   * The reply is the first `frame`, `error` or `exit` after it. The wire has no correlation id -
+   * `FrameEvent` does not say which command produced it - so a tick that was already in flight when
+   * `stop` went out can be taken for the snapshot's own frame. That ends the wait one OCR early; it
+   * cannot make it longer, and fixing it properly is a protocol change.
+   */
+  #snapshotOutstanding = false;
+  /** When the outstanding snapshot was written, by {@link #now}. See {@link SNAPSHOT_REPLY_STALE_MS}. */
+  #snapshotSentAt = 0;
   /** Serialises the async configure path so two config changes cannot interleave. */
   #configuring: Promise<void> = Promise.resolve();
   /** A region picker is open. Guards against a second hotkey press opening a second one. */
@@ -499,8 +557,8 @@ export class AppOrchestrator {
   /**
    * Cancels the pending `modes.snapshotHoldMs` timer, or `null` when nothing is counting down
    * (#61). Never left dangling: every place the countdown could stop meaning what it meant when it
-   * was started - a fresh snapshot, leaving `snapshot` mode, a dismiss, disposal - cancels this
-   * first. See {@link #cancelHold}.
+   * was started - a fresh snapshot's reply or its translation being drawn (#80), leaving `snapshot`
+   * mode, a dismiss, disposal - cancels this first. See {@link #cancelHold}.
    */
   #holdCancel: CancelTimer | null = null;
 
@@ -523,6 +581,9 @@ export class AppOrchestrator {
       }),
       this.#sidecar.on('error', (error) => {
         this.#fail(`${error.code}: ${error.message}`);
+        // `CaptureLoop.Snapshot` answers with an error when it has nothing to capture, and that is
+        // as much the end of the wait as a frame is.
+        this.#onSnapshotReply('error');
       }),
       this.#sidecar.on('frame', (frame) => {
         // A frame arriving is the only evidence that whatever failed is over. Clearing on
@@ -543,6 +604,7 @@ export class AppOrchestrator {
           changed = true;
         }
         if (changed) this.#notify();
+        this.#onSnapshotReply('frame');
       }),
       this.#sidecar.on('nochange', () => {
         if (this.#checkIdle()) this.#notify();
@@ -568,12 +630,21 @@ export class AppOrchestrator {
         // `#configured` is what actually gates sending, so keeping the mode cannot make anything
         // be sent at a process that is gone.
         if (!exit.expected) this.#lastError = SIDECAR_EXIT_ERROR;
+        // A snapshot the dead process was working on will never answer. Ending the wait here is
+        // what lets the restarted sidecar take the next press, and it gives whatever is on screen
+        // its hold instead of none (#80).
+        this.#onSnapshotReply('exit');
         this.#notify();
       }),
       this.#config.subscribe((current, previous) => {
         this.#onConfigChanged(current, previous);
       }),
     );
+
+    const offDrawn = this.#windows.onOverlayDrawn?.(() => {
+      this.#onOverlayDrawn();
+    });
+    if (offDrawn !== undefined) this.#unsubscribes.push(offDrawn);
   }
 
   get mode(): AppMode {
@@ -766,13 +837,40 @@ export class AppOrchestrator {
    * "the button does not work". A burst of presses collapses to one, because a flag is not
    * a queue - and replaying four snapshots of the same screen is not what the fourth press
    * meant.
+   *
+   * **And after `configure` too, since #80 (F3).** The flag above only ever collapsed a burst
+   * during startup; once configured, every press went straight out, and the sidecar runs them one
+   * at a time under `workGate` - so a held key (Windows auto-repeats global hotkeys) queued seconds
+   * of OCR in front of whatever the user did next, `start`/`stop`/`configure` included. Now a press
+   * while a snapshot is still waiting for its reply joins that one: the mode is still set, and
+   * {@link #apply} still stops the loop if this came from `auto`, but no second command is written.
+   * The wait ends on the first `frame`, `error` or `exit` - or after {@link SNAPSHOT_REPLY_STALE_MS},
+   * so a sidecar that stopped answering cannot turn this key into a silent no-op.
+   *
+   * **The hold starts when the reply arrives, not when the command goes out (#80, F2).** See
+   * {@link #scheduleSnapshotHold}.
    */
   snapshot(): void {
     const previous = this.#mode;
     this.#mode = 'snapshot';
-    this.#pendingSnapshot = true;
 
-    this.#log.info('snapshot requested', { mode: this.#mode, from: previous });
+    if (this.#snapshotOutstanding && this.#now() - this.#snapshotSentAt < SNAPSHOT_REPLY_STALE_MS) {
+      // Debug, not info: a held key produces one of these every ~30ms.
+      this.#log.debug('snapshot requested; one is already in flight, so this press joins it', {
+        mode: this.#mode,
+        from: previous,
+      });
+    } else {
+      if (this.#snapshotOutstanding) {
+        this.#log.warn('the previous snapshot never answered; sending another', {
+          waitedMs: this.#now() - this.#snapshotSentAt,
+        });
+        this.#snapshotOutstanding = false;
+      }
+      this.#pendingSnapshot = true;
+      this.#log.info('snapshot requested', { mode: this.#mode, from: previous });
+    }
+
     this.#apply();
     if (previous !== this.#mode) this.#notify();
   }
@@ -1050,9 +1148,18 @@ export class AppOrchestrator {
     // precisely what the app did before, from the mode users spend all their time in.
     if (this.#pendingSnapshot) {
       this.#pendingSnapshot = false;
-      this.#sidecar.send({ cmd: 'snapshot' });
-      // #61: arm (or re-arm) the automatic clear for the frame this command is about to produce.
-      this.#scheduleSnapshotHold();
+      if (this.#sidecar.send({ cmd: 'snapshot' })) {
+        // #61's hold is **not** armed here any more (#80, F2) - the frame this command produces is
+        // capture + OCR away, and translation is further still. It is armed by the reply; see
+        // {@link #onSnapshotReply}.
+        this.#snapshotOutstanding = true;
+        this.#snapshotSentAt = this.#now();
+      } else {
+        // No reply is coming for a command that never left, so this is its reply: whatever is on
+        // screen is what the press is holding, and it gets the hold now rather than never.
+        this.#log.error('could not send snapshot: the sidecar took no command');
+        this.#scheduleSnapshotHold('snapshot could not be sent');
+      }
     }
   }
 
@@ -1060,31 +1167,63 @@ export class AppOrchestrator {
    * (Re)start the countdown to an automatic {@link dismiss}, if `modes.snapshotHoldMs` asks for
    * one (#61).
    *
-   * Called from exactly one place: the line in {@link #apply} that just sent the `snapshot`
-   * command this timer is timing. That is deliberate and it is what makes case 1 of "the timer
-   * must never outlive what it was timing" - pressing Translate once again while a hold is already
-   * counting down - correct for free: every `snapshot()` press re-enters this method through
-   * `#apply`, which cancels whatever was running and starts a fresh `snapshotHoldMs` from zero for
-   * the new frame, rather than letting the old countdown reach the new one.
+   * ## Started by the reply, not by the command (#80, F2)
    *
-   * **Gated on `#mode` at the moment the command is actually sent, not at the moment `snapshot()`
-   * was called.** `#pendingSnapshot` can survive a mode change while the sidecar was not yet
-   * configured - `snapshot()` can be pressed, then `toggleAuto()`, before `configure` ever lands -
-   * and when the deferred `snapshot` command finally goes out here the mode may already be `auto`.
-   * Arming a timer in that case would leave it counting down against `auto`'s live content and
-   * blank a frame the user never asked to hold, which is exactly the failure case 1 exists to
-   * name from a different angle.
+   * This used to be armed on the line that *sent* the `snapshot` command, and the frame that
+   * command produces arrives only after capture and OCR, with translation after that - most of a
+   * second on the live app. A hold of about a second expired before anything had been drawn, which
+   * left the frame, when it did land, held with no timer at all; every longer hold was quietly
+   * shortened by the pipeline's own latency. So it starts at the two moments that describe what the
+   * user can see:
+   *
+   *   1. **The reply** ({@link #onSnapshotReply}) - the frame, or an `error` or `exit` in its place.
+   *      Always, whether or not anything is later drawn: a snapshot that produces no payload must
+   *      not leave the screen held for good, and an error reply is a snapshot that produced nothing
+   *      new while the last boxes are still up.
+   *   2. **The translation being drawn** ({@link #onOverlayDrawn}) - restarted from that moment, so
+   *      the user gets the whole hold to read what landed. Only a hold that is already running is
+   *      restarted: `dismiss()` sends an empty payload that is acked like any other, and arming on
+   *      that ack would make every dismiss schedule the next one.
+   *
+   * A second press while a hold is running leaves it running until the new reply lands - if that
+   * reply is an error, the first frame is still on screen and still needs clearing.
+   *
+   * **Gated on `#mode` at the moment it is armed**, which is now the moment the reply arrives. A
+   * deferred snapshot can go out after the user already left `snapshot` - pressed Translate once,
+   * then Auto, before `configure` landed - and its frame then arrives in `auto`; a timer armed then
+   * would blank live content nobody asked to hold. Leaving `snapshot` also cancels a running one
+   * ({@link #transition}), which is case 2 of "the timer must never outlive what it was timing".
    */
-  #scheduleSnapshotHold(): void {
+  #scheduleSnapshotHold(reason: string): void {
     this.#cancelHold();
     if (this.#mode !== 'snapshot') return;
     const holdMs = this.#config.current.modes.snapshotHoldMs;
     if (holdMs <= 0) return;
+    this.#log.debug('snapshot hold started', { holdMs, reason });
     this.#holdCancel = this.#schedule(() => {
       this.#holdCancel = null;
       this.#log.info('snapshot hold expired; clearing it the same way a dismiss would', { holdMs });
       this.dismiss();
     }, holdMs);
+  }
+
+  /**
+   * The outstanding `snapshot` has been answered - by its frame, an `error`, or the process exiting
+   * (#80, F2 and F3). Ends the wait {@link snapshot} joins presses to, and starts the hold for
+   * whatever the answer leaves on screen.
+   *
+   * A frame with no snapshot outstanding is an ordinary tick and does nothing here.
+   */
+  #onSnapshotReply(kind: 'frame' | 'error' | 'exit'): void {
+    if (!this.#snapshotOutstanding) return;
+    this.#snapshotOutstanding = false;
+    this.#scheduleSnapshotHold(`snapshot answered by ${kind}`);
+  }
+
+  /** The renderer drew a payload. Restarts a running hold from now - see {@link #scheduleSnapshotHold}. */
+  #onOverlayDrawn(): void {
+    if (this.#holdCancel === null || this.#mode !== 'snapshot') return;
+    this.#scheduleSnapshotHold('translation drawn');
   }
 
   /** Cancel the pending hold timer, if any. Calling it with nothing pending is harmless. */
@@ -1167,7 +1306,17 @@ export class AppOrchestrator {
       'configure',
     );
 
-    if (!acked) {
+    if (acked === 'exited') {
+      // Not a failure of this path's own (#80, F6): the process died, the `exit` arm has already
+      // recorded that, and the supervisor owns telling the user and restarting it - which re-runs
+      // `initialize`, which configures again. A second "capture is unavailable" here would only
+      // stack a vaguer alert on top of the supervisor's.
+      this.#log.info('the sidecar exited before acknowledging configure; its restart will configure again', {
+        reason,
+      });
+      return;
+    }
+    if (acked === 'no-reply') {
       this.#fail('the sidecar did not acknowledge configure; capture is unavailable');
       return;
     }
@@ -1203,9 +1352,9 @@ export class AppOrchestrator {
   }
 
   /**
-   * Turn the saved region into the rectangle that goes on the wire (#30, #31).
+   * Turn the saved region into the rectangle that goes on the wire (#30, #31, #80).
    *
-   * Three things happen here and the order matters:
+   * Four things happen here and the order matters:
    *
    *   1. **Validate the binding.** A saved region names the monitor it was drawn on and that
    *      monitor's size at the time. If either has changed, the region is dropped and the
@@ -1219,6 +1368,9 @@ export class AppOrchestrator {
    *      than the glyphs actually are.
    *   3. **Clamp to the monitor**, so padding a subtitle region at the bottom of the screen -
    *      the normal case - cannot produce a rectangle that runs off it.
+   *   4. **Snap to the monitor's edges** (#80): an edge left within `EDGE_SLOP_PX` of the
+   *      screen's edge is moved onto it, so a 1-2px gap cannot make text at the edge of the screen
+   *      read as clipped by the region. On the wire only - the stored rectangle stays the drag.
    *
    * `null` region means the whole display, and that path is unchanged: the size comes straight
    * from the sidecar's own reply, so no conversion happens in Node.
@@ -1264,13 +1416,20 @@ export class AppOrchestrator {
     }
 
     const padded = padRegion(saved.rect, capture.regionPadding, monitorSize);
+    // #80, L1. A padded edge that stops 1-2px short of the screen's is closed onto it - here, on
+    // the way to the wire, and never in the stored rectangle (`clampRegion` at pick time is
+    // `padRegion(..., 0)`, so this cannot live inside `padRegion`). Left open, that gap made text
+    // at the very edge of the screen read as clipped by the region, and "widen it" pointed at a
+    // pixel. See `snapToMonitorEdges`.
+    const applied = snapToMonitorEdges(padded, monitorSize);
     this.#log.info('region resolved', {
       monitorId: monitor.id,
       saved: saved.rect,
       padding: capture.regionPadding,
-      applied: padded,
+      padded,
+      applied,
     });
-    return padded;
+    return applied;
   }
 
   /**
@@ -1302,7 +1461,13 @@ export class AppOrchestrator {
 
   async #listMonitors(): Promise<readonly MonitorInfo[] | null> {
     const ack = await this.#send({ cmd: 'listMonitors' }, 'listMonitors');
-    if (ack === null) {
+    if (ack === 'exited') {
+      // Same reasoning as the configure path (#80, F6): the death is already reported, and the
+      // restart asks again.
+      this.#log.info('the sidecar exited before answering listMonitors; its restart will ask again');
+      return null;
+    }
+    if (ack === 'no-reply') {
       this.#fail('the sidecar never answered listMonitors; capture is unavailable');
       return null;
     }
@@ -1322,29 +1487,39 @@ export class AppOrchestrator {
    * The listener is attached **before** the command is written: the reply is a line on a
    * pipe that is already flowing, so subscribing afterwards is a race that only loses on a
    * machine faster than the one it was written on.
+   *
+   * @returns the ack; `'exited'` when the process exited first; `'no-reply'` when it timed out or
+   * the command could not be written at all. The two failures are kept apart because only one of
+   * them is this path's to report (#80, F6): this used to listen for the ack and a timer and nothing
+   * else, so a sidecar that died mid-command was waited on for the whole timeout - 2s on the live
+   * app - and then reported as "capture is unavailable", stacked on the supervisor's own alert about
+   * the same death, while the restarted sidecar's configure queued behind it on `#configuring`.
    */
-  async #send(command: SidecarCommand, cmd: string): Promise<AckEvent | null> {
-    return await new Promise<AckEvent | null>((resolve) => {
+  async #send(command: SidecarCommand, cmd: string): Promise<AckEvent | 'exited' | 'no-reply'> {
+    return await new Promise<AckEvent | 'exited' | 'no-reply'>((resolve) => {
       let timer: NodeJS.Timeout | undefined;
-      const off = this.#sidecar.on('ack', (ack) => {
-        if (ack.cmd !== cmd) return;
+      const settle = (result: AckEvent | 'exited' | 'no-reply'): void => {
         clearTimeout(timer);
-        off();
-        resolve(ack);
+        offAck();
+        offExit();
+        resolve(result);
+      };
+      const offAck = this.#sidecar.on('ack', (ack) => {
+        if (ack.cmd !== cmd) return;
+        settle(ack);
+      });
+      const offExit = this.#sidecar.on('exit', () => {
+        this.#log.info('the sidecar exited while a command was waiting for its reply', { cmd });
+        settle('exited');
       });
 
       timer = setTimeout(() => {
-        off();
         this.#log.error('no reply from the sidecar', { cmd, timeoutMs: this.#listMonitorsTimeoutMs });
-        resolve(null);
+        settle('no-reply');
       }, this.#listMonitorsTimeoutMs);
       timer.unref?.();
 
-      if (!this.#sidecar.send(command)) {
-        clearTimeout(timer);
-        off();
-        resolve(null);
-      }
+      if (!this.#sidecar.send(command)) settle('no-reply');
     });
   }
 
@@ -1364,7 +1539,6 @@ export class AppOrchestrator {
     if (this.#refreshNoRegionWarning()) this.#notify();
 
     if (JSON.stringify(current.capture) === JSON.stringify(previous.capture)) return;
-    if (!this.#configured) return;
 
     // #35's "เปลี่ยน region → cache ถูกล้าง". Only these two fields: a changed poll interval or
     // diff threshold leaves every box exactly where it was, and discarding the sticky anchors for
@@ -1373,6 +1547,16 @@ export class AppOrchestrator {
     const moved =
       JSON.stringify(current.capture.region) !== JSON.stringify(previous.capture.region) ||
       current.capture.monitorId !== previous.capture.monitorId;
+
+    // #80, F7. The edge warning is about the rectangle the text was clipped by, and that rectangle
+    // has just stopped existing. In `auto` the next frame would have re-decided it; in `paused` or
+    // `snapshot` no frame is coming, so it stayed up telling the user to widen a region they had
+    // already replaced. Before the `#configured` check on purpose: the warning is stale whether or
+    // not a sidecar is up to hear about the new region.
+    if (moved) this.#dropRegionWarning();
+
+    if (!this.#configured) return;
+
     if (moved) this.#windows.bumpOverlayEpoch('capture region or monitor changed');
 
     this.#log.info('capture settings changed; reconfiguring the sidecar');
@@ -1417,14 +1601,17 @@ export class AppOrchestrator {
     const monitorSize: readonly [number, number] = [frame.monitor.bounds[2], frame.monitor.bounds[3]];
     const report = findEdgeContact(frame.lines, frame.region, monitorSize);
     if (report.edges.length === 0) {
-      // Still paces `#log.warn` on every clean frame, exactly as before - resetting its memo so
-      // the *next* dirty report logs at once rather than waiting out an interval that began the
-      // last time this happened. This is the log's own cadence and #65 does not touch it.
-      this.#edgeThrottle.shouldReport(report);
+      // Not handed to `#edgeThrottle` any more (#80, F8). A clean report resets its memo, and a
+      // clean frame inside a flicker is not the condition ending - fed every one, the throttle
+      // re-armed between each pair of dirty frames and logged all of them: 65 lines in about 12
+      // minutes on the live app. It is reset where the user-facing warning actually clears
+      // instead, in `#setRegionWarning`.
       return this.#scheduleEdgeWarningClear();
     }
 
-    const message = `text is touching the ${report.edges.join('/')} edge of the region; widen it`;
+    // One sentence whichever edge it is (#80, F1) - see `REGION_EDGE_WARNING`. The edges go to
+    // the log line below, which is reported again at once whenever the edge set changes.
+    const message = REGION_EDGE_WARNING;
     if (this.#edgeThrottle.shouldReport(report)) {
       this.#log.warn('recognised text is against the edge of the capture region', {
         edges: report.edges,
@@ -1471,7 +1658,21 @@ export class AppOrchestrator {
   #setRegionWarning(message: string | null): boolean {
     if (this.#regionWarning === message) return false;
     this.#regionWarning = message;
+    // The one moment the log's throttle re-arms (#80, F8): the condition the user was shown is
+    // over, so the next time it starts is news and is logged at once.
+    if (message === null) this.#edgeThrottle.reset();
     return true;
+  }
+
+  /**
+   * Drop the edge warning and any clear counting down for it, now (#80, F7).
+   *
+   * For when the region it was raised against has been replaced - not for a clean frame, which
+   * still goes through the debounce in {@link #scheduleEdgeWarningClear}.
+   */
+  #dropRegionWarning(): void {
+    this.#cancelEdgeWarningClear();
+    if (this.#setRegionWarning(null)) this.#notify();
   }
 
   /**

@@ -28,6 +28,9 @@ import {
   AppOrchestrator,
   EDGE_WARNING_CLEAR_DELAY_MS,
   NO_REGION_WARNING,
+  REGION_EDGE_WARNING,
+  SIDECAR_EXIT_ERROR,
+  SNAPSHOT_REPLY_STALE_MS,
   describeAppWarning,
   type AppMode,
   type CaptureConfigSource,
@@ -116,6 +119,24 @@ interface FakeSidecar extends CaptureSidecar {
    * far longer than that.
    */
   tick(): void;
+  /**
+   * Deliver the `frame` that answers the oldest unanswered `snapshot` (#80, F5).
+   *
+   * **Snapshot replies are not synchronous any more, and that is the point.** The real sidecar
+   * answers `snapshot` only after capture and OCR - tens to hundreds of ms later, and later still
+   * when an in-flight tick holds `workGate` - so between the command and its frame there is a window
+   * in which the user can press again, the hold can be counting, and the mode can change. A fake
+   * that answered inside `send()` closed that window to zero, which is how a hold armed on the
+   * command (F2) and a snapshot sent per keypress (F3) both passed every test here. Tests that need
+   * the frame now ask for it, at the moment they mean it to arrive.
+   *
+   * @returns whether there was an unanswered snapshot to reply to.
+   */
+  answerSnapshot(frame?: SidecarClientEvents['frame']): boolean;
+  /** Answer the oldest unanswered `snapshot` with an `error` instead, as `CaptureLoop.Snapshot` can. */
+  failSnapshot(code?: string): boolean;
+  /** How many `snapshot` commands are waiting for their reply. */
+  readonly unansweredSnapshots: number;
   /** Stop accepting commands, as a dead process does. */
   die(): void;
   readonly kinds: string[];
@@ -136,6 +157,7 @@ function fakeSidecar(options: FakeSidecarOptions = {}): FakeSidecar {
   let capturing = false;
   let state = 'idle';
   let alive = options.dead !== true;
+  let unansweredSnapshots = 0;
 
   const emit = <K extends 'ack' | 'error' | 'frame' | 'nochange' | 'exit'>(
     event: K,
@@ -166,6 +188,21 @@ function fakeSidecar(options: FakeSidecarOptions = {}): FakeSidecar {
     tick() {
       if (!alive || !capturing) return;
       emit('frame', frameEvent());
+    },
+    answerSnapshot(frame) {
+      if (!alive || unansweredSnapshots === 0) return false;
+      unansweredSnapshots -= 1;
+      emit('frame', frame ?? frameEvent());
+      return true;
+    },
+    failSnapshot(code = 'NO_FRAME_YET') {
+      if (!alive || unansweredSnapshots === 0) return false;
+      unansweredSnapshots -= 1;
+      emit('error', { ev: 'error', code, message: 'no frame has been captured yet, so there is nothing to snapshot' });
+      return true;
+    },
+    get unansweredSnapshots() {
+      return unansweredSnapshots;
     },
     die() {
       alive = false;
@@ -209,8 +246,9 @@ function fakeSidecar(options: FakeSidecarOptions = {}): FakeSidecar {
             emit('error', { ev: 'error', code: 'NOT_CONFIGURED', message: '"snapshot" needs a region' });
             return true;
           }
-          // Replies with a frame, never an ack, and never changes state.
-          emit('frame', frameEvent());
+          // Replies with a frame, never an ack, and never changes state - but **later**, when the
+          // test calls `answerSnapshot()`. See that method for why this is not synchronous.
+          unansweredSnapshots += 1;
           return true;
 
         default:
@@ -284,6 +322,9 @@ interface FakeWindows {
   openSettings(): unknown;
   bumpOverlayEpoch(reason: string): void;
   clearOverlay(reason: string): void;
+  onOverlayDrawn(listener: (id: number) => void): () => void;
+  /** The renderer confirming it drew payload `id`, as `WindowManager.onOverlayDrawn` reports (#52). */
+  drawn(id: number): void;
   readonly calls: boolean[];
   /** Every epoch bump, with the reason. #35's "region changed → cache cleared" is asserted here. */
   readonly epochBumps: string[];
@@ -295,6 +336,7 @@ interface FakeWindows {
 }
 
 function fakeWindows(): FakeWindows {
+  const drawnListeners = new Set<(id: number) => void>();
   const windows: FakeWindows = {
     calls: [],
     epochBumps: [],
@@ -317,6 +359,15 @@ function fakeWindows(): FakeWindows {
     },
     clearOverlay(reason) {
       windows.clears.push(reason);
+    },
+    onOverlayDrawn(listener) {
+      drawnListeners.add(listener);
+      return () => {
+        drawnListeners.delete(listener);
+      };
+    },
+    drawn(id) {
+      for (const listener of [...drawnListeners]) listener(id);
     },
   };
   return windows;
@@ -375,6 +426,10 @@ function harness(
     /** Injectable timer behind `modes.snapshotHoldMs` (#61). Real `setTimeout` when omitted. */
     schedule?: ScheduleTimer;
     onDismissed?: () => void;
+    /** How long `#send` waits for an ack. 20ms unless a test needs to tell "waited" from "did not". */
+    listMonitorsTimeoutMs?: number;
+    /** Injectable clock. `Date.now` when omitted. */
+    now?: () => number;
   } = {},
 ): Harness {
   const sidecar = fakeSidecar(options);
@@ -386,11 +441,12 @@ function harness(
     config,
     windows,
     logger,
-    listMonitorsTimeoutMs: 20,
+    listMonitorsTimeoutMs: options.listMonitorsTimeoutMs ?? 20,
     ...(options.registry === undefined ? {} : { monitors: options.registry }),
     ...(options.picker === undefined ? {} : { picker: options.picker }),
     ...(options.schedule === undefined ? {} : { schedule: options.schedule }),
     ...(options.onDismissed === undefined ? {} : { onDismissed: options.onDismissed }),
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { orchestrator, sidecar, windows, config, lines };
 }
@@ -652,6 +708,7 @@ describe('AppOrchestrator: snapshot', () => {
     });
 
     h.orchestrator.snapshot();
+    h.sidecar.answerSnapshot();
     const held = frames.at(-1);
     h.sidecar.tick();
     h.sidecar.tick();
@@ -704,6 +761,72 @@ describe('AppOrchestrator: snapshot', () => {
     await h.orchestrator.initialize();
 
     expect(h.sidecar.kinds.filter((kind) => kind === 'snapshot')).toHaveLength(1);
+  });
+
+  /**
+   * #80, F3: the test above covers only startup, where `#pendingSnapshot` is a flag and so
+   * collapses by construction. Once configured, every press went straight to the sidecar - 30
+   * presses, 30 commands - and the sidecar runs them one at a time under `workGate`, so holding the
+   * key queued seconds of OCR in front of whatever the user did next.
+   */
+  it('collapses a burst of presses after configure into the one snapshot already in flight', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    const snapshots = () => h.sidecar.kinds.filter((kind) => kind === 'snapshot').length;
+
+    for (let i = 0; i < 30; i++) h.orchestrator.snapshot();
+
+    expect(snapshots()).toBe(1);
+    expectConverged(h, 'snapshot');
+
+    // Once it has answered, the next press is a new request and goes out.
+    h.sidecar.answerSnapshot();
+    h.orchestrator.snapshot();
+    expect(snapshots()).toBe(2);
+  });
+
+  it('treats an error reply as the end of the snapshot too', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+
+    // `CaptureLoop.Snapshot` answers with an error, not a frame, when there is nothing to capture.
+    h.sidecar.failSnapshot();
+    h.orchestrator.snapshot();
+
+    expect(h.sidecar.kinds.filter((kind) => kind === 'snapshot')).toHaveLength(2);
+  });
+
+  it('treats the sidecar exiting as the end of the snapshot too', async () => {
+    const h = harness();
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+
+    h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+
+    // Otherwise a crash mid-snapshot would leave Translate once refusing every press for good.
+    expect(h.sidecar.kinds.filter((kind) => kind === 'snapshot')).toHaveLength(2);
+  });
+
+  it('does not let a reply that never comes wedge Translate once for good', async () => {
+    // The guard's own failure mode. A sidecar that is alive but never answers would otherwise
+    // leave every later press joining a snapshot that is not coming - silently, which invariant 4
+    // forbids. Decided on the next press, by the clock, so no timer is needed.
+    const now = { value: 0 };
+    const h = harness({ now: () => now.value });
+    await h.orchestrator.initialize();
+    h.orchestrator.snapshot();
+
+    now.value = SNAPSHOT_REPLY_STALE_MS - 1;
+    h.orchestrator.snapshot();
+    expect(h.sidecar.kinds.filter((kind) => kind === 'snapshot')).toHaveLength(1);
+
+    now.value = SNAPSHOT_REPLY_STALE_MS;
+    h.orchestrator.snapshot();
+    expect(h.sidecar.kinds.filter((kind) => kind === 'snapshot')).toHaveLength(2);
+    expect(h.lines.some((line) => line.level === 'warn' && line.message.includes('never answered'))).toBe(true);
   });
 
   it('does not fire a held snapshot at a sidecar that died first', async () => {
@@ -784,6 +907,7 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
     await h.orchestrator.initialize();
 
     h.orchestrator.snapshot();
+    h.sidecar.answerSnapshot();
 
     expect(timers.live).toHaveLength(0);
   });
@@ -794,6 +918,7 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
     await h.orchestrator.initialize();
 
     h.orchestrator.snapshot();
+    h.sidecar.answerSnapshot();
     expect(timers.live.map((entry) => entry.delayMs)).toEqual([5_000]);
     h.windows.clears.length = 0;
 
@@ -816,9 +941,144 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
     h.orchestrator.toggleAuto();
 
     await h.orchestrator.initialize();
+    // Its frame lands in `auto` too - and since #80 the frame is where a hold would be armed.
+    h.sidecar.answerSnapshot();
 
     expect(h.orchestrator.mode).toBe('auto');
     expect(timers.live).toHaveLength(0);
+  });
+
+  /**
+   * #80, F2(i): the hold used to start when the `snapshot` command went out, and the frame it was
+   * timing arrives only after capture and OCR, with translation after that. A hold of about a
+   * second expired before anything was drawn - leaving the frame, when it did arrive, held with no
+   * timer at all - and every longer hold was quietly shortened by the pipeline's own latency.
+   */
+  describe('is timed from the frame, not from the command (#80)', () => {
+    it('arms nothing when the command goes out, and arms when its frame arrives', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+
+      h.orchestrator.snapshot();
+      expect(timers.live).toHaveLength(0);
+
+      h.sidecar.answerSnapshot();
+      expect(timers.live.map((entry) => entry.delayMs)).toEqual([5_000]);
+    });
+
+    it('still holds a frame that arrives after a hold-length wait, and clears it afterwards', async () => {
+      // The live failure: OCR plus translation outlasting a short hold. Whatever the delay, the
+      // frame that finally lands gets the whole hold, and then it goes.
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(1_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      h.windows.clears.length = 0;
+
+      timers.elapse();
+      expect(h.windows.clears).toEqual([]);
+
+      h.sidecar.answerSnapshot();
+      expect(timers.live).toHaveLength(1);
+      timers.elapse();
+      expect(h.windows.clears).toEqual(['dismiss']);
+    });
+
+    it('restarts the hold when the translation is actually drawn', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
+      const armedOnFrame = timers.live[0];
+
+      // The renderer confirming the payload landed (#52). Translation takes most of a second, and
+      // this is the moment the user starts reading.
+      h.windows.drawn(1);
+
+      expect(timers.live).toHaveLength(1);
+      expect(timers.live[0]).not.toBe(armedOnFrame);
+      expect(timers.live[0]?.delayMs).toBe(5_000);
+    });
+
+    it('does not start a hold from a drawn ack alone - the dismiss clear is itself drawn', async () => {
+      // `WindowManager.clearOverlay` sends an empty payload, which is acked like any other. Arming
+      // on every ack would turn dismiss -> clear -> ack -> hold -> dismiss into a loop that never
+      // ends; only a hold that is already running is extended.
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
+
+      h.orchestrator.dismiss();
+      h.windows.drawn(2);
+
+      expect(timers.live).toHaveLength(0);
+    });
+
+    it('ignores drawn acks outside snapshot mode', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+
+      h.sidecar.tick();
+      h.windows.drawn(1);
+
+      expect(h.orchestrator.mode).toBe('auto');
+      expect(timers.live).toHaveLength(0);
+    });
+
+    it('still arms a hold when the snapshot fails, so the screen is never held for good', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+
+      // Pressed from Auto: its last boxes are still on screen, and `snapshot` mode has stopped
+      // everything that would replace them.
+      h.sidecar.failSnapshot();
+
+      expect(timers.live.map((entry) => entry.delayMs)).toEqual([5_000]);
+    });
+
+    it('leaves a running hold alone when pressed again, so a failed second snapshot cannot strand the first', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
+      const first = timers.live[0];
+
+      h.orchestrator.snapshot();
+      // Still the first frame's hold: cancelling it here and then getting an error back would
+      // leave the first frame on screen with nothing left to clear it.
+      expect(timers.live).toHaveLength(1);
+      expect(timers.live[0]).toBe(first);
+
+      h.sidecar.failSnapshot();
+      expect(timers.live).toHaveLength(1);
+      h.windows.clears.length = 0;
+      timers.elapse();
+      expect(h.windows.clears).toEqual(['dismiss']);
+    });
+
+    it('does not re-arm on a frame nobody asked for', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: withHold(5_000), schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
+      const armed = timers.live[0];
+
+      // A frame after the snapshot's own reply has already landed. Only the reply to a command
+      // starts a hold; a stray frame must not quietly push the clear further away.
+      h.sidecar.emit('frame', frameEvent());
+
+      expect(timers.live).toHaveLength(1);
+      expect(timers.live[0]).toBe(armed);
+    });
   });
 
   /**
@@ -831,9 +1091,12 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
       const h = harness({ config: withHold(5_000), schedule: timers.schedule });
       await h.orchestrator.initialize();
       h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
       expect(timers.live).toHaveLength(1);
 
       h.orchestrator.snapshot();
+      // Restarted when the new frame lands (#80), not when the key is pressed.
+      h.sidecar.answerSnapshot();
 
       // The first timer is gone, not still ticking alongside a second one - a naive
       // implementation that forgot to cancel would leave two live here.
@@ -849,6 +1112,7 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
       const h = harness({ config: withHold(5_000), schedule: timers.schedule });
       await h.orchestrator.initialize();
       h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
       expect(timers.live).toHaveLength(1);
 
       h.orchestrator.toggleAuto();
@@ -865,6 +1129,7 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
       const h = harness({ config: withHold(5_000), schedule: timers.schedule });
       await h.orchestrator.initialize();
       h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
       expect(timers.live).toHaveLength(1);
 
       h.orchestrator.dismiss();
@@ -882,6 +1147,7 @@ describe('AppOrchestrator: the snapshot hold (#61, modes.snapshotHoldMs)', () =>
       const h = harness({ config: withHold(5_000), schedule: timers.schedule });
       await h.orchestrator.initialize();
       h.orchestrator.snapshot();
+      h.sidecar.answerSnapshot();
       expect(timers.live).toHaveLength(1);
 
       h.orchestrator.dispose();
@@ -1148,6 +1414,72 @@ describe('AppOrchestrator: failure reporting', () => {
     h.orchestrator.snapshot();
 
     expect(h.sidecar.kinds).toHaveLength(before);
+  });
+
+  /**
+   * #80, F6. `#send` listened only for its `ack` and a timer, so a sidecar that died mid-configure
+   * was waited on for the full timeout - 2s on the live app (exit 13:50:17.305, failure
+   * 13:50:19.294) - and then reported as "capture is unavailable", on top of the supervisor's own
+   * alert about the same death. The restarted sidecar's configure queued behind it the whole time.
+   */
+  describe('a sidecar that exits while a command is waiting for its ack (#80)', () => {
+    const TIMEOUT_MS = 5_000;
+    const settledWithin = async (promise: Promise<unknown>, ms: number): Promise<boolean> =>
+      await Promise.race([
+        promise.then(() => true),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(false);
+          }, ms);
+        }),
+      ]);
+
+    it('gives up on configure the moment the process exits, not when the timeout runs out', async () => {
+      const h = harness({ silentFor: ['configure'], listMonitorsTimeoutMs: TIMEOUT_MS });
+      const starting = h.orchestrator.initialize();
+      await vi.waitFor(() => {
+        expect(h.sidecar.kinds).toContain('configure');
+      });
+
+      h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+
+      expect(await settledWithin(starting, 200)).toBe(true);
+      // The exit arm's own report, which `index.ts` hands to the supervisor - not a second,
+      // vaguer "capture is unavailable" stacked on top of it.
+      expect(h.orchestrator.status.error).toBe(SIDECAR_EXIT_ERROR);
+      expect(h.lines.some((line) => line.message.includes('did not acknowledge configure'))).toBe(false);
+    });
+
+    it('gives up on listMonitors the same way', async () => {
+      const h = harness({ silentFor: ['listMonitors'], listMonitorsTimeoutMs: TIMEOUT_MS });
+      const starting = h.orchestrator.initialize();
+      await vi.waitFor(() => {
+        expect(h.sidecar.kinds).toContain('listMonitors');
+      });
+
+      h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+
+      expect(await settledWithin(starting, 200)).toBe(true);
+      expect(h.orchestrator.status.error).toBe(SIDECAR_EXIT_ERROR);
+      expect(h.lines.some((line) => line.message.includes('never answered listMonitors'))).toBe(false);
+    });
+
+    it('does not make the restarted sidecar wait behind the dead one', async () => {
+      const h = harness({ silentFor: ['configure'], listMonitorsTimeoutMs: TIMEOUT_MS });
+      void h.orchestrator.initialize();
+      await vi.waitFor(() => {
+        expect(h.sidecar.kinds).toContain('configure');
+      });
+      h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+
+      // The supervisor's restart re-runs `initialize`, which chains onto `#configuring`.
+      const restart = h.orchestrator.initialize();
+      await vi.waitFor(() => {
+        expect(h.sidecar.kinds.filter((kind) => kind === 'listMonitors')).toHaveLength(2);
+      }, { timeout: 500 });
+      h.sidecar.emit('exit', { code: 1, signal: null, expected: false });
+      expect(await settledWithin(restart, 200)).toBe(true);
+    });
   });
 
   it('does not report an expected exit as an error', async () => {
@@ -1497,13 +1829,66 @@ describe('AppOrchestrator: region edge warning', () => {
     };
   }
 
+  /** The log lines that carry which edges were touched - since #80 (F1), the only place they are. */
+  function edgeLogLines(h: Harness) {
+    return h.lines.filter(
+      (line) => line.level === 'warn' && line.message.includes('recognised text is against the edge'),
+    );
+  }
+
   it('warns when recognised text is against the region edge', async () => {
     const h = harness({ config: REGION_CONFIG });
     await h.orchestrator.initialize();
 
     h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
 
-    expect(h.orchestrator.status.warning).toContain('left');
+    expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
+    // The edge is still recorded - in the log, where a changing value costs nothing.
+    expect(edgeLogLines(h).map((line) => line.fields?.['edges'])).toEqual([['left']]);
+  });
+
+  /**
+   * #80, F1: the edge used to be part of the text the user sees, so text drifting from the top of
+   * the region to the bottom was a *different* warning - and `ErrorReporter` treats a different
+   * warning as news, bringing a banner the user had already let time out straight back. 11 of the
+   * day's 48 edge alerts were exactly that: one alert replaced by another with no clear between.
+   */
+  describe('does not become a new alert when the edge changes (#80)', () => {
+    it('notifies once across left, top and bottom, with one unchanging text', async () => {
+      const h = harness({ config: REGION_CONFIG });
+      await h.orchestrator.initialize();
+      const seen: Array<string | null> = [];
+      h.orchestrator.subscribe((status) => seen.push(status.warning));
+
+      h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
+      h.sidecar.emit('frame', frameWith([{ bbox: [20, 0, 300, 40] }]));
+      h.sidecar.emit('frame', frameWith([{ bbox: [20, 110, 300, 40] }]));
+
+      expect(seen).toEqual([REGION_EDGE_WARNING]);
+      // Each change of edge is still logged at once - the throttle keys on the edge set.
+      expect(edgeLogLines(h).map((line) => line.fields?.['edges'])).toEqual([['left'], ['top'], ['bottom']]);
+    });
+
+    it('does not bring back a banner that has already timed out', async () => {
+      const bannerTimers = fakeTimers();
+      const reporter = new ErrorReporter({ schedule: bannerTimers.schedule });
+      const h = harness({ config: REGION_CONFIG });
+      await h.orchestrator.initialize();
+      h.orchestrator.subscribe((status) => {
+        reporter.set('region', describeAppWarning(status.warning));
+      });
+
+      h.sidecar.emit('frame', frameWith([{ bbox: [20, 110, 300, 40] }]));
+      expect(reporter.banner).not.toBeNull();
+      bannerTimers.elapse();
+      expect(reporter.banner).toBeNull();
+
+      h.sidecar.emit('frame', frameWith([{ bbox: [20, 0, 300, 40] }]));
+
+      // Still the same standing condition: the tray keeps it, the screen stays clear.
+      expect(reporter.banner).toBeNull();
+      expect(reporter.top?.cause).toBe(REGION_EDGE_WARNING);
+    });
   });
 
   it('says nothing when every line sits clear of the edges', async () => {
@@ -1526,7 +1911,7 @@ describe('AppOrchestrator: region edge warning', () => {
     h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
 
     expect(h.orchestrator.status.error).toBeNull();
-    expect(h.orchestrator.status.warning).toContain('left');
+    expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
   });
 
   /**
@@ -1577,7 +1962,7 @@ describe('AppOrchestrator: region edge warning', () => {
       h.sidecar.emit('frame', frameWith(DIRTY));
 
       // Set synchronously, on this same tick - only the clearing direction is ever deferred.
-      expect(h.orchestrator.status.warning).toContain('left');
+      expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
       expect(timers.live).toHaveLength(0);
     });
 
@@ -1586,12 +1971,19 @@ describe('AppOrchestrator: region edge warning', () => {
       // inside the debounce window (the real gaps were 1463ms, 1001ms, 493ms, 1021ms, 461ms -
       // every one of them under EDGE_WARNING_CLEAR_DELAY_MS). `timers.elapse()` is never called,
       // because in that trace the window never actually ran out.
+      //
+      // **And the dirty frames do not all touch the same edge** (#80, F5). This burst used the one
+      // edge three times, which is the only shape in which the old per-edge text happened to stay
+      // identical - so it passed while the live app, whose text moved between top and bottom,
+      // re-alerted on every swap.
       const timers = fakeTimers();
       const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
       await h.orchestrator.initialize();
 
+      const DIRTY_TOP = [{ bbox: [20, 0, 300, 40] }] as const;
+      const DIRTY_BOTTOM_RIGHT = [{ bbox: [900, 110, 300, 40] }] as const;
       const seen: Array<string | null> = [];
-      const sequence = [DIRTY, CLEAN, DIRTY, CLEAN, DIRTY, CLEAN];
+      const sequence = [DIRTY, CLEAN, DIRTY_TOP, CLEAN, DIRTY_BOTTOM_RIGHT, CLEAN];
       for (const lines of sequence) {
         h.sidecar.emit('frame', frameWith(lines));
         seen.push(h.orchestrator.status.warning);
@@ -1610,6 +2002,82 @@ describe('AppOrchestrator: region edge warning', () => {
       expect(transitions).toBe(1);
       expect(h.orchestrator.status.warning).not.toBeNull();
     });
+
+    /**
+     * #80, F8. The log's throttle was handed every clean frame, and a clean frame reset it - so
+     * inside a flicker every dirty frame logged as if the problem had just started. 65 lines in
+     * about 12 minutes on the live app. It now re-arms when the warning the user sees clears, which
+     * is the only point at which "it started again" is true.
+     */
+    it('logs a flickering edge once, and again only after the warning has really cleared', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
+      await h.orchestrator.initialize();
+
+      for (let i = 0; i < 3; i++) {
+        h.sidecar.emit('frame', frameWith(DIRTY));
+        h.sidecar.emit('frame', frameWith(CLEAN));
+      }
+      expect(edgeLogLines(h)).toHaveLength(1);
+
+      timers.elapse();
+      expect(h.orchestrator.status.warning).toBeNull();
+
+      h.sidecar.emit('frame', frameWith(DIRTY));
+      expect(edgeLogLines(h)).toHaveLength(2);
+    });
+  });
+
+  /**
+   * #80, F7. The edge warning is about the region the text was clipped by. Once the region or the
+   * monitor changes, it describes a rectangle that no longer exists - and in `paused` or `snapshot`
+   * no frame will come to re-evaluate it, so it used to stay up telling the user to widen a region
+   * they had already replaced.
+   */
+  describe('belongs to the region it was raised for (#80)', () => {
+    const elsewhere = () => ({
+      rect: [100, 100, 600, 200] as const,
+      monitorId: PRIMARY.id,
+      monitorSize: [1920, 1080] as const,
+    });
+
+    it('is dropped the moment the region changes, even with capture stopped', async () => {
+      const h = harness({ config: REGION_CONFIG });
+      await h.orchestrator.initialize();
+      h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
+      h.orchestrator.pause();
+      expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
+      const seen: Array<string | null> = [];
+      h.orchestrator.subscribe((status) => seen.push(status.warning));
+
+      h.config.change({ capture: { region: elsewhere() } });
+
+      expect(h.orchestrator.status.warning).toBeNull();
+      expect(seen).toContain(null);
+    });
+
+    it('cancels a clear that was counting down for the old region', async () => {
+      const timers = fakeTimers();
+      const h = harness({ config: REGION_CONFIG, schedule: timers.schedule });
+      await h.orchestrator.initialize();
+      h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
+      h.sidecar.emit('frame', frameWith([{ bbox: [20, 20, 300, 40] }]));
+      expect(timers.live).toHaveLength(1);
+
+      h.config.change({ capture: { region: elsewhere() } });
+
+      expect(timers.live).toHaveLength(0);
+    });
+
+    it('is left alone by a settings change that did not move the region', async () => {
+      const h = harness({ config: REGION_CONFIG });
+      await h.orchestrator.initialize();
+      h.sidecar.emit('frame', frameWith([{ bbox: [0, 20, 300, 40] }]));
+
+      h.config.change({ capture: { intervalActive: 250 } });
+
+      expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
+    });
   });
 
   it('never warns about edges when the whole monitor is the region', async () => {
@@ -1625,7 +2093,8 @@ describe('AppOrchestrator: region edge warning', () => {
 
     h.sidecar.emit('frame', frameWith([{ bbox: [0, 0, 300, 40] }]));
 
-    expect(h.orchestrator.status.warning).not.toContain('touching');
+    expect(h.orchestrator.status.warning).not.toBe(REGION_EDGE_WARNING);
+    expect(edgeLogLines(h)).toHaveLength(0);
     expect(h.orchestrator.status.warning).toContain('no capture region has been chosen');
   });
 
@@ -1676,8 +2145,103 @@ describe('AppOrchestrator: region edge warning', () => {
 
       h.sidecar.emit('frame', cornerFrame([{ bbox: [0, 20, 1200, 40] }]));
 
-      expect(h.orchestrator.status.warning).toContain('right');
-      expect(h.orchestrator.status.warning).not.toContain('left');
+      expect(h.orchestrator.status.warning).toBe(REGION_EDGE_WARNING);
+      // Which edge is the log's to say since #80 (F1), and it still says exactly this one.
+      expect(edgeLogLines(h).map((line) => line.fields?.['edges'])).toEqual([['right']]);
+    });
+  });
+
+  /**
+   * #80, L1, at the seam: the live region, end to end. `region-guard.test.ts` owns the snapping
+   * arithmetic; what is only testable here is that `#resolveRegion` applies it to what goes on the
+   * wire and not to what is stored, and that the frame the sidecar echoes back then reads clean.
+   */
+  describe('a saved region 1-2px short of the screen edge (#80)', () => {
+    const WIDE: MonitorInfo = { id: PRIMARY.id, bounds: [0, 0, 3440, 1440], scale: 1 };
+    const LIVE_CONFIG: Config = {
+      ...DEFAULT_CONFIG,
+      capture: {
+        ...DEFAULT_CONFIG.capture,
+        monitorId: WIDE.id,
+        // The live app's saved region. Padded by the default 8 it used to reach the wire as
+        // [0, 1, 3440, 1437] - 1px short of the top, 2px short of the bottom.
+        region: { rect: [7, 9, 3430, 1421], monitorId: WIDE.id, monitorSize: [3440, 1440] },
+      },
+    };
+
+    /** What the real sidecar does: frames carry the region the last `configure` asked for. */
+    function echoedFrame(h: Harness, lines: readonly { bbox: readonly [number, number, number, number] }[]) {
+      const configures = h.sidecar.sent.filter((command) => command.cmd === 'configure');
+      const last = configures[configures.length - 1];
+      if (last?.cmd !== 'configure') throw new Error('nothing has been configured');
+      return {
+        ev: 'frame' as const,
+        seq: 1,
+        timings: { captureUs: 1, diffUs: 1, ocrUs: 1 },
+        monitor: WIDE,
+        region: last.region,
+        lines: lines.map((entry) => ({ text: 'sample', bbox: entry.bbox })),
+      };
+    }
+
+    it('puts the whole monitor on the wire, and leaves the stored region as it was', async () => {
+      const h = harness({ config: LIVE_CONFIG, monitors: [WIDE] });
+      await h.orchestrator.initialize();
+
+      expect(h.sidecar.sent.find((command) => command.cmd === 'configure')).toMatchObject({
+        region: [0, 0, 3440, 1440],
+      });
+      expect(h.config.current.capture.region?.rect).toEqual([7, 9, 3430, 1421]);
+    });
+
+    it('does not warn about text at the very top or bottom of the screen', async () => {
+      const h = harness({ config: LIVE_CONFIG, monitors: [WIDE] });
+      await h.orchestrator.initialize();
+
+      h.sidecar.emit('frame', echoedFrame(h, [{ bbox: [100, 0, 300, 20] }]));
+      h.sidecar.emit('frame', echoedFrame(h, [{ bbox: [100, 1420, 300, 20] }]));
+
+      expect(h.orchestrator.status.warning).toBeNull();
+      expect(edgeLogLines(h)).toHaveLength(0);
+    });
+
+    it('snaps a zero-padding pick that stopped on the last pixel the cursor reaches', async () => {
+      const display = {
+        id: 21,
+        label: 'Dell AW3423DW',
+        bounds: { x: 0, y: 0, width: 3440, height: 1440 },
+        size: { width: 3440, height: 1440 },
+        scaleFactor: 1,
+      };
+      const h = harness({
+        config: { ...LIVE_CONFIG, capture: { ...LIVE_CONFIG.capture, regionPadding: 0 } },
+        monitors: [WIDE],
+        registry: {
+          monitors: [WIDE],
+          setMonitors: () => undefined,
+          displayFor: (id) => (id === WIDE.id ? display : undefined),
+        },
+        picker: {
+          // Dragged to the right edge: the cursor stops at x = 3439, so the rect ends 1px short.
+          pickRegion: async () => ({
+            rect: { x: 100, y: 100, width: 3339, height: 200 },
+            origin: { x: 0, y: 0 },
+            displayId: 21,
+          }),
+        },
+      });
+      await h.orchestrator.initialize();
+
+      await h.orchestrator.selectRegion();
+      await vi.waitFor(() => {
+        expect(h.sidecar.sent.filter((command) => command.cmd === 'configure')).toHaveLength(2);
+      });
+
+      // Stored as dragged - `clampRegion` at pick time must not snap, or changing the slop later
+      // could never give the user their exact rectangle back.
+      expect(h.config.current.capture.region?.rect).toEqual([100, 100, 3339, 200]);
+      const configures = h.sidecar.sent.filter((command) => command.cmd === 'configure');
+      expect(configures[1]).toMatchObject({ region: [100, 100, 3340, 200] });
     });
   });
 });
@@ -2194,7 +2758,7 @@ describe('AppOrchestrator: which warnings may leave the screen by themselves (#5
   });
 
   it.each([
-    ['text clipping the region (#30)', 'text is touching the right edge of the region; widen it'],
+    ['text clipping the region (#30)', REGION_EDGE_WARNING],
     ['a saved region that no longer applies (#31)', 'DISPLAY1 was 1920x1080 when the region was saved'],
     ['auto mode finding nothing (#50)', 'no change has been detected for over 25s'],
   ])('lets the warning about %s stop covering the screen', (_label, warning) => {
@@ -2232,7 +2796,7 @@ describe('AppOrchestrator: which warnings may leave the screen by themselves (#5
     expect(describeAppWarning(NO_REGION_WARNING)?.remedy).not.toContain('change');
 
     for (const warning of [
-      'text is touching the right edge of the region; widen it',
+      REGION_EDGE_WARNING,
       'DISPLAY1 was 1920x1080 when the region was saved',
       'no change has been detected for over 25s',
     ]) {
