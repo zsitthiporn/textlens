@@ -157,7 +157,12 @@ const HELPERS = `
   // them into CSS custom properties on every payload, so omitting them writes an invalid value and
   // the box silently falls back to the browser's 16px default instead of the configured 17px.
   // These are DEFAULT_CONFIG.render's values, so the harness measures what the app measures.
+  // \`id\` is required by OverlayRenderMessage (#52) and the renderer now refuses a message without
+  // one before touching any state (#81 F3) - exactly what a real WindowManager never sends. The
+  // harness stamps a fresh one per message the same way WindowManager does.
+  window.__harnessMessageId = window.__harnessMessageId ?? 0;
   const message = (entries, opts = {}) => ({
+    id: ++window.__harnessMessageId,
     payload: { seq: opts.seq ?? 1, complete: true, entries, degraded: false },
     origin: { x: 0, y: 0 },
     config: {
