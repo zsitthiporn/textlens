@@ -216,6 +216,21 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     };
   }
 
+  /**
+   * A controllable clock, for the tests below that need to simulate real elapsed time passing
+   * while a banner is displaced - `fakeTimers()` above has no notion of elapsed time at all, it
+   * only supports "fire whatever is pending right now".
+   */
+  function fakeClock(startAtMs = 0) {
+    let currentMs = startAtMs;
+    return {
+      now: () => currentMs,
+      advance(ms: number) {
+        currentMs += ms;
+      },
+    };
+  }
+
   const EDGE = {
     severity: 'warning',
     cause: 'text is touching the right edge of the region; widen it',
@@ -306,9 +321,10 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     expect(timers.live).toHaveLength(1);
   });
 
-  it('shows a condition again if it is fixed and then comes back', () => {
+  it('shows a condition again if it is fixed and then comes back, with a fresh budget and a fresh log line (#88)', () => {
     const timers = fakeTimers();
-    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    const rec = recordingLogger();
+    const reporter = new ErrorReporter({ schedule: timers.schedule, logger: rec.logger });
     reporter.set('region', EDGE);
     timers.elapse();
     expect(reporter.banner).toBeNull();
@@ -319,6 +335,12 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     // "The condition, not the clock, decides whether it is still true" still holds: having gone
     // away and returned, this is news, not the message the user already dismissed by waiting.
     expect(reporter.banner?.cause).toBe(EDGE.cause);
+    // A fresh occurrence - not a resumption - gets the full budget back, not a remainder.
+    expect(timers.live[0]?.delayMs).toBe(DEFAULT_BANNER_TIMEOUT_MS);
+    // ...and a fresh log line, exactly as it did before #88: this is the case that rule is meant
+    // to keep working even though #88 stops a *displaced-and-returned* occurrence from relogging.
+    const regionLines = rec.lines.filter((line) => (line.fields as { source?: string } | undefined)?.source === 'region');
+    expect(regionLines).toHaveLength(2);
   });
 
   it('does not let a displaced warning’s timer blank the message that displaced it', () => {
@@ -334,17 +356,29 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     expect(reporter.banner?.cause).toBe('the capture engine died');
   });
 
-  it('gives a warning that was covered up a full turn of its own once the error clears', () => {
+  /**
+   * This used to be titled "gives a warning that was covered up a full turn of its own once the
+   * error clears", and asserted only that a timer got scheduled again - true before #88 and still
+   * true after, so it was not actually pinning "full turn" vs "remainder". #88 changes exactly
+   * this: the warning resumes with whatever budget it has *left*, not a fresh
+   * {@link DEFAULT_BANNER_TIMEOUT_MS} - see the module doc for why the old comment was wrong and
+   * what a real run showed instead (#88's flapping-region-vs-standing-hotkeys log).
+   */
+  it('resumes a warning that was covered up with its remaining budget, not a fresh one, once the error clears (#88)', () => {
+    const clock = fakeClock();
     const timers = fakeTimers();
-    const reporter = new ErrorReporter({ schedule: timers.schedule });
+    const reporter = new ErrorReporter({ schedule: timers.schedule, now: clock.now });
     reporter.set('region', EDGE);
-    reporter.set('sidecar', { severity: 'error', cause: 'the capture engine died', remedy: 'restart it' });
-    timers.elapse();
 
+    clock.advance(3_000); // the warning has been drawn for 3s of its 8s budget...
+    reporter.set('sidecar', { severity: 'error', cause: 'the capture engine died', remedy: 'restart it' });
+    clock.advance(20_000); // ...and stays covered for 20s - far longer than its budget ever was.
     reporter.set('sidecar', null);
 
     expect(reporter.banner?.cause).toBe(EDGE.cause);
-    expect(timers.live).toHaveLength(1);
+    // 8s total minus the 3s it already spent, not a fresh 8s - the twenty seconds it spent
+    // displaced cost it nothing further, because the clock was paused, not reset.
+    expect(timers.live[0]?.delayMs).toBe(DEFAULT_BANNER_TIMEOUT_MS - 3_000);
   });
 
   it('sends the tray the standing alert and the overlay the drawn one, never the other way round', () => {
@@ -363,6 +397,203 @@ describe('ErrorReporter: the overlay banner hands the screen back (#59)', () => 
     expect(surfaces.trayError).toBeNull();
     expect(surfaces.overlayAlert).toBeNull();
   });
+});
+
+/**
+ * #88: the budget is spent in total across every stretch an occurrence is drawn, and the log line
+ * is written once per occurrence - not once per turn on the top slot.
+ *
+ * The reproduction below is the shape of the real bug: a standing `hotkeys` warning underneath a
+ * `region` warning that keeps clearing and reasserting itself. Before #88, `hotkeys` regained a
+ * fresh {@link DEFAULT_BANNER_TIMEOUT_MS} - and a fresh log line - every single time `region`
+ * stepped out of the way, which in practice meant it never ran out and never stopped being
+ * relogged. `region` itself is not the bug: it genuinely clears and reasserts each cycle, so it
+ * is correctly a new occurrence, a fresh budget and a fresh log line every time - the test below
+ * pins that too, so nobody "fixes" it into matching `hotkeys`.
+ */
+describe('ErrorReporter: cumulative banner budget per occurrence, and the log line that goes with it (#88)', () => {
+  /**
+   * A clock and scheduler combined, so `advance` can fire a pending timer exactly at its deadline
+   * and keep going - unlike `fakeTimers()`/`fakeClock()` above, which either has no notion of
+   * elapsed time or has no notion of a timer actually firing partway through an `advance`. Needed
+   * here, and only here: proving the *integral* of drawn time requires a timer that can expire
+   * mid-`advance` and be observed doing so, through `ErrorReporter.subscribe`.
+   */
+  function virtualTime() {
+    let currentMs = 0;
+    let nextId = 0;
+    const pending = new Map<number, { readonly deadlineMs: number; readonly handler: () => void }>();
+
+    const schedule: ScheduleTimer = (handler, delayMs) => {
+      const id = nextId;
+      nextId += 1;
+      pending.set(id, { deadlineMs: currentMs + delayMs, handler });
+      return () => {
+        pending.delete(id);
+      };
+    };
+
+    function advance(ms: number): void {
+      const targetMs = currentMs + ms;
+      for (;;) {
+        let earliestId: number | null = null;
+        let earliestDeadlineMs = Infinity;
+        for (const [id, entry] of pending) {
+          if (entry.deadlineMs <= targetMs && entry.deadlineMs < earliestDeadlineMs) {
+            earliestId = id;
+            earliestDeadlineMs = entry.deadlineMs;
+          }
+        }
+        if (earliestId === null) break;
+        const entry = pending.get(earliestId);
+        pending.delete(earliestId);
+        currentMs = earliestDeadlineMs;
+        entry?.handler();
+      }
+      currentMs = targetMs;
+    }
+
+    return { now: () => currentMs, schedule, advance };
+  }
+
+  const HOTKEYS = {
+    severity: 'warning',
+    cause: 'typing Shift+Space anywhere in Windows will trigger "Translate once" instead of typing a space',
+    remedy: 'pick a different key in the tray menu → "Settings…", under "Shortcuts"',
+  } as const;
+  const REGION = {
+    severity: 'warning',
+    cause: 'text is touching the right edge of the region; widen it',
+    remedy: 'use the tray menu → "Select Region…"',
+  } as const;
+
+  function sourceLines(rec: { readonly lines: readonly RecordedLine[] }, source: string): RecordedLine[] {
+    return rec.lines.filter((line) => (line.fields as { source?: string } | undefined)?.source === source);
+  }
+
+  it(
+    'draws a standing warning for at most its total budget, and logs it once, while a ' +
+      'higher-ranked neighbour clears and reasserts every ~10s for 60s (#88 reproduction)',
+    () => {
+      const vt = virtualTime();
+      const rec = recordingLogger();
+      const reporter = new ErrorReporter({ schedule: vt.schedule, now: vt.now, logger: rec.logger });
+
+      // Sampled through `subscribe`, not through the `set()` call sites: the timer that spends
+      // `hotkeys`'s last few hundred milliseconds of budget fires *during* `vt.advance`, between
+      // two `set()` calls, and only a listener sees that transition at the moment it happens.
+      const timeline: { readonly atMs: number; readonly cause: string | null }[] = [];
+      reporter.subscribe(() => {
+        timeline.push({ atMs: vt.now(), cause: reporter.banner?.cause ?? null });
+      });
+
+      reporter.set('hotkeys', HOTKEYS);
+      for (let cycle = 0; cycle < 6; cycle += 1) {
+        vt.advance(5_000);
+        reporter.set('region', REGION); // region outranks hotkeys - this displaces it
+        vt.advance(5_000);
+        reporter.set('region', null); // region genuinely clears - hotkeys resumes
+      }
+
+      let hotkeysDrawnMs = 0;
+      for (let i = 0; i < timeline.length - 1; i += 1) {
+        const entry = timeline[i];
+        const nextEntry = timeline[i + 1];
+        if (entry !== undefined && nextEntry !== undefined && entry.cause === HOTKEYS.cause) {
+          hotkeysDrawnMs += nextEntry.atMs - entry.atMs;
+        }
+      }
+
+      // The whole point of #88: a continuously-standing warning is drawn for its budget in total,
+      // never more - not a fresh turn every time a flapping neighbour steps aside. It should hit
+      // the budget exactly, not merely stay under it - anything less means time is being lost
+      // somewhere, not saved.
+      expect(hotkeysDrawnMs).toBe(DEFAULT_BANNER_TIMEOUT_MS);
+      // The condition itself never went away - the tray still says so...
+      expect(reporter.top?.cause).toBe(HOTKEYS.cause);
+      // ...but its banner budget is spent, permanently, for as long as it keeps being asserted.
+      expect(reporter.banner).toBeNull();
+
+      // Logged once for the one occurrence - not once per regain of the top slot, which is the
+      // other half of #88 (the log line repeating every ~10s in the issue's own capture).
+      expect(sourceLines(rec, 'hotkeys')).toHaveLength(1);
+      // `region` truly clears and reasserts each cycle - six real occurrences, six log lines.
+      // Pinned here too, so the fix above does not get generalised into suppressing this.
+      expect(sourceLines(rec, 'region')).toHaveLength(6);
+    },
+  );
+
+  /**
+   * Reading (a) of item 3, per the lead: log-once-per-occurrence is one rule applied to every
+   * severity - an `error` standing under a flapping higher-ranked alert must not relog on every
+   * displacement either, or it reproduces #88's own bug one severity up. The *only* thing that
+   * stays different for `error`/`fatal`/`sticky` is the banner itself, which never times out.
+   */
+  it(
+    'never times out, and logs once per occurrence even across repeated displacement - same rule as a warning (#88)',
+    () => {
+      let scheduleCalls = 0;
+      const schedule: ScheduleTimer = () => {
+        scheduleCalls += 1;
+        return () => {};
+      };
+      const rec = recordingLogger();
+      const reporter = new ErrorReporter({ schedule, logger: rec.logger });
+      const DIED = { severity: 'error', cause: 'the capture engine died', remedy: 'restart it' } as const;
+
+      reporter.set('sidecar', DIED);
+      // A worse alert displaces it, then clears, twice over - `sidecar` regains the top slot
+      // twice without ever truly clearing itself.
+      reporter.set('ocr', { severity: 'fatal', cause: 'no recognizer', remedy: 'install it' });
+      reporter.set('ocr', null);
+      reporter.set('ocr', { severity: 'fatal', cause: 'no recognizer', remedy: 'install it' });
+      reporter.set('ocr', null);
+
+      // The banner: unchanged - `error` never auto-hides, so nothing was ever scheduled for it,
+      // and it is still drawn after all that displacement.
+      expect(scheduleCalls).toBe(0);
+      expect(reporter.banner?.cause).toBe(DIED.cause);
+      // The log: one line for the one occurrence, not one per regain of the top slot.
+      expect(sourceLines(rec, 'sidecar')).toHaveLength(1);
+
+      // A genuine clear - the condition actually fixed - and then coming back is a new
+      // occurrence, and gets a new log line, exactly like `region` in the reproduction above.
+      reporter.set('sidecar', null);
+      reporter.set('sidecar', DIED);
+      expect(sourceLines(rec, 'sidecar')).toHaveLength(2);
+    },
+  );
+
+  it(
+    'never times out, and logs once per occurrence even across repeated displacement - same as error/fatal (#88)',
+    () => {
+      let scheduleCalls = 0;
+      const schedule: ScheduleTimer = () => {
+        scheduleCalls += 1;
+        return () => {};
+      };
+      const rec = recordingLogger();
+      const reporter = new ErrorReporter({ schedule, logger: rec.logger });
+      const stickyWarning = { severity: 'warning', cause: 'no capture region has been chosen', remedy: 'r', sticky: true } as const;
+
+      reporter.set('region', stickyWarning);
+      // Displaced, then regains the top slot - twice - same shape as the `sidecar` case above.
+      reporter.set('ocr', { severity: 'fatal', cause: 'no recognizer', remedy: 'install it' });
+      reporter.set('ocr', null);
+      reporter.set('ocr', { severity: 'fatal', cause: 'no recognizer', remedy: 'install it' });
+      reporter.set('ocr', null);
+
+      // Sticky opts out of the timeout entirely - nothing was ever scheduled for it.
+      expect(scheduleCalls).toBe(0);
+      expect(reporter.banner?.cause).toBe(stickyWarning.cause);
+      // But not out of the log-dedup rule, which is not conditioned on severity or `sticky`.
+      expect(sourceLines(rec, 'region')).toHaveLength(1);
+
+      reporter.set('region', null);
+      reporter.set('region', stickyWarning);
+      expect(sourceLines(rec, 'region')).toHaveLength(2);
+    },
+  );
 });
 
 /**
@@ -418,9 +649,13 @@ describe('ErrorReporter: a logger that arrives late does not lose what happened 
     reporter.set('config', { severity: 'warning', cause: 'first', remedy: 'r' });
     // `fatal` outranks `warning`, so this is a second `top` change, not a replacement of the first.
     reporter.set('ocr', { severity: 'fatal', cause: 'second', remedy: 'r' });
-    // Clearing the fatal one hands `top` back to the still-standing warning - a third change.
+    // Clearing the fatal one hands `top` back to the still-standing warning - `config`/`first`
+    // never left `#alerts`, so this is the same occurrence regaining the top slot, not a new one.
+    // Before #88 this re-logged 'first' a third time; that was exactly the bug #88 was filed over
+    // (a standing warning re-logged every time a flapping neighbour stepped aside) - so the fix
+    // here is this line staying silent, not producing a third `user-facing alert`.
     reporter.set('ocr', null);
-    // And clearing that is the fourth: silence.
+    // And clearing `config` too - nothing left standing - is the next real change: silence.
     reporter.set('config', null);
 
     const rec = recordingLogger();
@@ -429,13 +664,11 @@ describe('ErrorReporter: a logger that arrives late does not lose what happened 
     expect(rec.lines.map((line) => line.message)).toEqual([
       'user-facing alert',
       'user-facing alert',
-      'user-facing alert',
       'all clear',
     ]);
     expect(rec.lines.map((line) => fieldText(line))).toEqual([
       expect.stringContaining('first'),
       expect.stringContaining('second'),
-      expect.stringContaining('first'),
       undefined,
     ]);
   });

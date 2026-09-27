@@ -45,6 +45,39 @@
  * The clock is injected ({@link ErrorReporterOptions.schedule}) for the same reason it is
  * everywhere else in this codebase: a test that waits eight real seconds is a test nobody runs.
  *
+ * ## The budget is cumulative per occurrence, not per turn on top (#88)
+ *
+ * This used to say a warning displaced by something worse "gets a full turn if it comes back" -
+ * that was wrong, and a real run is why: a `region` edge warning flapping on and off every few
+ * seconds displaced a standing `hotkeys` caution underneath it, and every single time the caution
+ * came back on top it was granted a fresh {@link DEFAULT_BANNER_TIMEOUT_MS}, because it had never
+ * been on screen long enough at a stretch to actually spend one. The result was a caution that
+ * had, in effect, no budget at all - drawn for as long as the process ran - and a log line for it
+ * repeating every time its flapping neighbour stepped aside, which is what a user actually saw as
+ * the banner "not stopping".
+ *
+ * The fix is that {@link DEFAULT_BANNER_TIMEOUT_MS} is spent **in total across every stretch an
+ * occurrence is drawn**, not reset by being covered up. Being displaced pauses the clock rather
+ * than refunding it; returning to the top slot resumes with whatever is left, and once the total
+ * is gone the message does not come back - {@link ErrorReporter.top} still has it, but
+ * {@link ErrorReporter.banner} does not draw it again. What still resets the budget, unchanged
+ * from before, is the message actually leaving {@link ErrorReporter.alerts} - a condition that
+ * cleared and later came back is news again, exactly as #59 always intended, and gets a fresh
+ * {@link DEFAULT_BANNER_TIMEOUT_MS} and a fresh log line.
+ *
+ * The same "once per occurrence, not once per turn on top" rule applies to the `user-facing
+ * alert` log line, and it applies to **every severity**, `error` and `fatal` included: logged
+ * when the occurrence starts (or genuinely restarts after clearing), not every time displacing it
+ * ends. Gating that to only `warning`/`info` would leave an `error` standing under a flapping
+ * higher-ranked alert relogging on every displacement - #88's bug by another name, just one
+ * severity up.
+ *
+ * What *is* still different for `error`, `fatal` and a `sticky` alert - and only this - is the
+ * banner: {@link #bannerFor} never times it out regardless of how long it has been drawn, because
+ * those are the cases where continuing to look at a working-looking screen is the actual harm
+ * (see "No alert expires" above). The budget and the log-dedup are the same mechanism
+ * ({@link #occurrences}) for every severity; only the timeout check reads severity at all.
+ *
  * ## A logger that arrives late does not lose what happened before it (#62)
  *
  * `index.ts` constructs this class at module scope, before `createLogger` has resolved - see
@@ -186,6 +219,17 @@ export type CancelTimer = () => void;
  */
 export type ScheduleTimer = (handler: () => void, delayMs: number) => CancelTimer;
 
+/**
+ * Milliseconds since some fixed point, for measuring how long an occurrence has actually spent
+ * drawn on the banner (#88). Injected for the same reason {@link ScheduleTimer} is: a test that
+ * measures a cumulative budget by waiting for wall-clock time to pass is a test nobody runs.
+ *
+ * Deliberately never consulted on a timeout firing - see {@link ErrorReporter}'s `#expireBanner`
+ * for why reading the clock there instead of marking the occurrence exhausted directly would give
+ * the wrong answer under exactly the fake schedule this module's own tests use.
+ */
+export type Clock = () => number;
+
 function scheduleWithTimeout(handler: () => void, delayMs: number): CancelTimer {
   const timer = setTimeout(handler, delayMs);
   // A banner that is about to hide itself must never be the reason the process is still alive:
@@ -201,8 +245,10 @@ export interface ErrorReporterOptions {
   readonly logger?: Logger;
   /** How long a non-severe alert stays on the overlay banner. See {@link DEFAULT_BANNER_TIMEOUT_MS}. */
   readonly bannerTimeoutMs?: number;
-  /** The clock behind that timeout. Tests pass one they can fire by hand. */
+  /** Fires the banner timeout. Tests pass one they can fire by hand. */
   readonly schedule?: ScheduleTimer;
+  /** Measures elapsed banner time for the cumulative budget (#88). Defaults to {@link Date.now}. */
+  readonly now?: Clock;
 }
 
 /** One line {@link ErrorReporter} would have logged, held until {@link ErrorReporter.attachLogger}. */
@@ -218,18 +264,31 @@ export class ErrorReporter {
   readonly #listeners = new Set<(top: Alert | null) => void>();
   readonly #bannerTimeoutMs: number;
   readonly #schedule: ScheduleTimer;
+  readonly #now: Clock;
   /**
-   * Alerts whose banner time is up, keyed by severity and cause (#59).
+   * Per-occurrence bookkeeping, keyed by severity+cause (#59, #88) - one entry for exactly as long
+   * as a message stays asserted anywhere in {@link #alerts}, for every severity.
    *
    * Keyed by the *message* rather than by source, because that is the unit the user experiences:
-   * a source re-asserting the same words is the same banner they already read, and a source
-   * changing its wording is news. Pruned in {@link #recompute} the moment an alert leaves the
-   * map, so a condition that is fixed and then comes back is shown again rather than being
-   * remembered as dismissed forever.
+   * a source re-asserting the same words is the same occurrence they already read, and a source
+   * changing its wording is news, same as before #88. What #88 adds is two fields. `spentMs` is
+   * the total time this occurrence has actually spent drawn on the banner, charged in
+   * {@link #retime} whenever the banner stops showing it (displaced or exhausted) rather than
+   * reset by the displacement - see the module doc for the bug this replaces. It is only ever
+   * read for a non-sticky `warning`/`info`: `error`, `fatal` and `sticky` alerts never auto-hide,
+   * so nothing consults it for them, even though an entry exists. `logged` is whether
+   * `user-facing alert` has already been written for this occurrence - read for every severity, so
+   * regaining the top slot after being displaced does not re-log any of them.
+   *
+   * Both fields die with the entry: pruned in {@link #recompute} the instant nothing asserts this
+   * message any more, which is what makes "fixed and come back" a fresh entry - fresh budget,
+   * fresh log line - rather than a resumption of the one that just ended.
    */
-  readonly #timedOut = new Set<string>();
+  readonly #occurrences = new Map<string, { spentMs: number; logged: boolean }>();
   /** The key the pending timeout belongs to, or `null` when nothing is being timed. */
   #timing: string | null = null;
+  /** When `#timing` started being drawn, per {@link #now}. `null` exactly when `#timing` is. */
+  #timingStartedAt: number | null = null;
   #cancelTimer: CancelTimer | null = null;
   #top: Alert | null = null;
   #banner: Alert | null = null;
@@ -247,6 +306,7 @@ export class ErrorReporter {
     this.#log = (options.logger ?? nullLogger()).child('alerts');
     this.#bannerTimeoutMs = options.bannerTimeoutMs ?? DEFAULT_BANNER_TIMEOUT_MS;
     this.#schedule = options.schedule ?? scheduleWithTimeout;
+    this.#now = options.now ?? Date.now;
   }
 
   /**
@@ -340,31 +400,53 @@ export class ErrorReporter {
     const topChanged = !isSameMessage(next, this.#top);
     this.#top = next;
 
-    // A message nobody is asserting any more has no banner history worth keeping. A condition
-    // that was fixed and has come back is news again, and showing it again is the honest
-    // reading of "the clock does not decide whether it is still true".
-    if (this.#timedOut.size > 0) {
-      const live = new Set(standing.map(messageKey));
-      for (const key of [...this.#timedOut]) {
-        if (!live.has(key)) this.#timedOut.delete(key);
-      }
+    // A message nobody is asserting any more has no occurrence worth keeping - neither a banner
+    // budget nor a "have I logged this" flag. A condition that was fixed and has come back is
+    // news again, and showing it (and logging it) again is the honest reading of "the clock does
+    // not decide whether it is still true" (#59, #88).
+    //
+    // Tracked for every severity, not only the ones the banner ever times out: "logged when a
+    // condition starts, not every time it regains the top slot" is one rule, and an `error` or
+    // `fatal` standing under a flapping higher-ranked alert reproduces #88's log cadence exactly
+    // as a `warning` does if this were gated to the auto-hiding population. `spentMs` still only
+    // means anything for that population - `#bannerFor` and `#retime` never consult it for
+    // anything else, since `error`/`fatal`/sticky never auto-hide regardless of what it holds.
+    const live = new Set(standing.map(messageKey));
+    for (const key of [...this.#occurrences.keys()]) {
+      if (!live.has(key)) this.#occurrences.delete(key);
+    }
+    for (const alert of standing) {
+      const key = messageKey(alert);
+      if (!this.#occurrences.has(key)) this.#occurrences.set(key, { spentMs: 0, logged: false });
     }
 
-    const banner = next !== null && !this.#timedOut.has(messageKey(next)) ? next : null;
+    const banner = this.#bannerFor(next);
     const bannerChanged = !isSameMessage(banner, this.#banner);
     this.#banner = banner;
     this.#retime();
 
     // Logged on the alert changing, never on the banner hiding: a hide is not a new condition,
     // and a second line for it would read in the log exactly like the alert firing twice.
+    //
+    // "Changing" means the *occurrence* starting (or genuinely restarting after clearing), not
+    // merely regaining the top slot - for every severity, `error` and `fatal` included. That is
+    // one rule applied uniformly, not two: gating it to only `warning`/`info` would leave an
+    // `error` standing under a flapping higher-ranked alert relogging on every displacement,
+    // which is #88's bug by another name. The one thing that stays different for `error`,
+    // `fatal` and a `sticky` alert is the banner itself - see `#bannerFor` - never this.
     if (topChanged) {
-      if (next === null) this.#logLine('info', 'all clear');
-      else {
-        this.#logLine('warn', 'user-facing alert', {
-          source: next.source,
-          severity: next.severity,
-          text: describeAlert(next),
-        });
+      if (next === null) {
+        this.#logLine('info', 'all clear');
+      } else {
+        const occurrence = this.#occurrences.get(messageKey(next));
+        if (occurrence === undefined || !occurrence.logged) {
+          this.#logLine('warn', 'user-facing alert', {
+            source: next.source,
+            severity: next.severity,
+            text: describeAlert(next),
+          });
+          if (occurrence !== undefined) occurrence.logged = true;
+        }
       }
     }
 
@@ -400,44 +482,80 @@ export class ErrorReporter {
   }
 
   /**
-   * Keep the pending timeout pointed at whatever the banner is showing now (#59).
+   * What should actually be drawn: `next`, unless it is a non-sticky `warning`/`info` occurrence
+   * that has already spent its whole {@link DEFAULT_BANNER_TIMEOUT_MS} across every stretch it has
+   * been drawn, displacements included (#59, #88).
+   */
+  #bannerFor(next: Alert | null): Alert | null {
+    if (next === null || !autoHidesFromBanner(next)) return next;
+    const spent = this.#occurrences.get(messageKey(next))?.spentMs ?? 0;
+    return spent < this.#bannerTimeoutMs ? next : null;
+  }
+
+  /**
+   * Keep the pending timeout pointed at whatever the banner is showing now, and charge the
+   * occurrence that was showing before for the time it actually spent on screen (#59, #88).
    *
    * One timer at a time, owned by the displayed message. The case that forces that: a warning
    * appears, an `error` displaces it three seconds later, and the original timeout is still in
    * flight - left running, it would fire while a *different* message is on screen and blank a
-   * banner that had been up for three seconds. Cancelling on every banner change also gives the
-   * displaced warning a full turn if it comes back, which is what the user would expect, having
-   * had it covered up.
+   * banner that had been up for three seconds. What #88 changes is what happens to those three
+   * seconds: they are added to the occurrence's `spentMs` rather than discarded, so a warning
+   * displaced for twenty seconds and then uncovered resumes with five seconds left, not a fresh
+   * eight - and a `region` warning that keeps flapping every few seconds no longer hands the
+   * `hotkeys` caution underneath it an endless series of fresh turns, which is the bug #88 was
+   * filed over. See the module doc for the full account.
    *
-   * A banner that has not changed keeps its running timer untouched. That is what makes the
-   * timeout mean "eight seconds on screen" rather than "eight seconds since the last frame that
-   * re-asserted this" - and re-assertion is constant, since the condition behind a warning is
-   * usually true on every frame. Two guards upstream already absorb most of it ({@link set}
-   * returns early for an identical message from the same source, and `AppOrchestrator` dedupes
-   * its warning text before that), and this is the one that has to hold when they do not.
+   * A banner that has not changed keeps its running timer untouched and nothing is charged - that
+   * is what makes the budget mean "eight seconds actually drawn" rather than "eight seconds since
+   * the last frame that re-asserted this" - and re-assertion is constant, since the condition
+   * behind a warning is usually true on every frame. Two guards upstream already absorb most of it
+   * ({@link set} returns early for an identical message from the same source, and
+   * `AppOrchestrator` dedupes its warning text before that), and this is the one that has to hold
+   * when they do not.
    */
   #retime(): void {
     const banner = this.#banner;
     const wanted = banner !== null && autoHidesFromBanner(banner) ? messageKey(banner) : null;
     if (wanted === this.#timing) return;
 
+    if (this.#timing !== null && this.#timingStartedAt !== null) {
+      const occurrence = this.#occurrences.get(this.#timing);
+      if (occurrence !== undefined) occurrence.spentMs += Math.max(0, this.#now() - this.#timingStartedAt);
+    }
     this.#cancelTimer?.();
     this.#cancelTimer = null;
     this.#timing = null;
+    this.#timingStartedAt = null;
     if (wanted === null) return;
 
+    const spent = this.#occurrences.get(wanted)?.spentMs ?? 0;
+    const remaining = this.#bannerTimeoutMs - spent;
+    // `#bannerFor` already turns an exhausted occurrence into a `null` banner before `wanted`
+    // could ever be computed from it, so this is unreachable in practice - kept as a guard rather
+    // than an assumption, because "schedule a non-positive timeout" is a worse failure than a
+    // no-op.
+    if (remaining <= 0) return;
+
     this.#timing = wanted;
+    this.#timingStartedAt = this.#now();
     this.#cancelTimer = this.#schedule(() => {
       this.#expireBanner(wanted);
-    }, this.#bannerTimeoutMs);
+    }, remaining);
   }
 
   #expireBanner(key: string): void {
     // A timeout that fired after being superseded has nothing to say about what is on screen now.
     if (this.#timing !== key) return;
     this.#timing = null;
+    this.#timingStartedAt = null;
     this.#cancelTimer = null;
-    this.#timedOut.add(key);
+    // Marked exhausted directly, not derived from `#now() - startedAt`: this timer already ran
+    // for exactly this occurrence's remaining budget by construction (see `#retime`), and reading
+    // the clock again here would read close to zero elapsed under a fake `schedule` that fires
+    // handlers without ever advancing a clock - which is what most of this file's own tests do.
+    const occurrence = this.#occurrences.get(key);
+    if (occurrence !== undefined) occurrence.spentMs = this.#bannerTimeoutMs;
     // Recomputed rather than assigning `#banner = null` directly, so the hide travels the same
     // path and reaches the same listeners as every other change to what the user sees.
     this.#recompute();
