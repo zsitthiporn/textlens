@@ -427,15 +427,31 @@ describe('progressive render: cache hits do not wait behind a round trip', () =>
 
 describe('ordering and failure containment', () => {
   it('a slow frame that finishes late cannot overwrite a newer one', async () => {
-    const h = harness();
+    // Genuinely overlapping, as in production: the slow frame is still at the engine when the
+    // newer one starts and finishes. This used to be two sequential frames with the second one
+    // carrying a *lower* `seq` - which is not a late frame at all but a restarted sidecar, and
+    // dropping it is the bug #78 fixed. Order is now the order the pipeline received frames in.
+    let release: (() => void) | undefined;
+    const engine = new FakeEngine('google', async (texts) => {
+      if (texts.includes('alpha alpha')) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return texts.map((text) => `google(${text})`);
+    });
+    const h = harness({}, engine);
 
-    await h.pipeline.handleFrame(frameWith(['alpha alpha'], 9), DISPLAY);
-    expect(h.payloads).toHaveLength(1);
+    const slow = h.pipeline.handleFrame(frameWith(['alpha alpha'], 1), DISPLAY);
+    const fresh = await h.pipeline.handleFrame(frameWith(['bravo bravo'], 2), DISPLAY);
+    expect(fresh?.entries.map((entry) => entry.text)).toEqual(['google(bravo bravo)']);
 
-    const stale = await h.pipeline.handleFrame(frameWith(['bravo bravo'], 4), DISPLAY);
+    release?.();
+    const stale = await slow;
 
     expect(stale).toBeUndefined();
     expect(h.payloads).toHaveLength(1);
+    expect(h.logger.lines.some((line) => line.message.includes('overtaken by a newer frame'))).toBe(true);
   });
 
   it('a throwing stage is reported and the frame is skipped, not crashed', async () => {
