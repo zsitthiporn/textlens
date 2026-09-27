@@ -422,7 +422,17 @@ export class SidecarClient {
       this.#log.warn('sidecar did not exit after stdin close; killing', { pid: child.pid, timeoutMs });
       child.kill();
       const killed = await raceWithTimeout(exited, timeoutMs);
-      if (!killed) this.#log.error('sidecar survived kill()', { pid: child.pid });
+      if (!killed) {
+        // #77. Kept, not let go: a process that outlived its kill is still alive and still holding
+        // capture resources, and dropping it here let the next `start()` spawn a second sidecar
+        // beside it - whose `exit`, when the first finally went, would be reported against the
+        // wrong process. `start()` refuses instead, and the exit handler still releases it if it
+        // ever goes.
+        this.#log.error('sidecar survived kill(); keeping hold of it rather than starting another beside it', {
+          pid: child.pid,
+        });
+        return;
+      }
     }
 
     this.#child = null;
@@ -515,11 +525,30 @@ export class SidecarClient {
     child.stderr?.on('end', () => {
       for (const line of decoder.flush()) log.warn(line, { stream: 'stderr' });
     });
+
+    // #77 LR-10. Same reason stdout has one: a stream `error` with no listener is rethrown as an
+    // uncaught exception, which in the main process is Electron's blocking error box (#67) - for a
+    // stream that only ever carries diagnostics.
+    child.stderr?.on('error', (error: Error) => {
+      this.#log.error('sidecar stderr failed', { message: error.message });
+    });
   }
 
   #attachLifecycle(child: ChildProcess): void {
     child.on('error', (error: Error) => {
-      this.#log.error('sidecar process error', { message: error.message });
+      this.#log.error('sidecar process error', { message: error.message, spawned: child.pid !== undefined });
+      // #77 LR-04. A spawn that fails (ENOENT, EACCES - e.g. `TEXTLENS_SIDECAR_PATH` naming a
+      // directory, which `existsSync` accepts) emits `error` and `close` but never `exit`, so the
+      // exit handler below never runs to release the child. Left in place, it made every later
+      // `start()` refuse with "already running" - retry included - until the app was relaunched.
+      // Keyed on `pid`, which Node leaves undefined exactly when the spawn failed: `error` also
+      // fires for a failed kill, and that child is still alive and still ours.
+      if (child.pid === undefined && this.#child === child) {
+        this.#child = null;
+        this.#ready = null;
+        // The exit handler's recording safety net never runs on this path either.
+        void this.#closeRecording();
+      }
       this.#emit('spawnError', error);
     });
 
