@@ -8,11 +8,12 @@
  * ## Why this is not a wrapper around `SidecarClient`
  *
  * It supervises **one** client instance and never replaces it. `SidecarClient.start` only refuses
- * while `#child !== null`, and both the exit handler and `stop()` null that field - so the same
- * object can be started again, and every subscription taken out against it (the mode machine's,
- * the frame handler's in `index.ts`) survives a restart untouched. A supervisor that constructed a
- * fresh client per restart would have to re-broadcast the whole event surface, and the day it
- * missed one the app would come back up looking healthy with nothing reaching the pipeline.
+ * while `#child !== null`, and the exit handler, a failed spawn and `stop()` all null that field -
+ * so the same object can be started again, and every subscription taken out against it (the mode
+ * machine's, the frame handler's in `index.ts`) survives a restart untouched. A supervisor that
+ * constructed a fresh client per restart would have to re-broadcast the whole event surface, and
+ * the day it missed one the app would come back up looking healthy with nothing reaching the
+ * pipeline.
  *
  * ## A watchdog that restarts too eagerly is worse than no watchdog
  *
@@ -59,6 +60,16 @@ export interface SupervisedSidecar {
     listener: (payload: SidecarClientEvents[K]) => void,
   ): () => void;
   readonly isRunning: boolean;
+  /**
+   * Defined while the client still holds a process - including one it is in the middle of
+   * stopping. Outside a start in flight, `start()` refuses exactly while this is defined.
+   *
+   * **Not the same question as {@link isRunning}**, which turns false the moment a kill is *sent*
+   * (`ChildProcess.killed`), while the process - and the client's hold on it - lasts until its
+   * `exit` arrives. Measured on Node 24: `killed=true exitCode=null` straight after `kill()`, the
+   * exit later. A restart that waited on `isRunning` would start into that gap and be refused.
+   */
+  readonly pid: number | undefined;
 }
 
 export type SupervisorState =
@@ -169,6 +180,20 @@ const DEFAULT_BACKOFF_MS = [500, 2_000, 5_000] as const;
  * longer than any single tick this app is designed to produce.
  */
 export const MIN_WATCHDOG_SILENCE_MS = 10_000;
+
+/**
+ * How long a due restart waits for the client to let go of a process it is still stopping (#77).
+ *
+ * After a ready timeout the client keeps the timed-out process through its own `stop()`: up to
+ * `shutdownTimeoutMs` for a clean exit and the same again after the kill - 4s at the defaults,
+ * counted from the rejection. The first restart falls due 500ms after that, so 5s covers the whole
+ * teardown with room to spare. Past it the start goes ahead, and a refusal then is a real failure
+ * (a process that outlived its kill) and is charged like one.
+ */
+export const TEARDOWN_WAIT_MS = 5_000;
+
+/** How often that wait looks again. A timer, never a reaction to `exit` - see `#startWhenClear`. */
+const TEARDOWN_POLL_MS = 100;
 
 export class SidecarSupervisor {
   readonly #client: SupervisedSidecar;
@@ -293,7 +318,8 @@ export class SidecarSupervisor {
   }
 
   /**
-   * The deliberate retry out of `gave-up` (#41: "บอกให้ดู log และวิธี restart").
+   * The deliberate retry out of `gave-up` (#41: "บอกให้ดู log และวิธี restart"), and out of a
+   * `backoff` the user does not want to wait for - the tray and settings offer it in every state.
    *
    * Clears the quota, because the user asking again is new information: the automatic path gave up
    * on the evidence that restarting was not working, and a human who has just fixed something has
@@ -304,7 +330,33 @@ export class SidecarSupervisor {
     this.#log.info('restart quota cleared by an explicit retry', { from: this.#state, deaths: this.#deaths.length });
     this.#deaths = [];
     this.#cancelRestart();
-    if (this.#state === 'gave-up') this.#set('stopped', 'manual', null);
+    // #77 LR-01. From `backoff` and `gave-up` this starts one itself rather than handing over to
+    // `ensureRunning`, for two reasons:
+    //
+    //   - `ensureRunning` declines `backoff` by design. Having just cancelled the one timer that
+    //     would have left `backoff`, handing over to it stranded the machine there with nothing
+    //     scheduled - and the tray kept saying "retrying in about Ns" for the rest of the session.
+    //   - it also declines while the client still holds a process, and after a ready timeout the
+    //     client is still tearing the timed-out one down. Declining there would land in `stopped`
+    //     with no timer and no alert. This waits for that process instead (`#startWhenClear`), and
+    //     says so as a `backoff` - `gave-up` would claim nothing further is going to happen.
+    //
+    // Not gated on `wantsSidecar`: this is the user asking, as it always was out of `gave-up`.
+    if (this.#state === 'backoff' || this.#state === 'gave-up') {
+      const deadlineMs = this.#now() + TEARDOWN_WAIT_MS;
+      const pid = this.#client.pid;
+      if (pid !== undefined) {
+        this.#log.info('retry requested while the previous sidecar is still being stopped; waiting for it', {
+          pid,
+          upToMs: TEARDOWN_WAIT_MS,
+        });
+        // Before `#set`, which is when the error surface reads it.
+        this.#retryAtMs = deadlineMs;
+        this.#set('backoff', 'manual', this.#detail);
+      }
+      this.#startWhenClear('manual', false, deadlineMs);
+      return;
+    }
     this.ensureRunning();
   }
 
@@ -381,18 +433,34 @@ export class SidecarSupervisor {
     if (this.#state === 'disposed') return;
     this.#stopWatchdog();
 
-    // A process that dies **during** `start()` is one failure that arrives twice: the `exit`
-    // event, and then `SidecarClient.#awaitReady` rejecting with "exited before ready". Measured
-    // on a real run - killing the sidecar in its startup window charged two of three restarts and
-    // gave up one death early. The start path is the one that reports it, because it is the one
-    // that knows the attempt is over; this arm only notes it.
-    if (this.#starting) {
-      this.#log.warn('the sidecar died before it finished starting', { code: exit.code, signal: exit.signal });
-      return;
-    }
-
+    // Read and cleared before the guard below, so an exit that is ignored cannot leave the flag
+    // set for some later, unrelated exit to be misread by.
     const killed = this.#killedByWatchdog;
     this.#killedByWatchdog = false;
+
+    // #77 LR-02. Only the death of a **running** sidecar is news; in every other state the process
+    // going away has already been accounted for, and acting on it again is how failures were
+    // either double-charged or erased.
+    //
+    //   - `starting`: a process that dies during `start()` is one failure that arrives twice - this
+    //     event, and then `SidecarClient.#awaitReady` rejecting with "exited before ready". Measured
+    //     on a real run: killing the sidecar in its startup window charged two of three restarts
+    //     and gave up one death early. The start path reports it, because it is the one that knows
+    //     the attempt is over.
+    //   - `backoff` / `gave-up` / `stopped`: the only live process in these states is the one the
+    //     client is tearing down after a ready timeout. It sets `#stopping` before rejecting, so
+    //     this exit arrives `expected` - and used to overwrite the `backoff` (or the `gave-up`) the
+    //     failed start had just recorded with `stopped/manual`: no alert, no timer, capture gone
+    //     for the session. At launch nothing ever calls `ensureRunning`, so it never came back.
+    //
+    // The watchdog is unaffected: it only kills from `running`, and nothing leaves `running`
+    // between its `stop()` and the exit that follows.
+    if (this.#state !== 'running') {
+      const fields = { state: this.#state, code: exit.code, signal: exit.signal, expected: exit.expected };
+      if (this.#state === 'starting') this.#log.warn('the sidecar died before it finished starting', fields);
+      else this.#log.info('a sidecar exit arrived after its failure was already handled; ignoring it', fields);
+      return;
+    }
 
     if (exit.expected && !killed) {
       this.#log.info('sidecar exited as asked; not restarting', { code: exit.code });
@@ -412,6 +480,15 @@ export class SidecarSupervisor {
    * for it would leave the user with a reduced quota for a decision they made on purpose.
    */
   #recordFailure(reason: SupervisorReason, detail: string): void {
+    // #77 LR-07. A start still in flight at `dispose()` fails once the shutdown stops its process,
+    // and recording that failure used to walk the supervisor from `disposed` back into `backoff`
+    // and spawn a fresh sidecar in the middle of the quit. This was the one way out of `disposed`:
+    // every public entry checks for it, and the restart timer only acts from `backoff`.
+    if (this.#state === 'disposed') {
+      this.#log.info('a failure arrived after supervision was disposed; not restarting', { reason, detail });
+      return;
+    }
+
     if (!this.#wantsSidecar()) {
       this.#log.warn('the sidecar is gone, but nothing wants one right now; not restarting', {
         reason,
@@ -453,15 +530,67 @@ export class SidecarSupervisor {
     this.#restartTimer = this.#setTimer(() => {
       this.#restartTimer = null;
       this.#retryAtMs = null;
-      if (this.#state !== 'backoff') return;
-      // Re-checked at the moment of the restart as well: the user may have paused during the wait,
-      // and spawning a process they have just asked to stop is the same mistake in slow motion.
-      if (!this.#wantsSidecar()) {
-        this.#set('stopped', 'not-wanted', this.#detail);
+      if (!this.#restartStillWanted(true)) return;
+      const pid = this.#client.pid;
+      if (pid !== undefined) {
+        this.#log.info('restart due, but the previous sidecar is still being stopped; waiting for it', {
+          pid,
+          upToMs: TEARDOWN_WAIT_MS,
+        });
+      }
+      this.#startWhenClear(reason, true, this.#now() + TEARDOWN_WAIT_MS);
+    }, waitMs);
+  }
+
+  /**
+   * Whether a restart that has just come due should still happen, asked at the moment it would.
+   *
+   * `gated` is the automatic path: the user may have paused during the wait, and spawning a process
+   * they have just asked to stop is the same mistake in slow motion. An explicit retry is not gated,
+   * as it never was. Both drop out of anything but `backoff` - a dispose, or a retry that has
+   * already taken over.
+   */
+  #restartStillWanted(gated: boolean): boolean {
+    if (this.#state !== 'backoff') return false;
+    if (gated && !this.#wantsSidecar()) {
+      this.#set('stopped', 'not-wanted', this.#detail);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Start one as soon as the client has let go of the previous process, or at `deadlineMs`,
+   * whichever is first (#77).
+   *
+   * Without this, a restart that fell due while the client was still stopping a process that timed
+   * out on `ready` was refused with "already running" and **charged as a death** - so a slow but
+   * healthy sidecar could walk to `gave-up` on failures that were only ever our own teardown.
+   *
+   * Polled on a timer, never started from inside the `exit` event. The client's own exit handler
+   * runs first and lets go of the child, but `stop()` - still awaiting that same exit - then clears
+   * `#child` and the recording in the microtasks that follow, and would clear a *new* child that a
+   * start inside the event had just put there. A timer callback only runs after those have.
+   */
+  #startWhenClear(reason: SupervisorReason, gated: boolean, deadlineMs: number): void {
+    const pid = this.#client.pid;
+    if (pid !== undefined) {
+      if (this.#now() < deadlineMs) {
+        this.#retryAtMs = deadlineMs;
+        this.#restartTimer = this.#setTimer(() => {
+          this.#restartTimer = null;
+          this.#retryAtMs = null;
+          if (!this.#restartStillWanted(gated)) return;
+          this.#startWhenClear(reason, gated, deadlineMs);
+        }, TEARDOWN_POLL_MS);
         return;
       }
-      void this.#startOnce(reason);
-    }, waitMs);
+      this.#log.warn('the previous sidecar is still held after waiting for it; starting anyway', {
+        pid,
+        waitedMs: TEARDOWN_WAIT_MS,
+      });
+    }
+    void this.#startOnce(reason);
   }
 
   /** The wait for the nth death in the window, clamped to the last entry for anything beyond. */

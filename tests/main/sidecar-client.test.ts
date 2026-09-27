@@ -10,12 +10,14 @@
  * the parts most likely to behave differently from how a mock says they do.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn as nodeSpawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { FrameEvent } from '../../src/shared/protocol.js';
 import type { LogFields, LogLevel, Logger } from '../../src/main/services/logger.js';
@@ -25,6 +27,7 @@ import {
   SIDECAR_PATH_ENV,
   SidecarClient,
   resolveSidecarPath,
+  type SpawnFn,
 } from '../../src/main/services/sidecar-client.js';
 
 // ---------------------------------------------------------------------------
@@ -415,6 +418,37 @@ describe('SidecarClient against a live child process', () => {
     await expect(client.start()).rejects.toThrow(/did not send "ready" within 300ms/);
   });
 
+  /**
+   * #77. The ordering `SidecarSupervisor`'s tests model a ready timeout with, pinned against a real
+   * child rather than asserted: the rejection lands first, the timed-out process is still held -
+   * so a start in that window refuses - and its exit arrives afterwards, flagged `expected`.
+   */
+  it('rejects a ready timeout before the timed-out process has gone, and reports its exit as expected', async () => {
+    // Ignores stdin, so closing it does not end the process and `stop()` has to escalate.
+    const silent = path.join(tempDir, 'silent-ordering.mjs');
+    fs.writeFileSync(silent, 'setTimeout(() => {}, 60_000);\n', 'utf8');
+    const client = track(
+      new SidecarClient({
+        exePath: process.execPath,
+        args: [silent],
+        logger: new RecordingLogger(),
+        readyTimeoutMs: 300,
+        shutdownTimeoutMs: 500,
+      }),
+    );
+    const order: string[] = [];
+    const exited = nextEvent<{ expected: boolean }>((handler) => client.on('exit', handler));
+    client.on('exit', ({ expected }) => order.push(`exit expected=${String(expected)}`));
+
+    await client.start().catch(() => order.push('rejected'));
+
+    expect(order).toEqual(['rejected']);
+    await expect(client.start()).rejects.toThrow(/already running/);
+
+    await exited;
+    expect(order).toEqual(['rejected', 'exit expected=true']);
+  });
+
   it('reports an unexpected exit as an error, not as a normal shutdown', async () => {
     const dies = path.join(tempDir, 'dies.mjs');
     fs.writeFileSync(
@@ -431,6 +465,128 @@ describe('SidecarClient against a live child process', () => {
 
     expect(exit).toMatchObject({ expected: false, code: 3 });
     expect(logger.lines.some((l) => l.level === 'error' && l.message.includes('exited unexpectedly'))).toBe(true);
+  });
+
+  /**
+   * #77 LR-04. A directory passes `existsSync` - the only check before the spawn - and then fails
+   * the spawn itself (`TEXTLENS_SIDECAR_PATH` pointed at a folder is the real trigger). Node reports
+   * that as `error` + `close` and never `exit`, and the exit handler was the only thing that let go
+   * of the child.
+   */
+  it('can be started again after a spawn that failed outright', async () => {
+    const client = track(new SidecarClient({ exePath: tempDir, logger: new RecordingLogger() }));
+
+    await expect(client.start()).rejects.toThrow(/spawn/);
+
+    // Before the fix this refused with "already running", and so did every retry after it.
+    const second = await client.start().then(
+      () => null,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+    expect(second?.message).toMatch(/spawn/);
+    expect(second?.message).not.toMatch(/already running/);
+  });
+
+  it('closes the session recording when the spawn fails, as it does on exit', async () => {
+    const opened: fs.WriteStream[] = [];
+    const real = fs.createWriteStream.bind(fs);
+    const spy = vi.spyOn(fs, 'createWriteStream').mockImplementation(((...args: Parameters<typeof real>) => {
+      const stream = real(...args);
+      opened.push(stream);
+      return stream;
+    }) as typeof fs.createWriteStream);
+
+    try {
+      const client = track(
+        new SidecarClient({
+          exePath: tempDir,
+          logger: new RecordingLogger(),
+          recordTo: path.join(tempDir, 'failed-spawn.jsonl'),
+        }),
+      );
+      await expect(client.start()).rejects.toThrow(/spawn/);
+      // `end()` is asynchronous; `writableEnded` flips as soon as it is called.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(opened).toHaveLength(1);
+      expect(opened[0]?.writableEnded).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /**
+   * #77 LR-10. stdout has had an `error` listener all along; stderr had none, and an `error` on an
+   * `EventEmitter` with no listener is thrown - in the main process, an uncaught exception.
+   *
+   * Emitted synchronously on purpose: with no listener, `emit` throws straight back into this test,
+   * where it can be asserted on. `destroy(error)` would deliver the same error on a later tick as a
+   * process-level uncaught exception, which proves the same thing far less legibly.
+   */
+  it('logs an error on the stderr stream instead of throwing it', async () => {
+    let child: ChildProcess | null = null;
+    const keepChild = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      child = nodeSpawn(command, args, options);
+      return child;
+    }) as unknown as SpawnFn;
+    const logger = new RecordingLogger();
+    const client = track(
+      new SidecarClient({ exePath: process.execPath, args: [fakeSidecarJs], logger, spawn: keepChild }),
+    );
+    await client.start();
+
+    const stderr = (child as ChildProcess | null)?.stderr;
+    expect(stderr).toBeDefined();
+    expect(() => stderr?.emit('error', new Error('stderr pipe broke'))).not.toThrow();
+
+    const line = logger.lines.find((l) => l.message === 'sidecar stderr failed');
+    expect(line?.level).toBe('error');
+    expect(line?.fields?.['message']).toBe('stderr pipe broke');
+  });
+
+  /**
+   * #77. A process that outlives its kill cannot be produced on demand by a real child - Windows'
+   * TerminateProcess does not fail politely - so this one is a stub behind the spawn seam: it says
+   * `ready`, ignores stdin, and swallows `kill()` without ever exiting until the test says so.
+   */
+  it('keeps hold of a process that survived kill(), rather than starting a second beside it', async () => {
+    const children: EventEmitter[] = [];
+    const stubborn = (() => {
+      const child = Object.assign(new EventEmitter(), {
+        pid: 4_000 + children.length,
+        exitCode: null,
+        signalCode: null,
+        killed: false,
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill(): boolean {
+          child.killed = true;
+          return true;
+        },
+      });
+      children.push(child);
+      setImmediate(() => child.stdout.write(`${JSON.stringify({ ev: 'ready', version: 'stub', ocrLanguages: [] })}\n`));
+      return child;
+    }) as unknown as SpawnFn;
+    const logger = new RecordingLogger();
+    const client = track(
+      new SidecarClient({ exePath: process.execPath, logger, spawn: stubborn, shutdownTimeoutMs: 50 }),
+    );
+    await client.start();
+
+    await client.stop();
+
+    expect(logger.lines.some((l) => l.level === 'error' && l.message.startsWith('sidecar survived kill()'))).toBe(true);
+    expect(client.pid).toBe(4_000);
+    await expect(client.start()).rejects.toThrow(/already running/);
+    expect(children).toHaveLength(1);
+
+    // If it does go in the end, the exit handler lets go of it as it always did.
+    children[0]?.emit('exit', null, 'SIGKILL');
+    await client.start();
+    expect(children).toHaveLength(2);
+    children[1]?.emit('exit', 0, null);
   });
 });
 
