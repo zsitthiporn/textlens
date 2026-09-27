@@ -74,6 +74,28 @@
  * from one engine under another engine's name, which quietly defeats a user who changed engines
  * to change the output.
  *
+ * ## Frames overlap, and the pipeline has to be right across them (#78)
+ *
+ * `src/main/index.ts` hands every frame over with `void handleFrame(...)` and no queue, on a
+ * 500-800ms tick, while a cache miss takes ~870ms. So the next frame routinely starts while the
+ * previous one is still waiting on the engine - and every memory here is *read* when a frame
+ * starts but *written* only when it delivers. Three rules keep that gap from losing text:
+ *
+ * 1. **A line another frame is still resolving is shared, not dropped.** Dedup admitted it when
+ *    the earlier frame started, so to the next frame it is a duplicate - with nothing in the
+ *    displayed set yet to show for it. Emitting without it retires the box, overtakes the frame
+ *    carrying it, and records the text as shown, after which the screen reads as unchanged and
+ *    that line is never drawn. Each frame that is about to wait therefore publishes what it has
+ *    resolved (cache hits included), and a later frame that sees one of those lines waits for
+ *    that same answer and carries it. It waits only for lines it can see and is not translating
+ *    itself; its own misses are in flight at the same time. Not a latest-wins mailbox, which is
+ *    simpler but makes a subtitle that changes mid-flight wait for the round trip it replaced.
+ * 2. **Order is the order Node received frames in**, from a counter that is never reset - not the
+ *    sidecar's `seq`, which starts over whenever the sidecar process does.
+ * 3. **`resetScene` fences off frames already in progress.** Each frame carries the generation it
+ *    started in, and a payload from an older generation is refused at emit, so a frame that lands
+ *    after a dismiss or a region change cannot write the forgotten scene back.
+ *
  * ## What is deliberately not here
  *
  * - **`RecentOutputs.remember`.** That module is explicit that only the stage which actually
@@ -180,6 +202,9 @@ export interface PipelineStats {
    * The counterpart to `duplicate`: dedup removed those blocks so they are not translated again,
    * and this is how many of them are still in the payload anyway. A frame where `duplicate` is
    * high and this is 0 is the bug #53 describes, visible in one log line.
+   *
+   * Since #78 this also counts lines whose translation this frame took from an earlier frame that
+   * had not delivered it yet - carried over from an earlier frame too, one step sooner.
    */
   readonly held: number;
   /** Entries retired because OCR no longer sees their source text (#53). */
@@ -218,7 +243,12 @@ export type CollectStats = Pick<
  * re-emits it for as long as OCR keeps reporting the source.
  */
 export interface OverlayPayload {
-  /** The `frame.seq` this came from. Two payloads may share one. */
+  /**
+   * The `frame.seq` this came from. Two payloads may share one.
+   *
+   * For diagnostics only: nothing orders payloads by it any more (#78), because a restarted
+   * sidecar counts from 1 again. The pipeline orders frames by when it received them.
+   */
   readonly seq: number;
   /** False for the progressive first half; true for the frame's final payload. */
   readonly complete: boolean;
@@ -284,6 +314,81 @@ interface ObservedBlock {
 /** One observed block paired with whatever the overlay is already showing for it. */
 interface RecalledBlock extends ObservedBlock {
   readonly remembered: DisplayedEntry | undefined;
+}
+
+/**
+ * What one frame learned about one line, as another frame sees it (#78).
+ *
+ * `entry` is `undefined` when the line produced no box - its translation came back identical to
+ * its source. `failed` means the owning frame's translator threw, so nothing was learned at all.
+ */
+type SharedOutcome =
+  | { readonly failed: false; readonly entry: DisplayedEntry | undefined }
+  | { readonly failed: true };
+
+const SHARE_FAILED: SharedOutcome = { failed: true };
+
+/**
+ * A line one frame has resolved and not yet delivered, published so that frames starting in the
+ * meantime can use it instead of treating the line as unaccounted for (#78). See `#publish`.
+ */
+interface SharedLine {
+  /** Set the moment the answer is known - immediately for a cache hit. `undefined` while pending. */
+  outcome: SharedOutcome | undefined;
+  /** Settles when {@link outcome} is set. Never rejects: a failure settles as {@link SHARE_FAILED}. */
+  readonly settled: Promise<SharedOutcome>;
+}
+
+function settledLine(entry: DisplayedEntry | undefined): SharedLine {
+  const outcome: SharedOutcome = { failed: false, entry };
+  return { outcome, settled: Promise.resolve(outcome) };
+}
+
+function pendingLine(
+  translation: Promise<TranslationOutcome>,
+  pick: (outcome: TranslationOutcome) => DisplayedEntry | undefined,
+): SharedLine {
+  const line: SharedLine = {
+    outcome: undefined,
+    settled: translation
+      .then(
+        (outcome): SharedOutcome => ({ failed: false, entry: pick(outcome) }),
+        // The owning frame awaits the same promise and reports the throw itself; this branch only
+        // has to stop the frames sharing it from hanging, or from each raising an unhandled one.
+        (): SharedOutcome => SHARE_FAILED,
+      )
+      .then((outcome) => {
+        line.outcome = outcome;
+        return outcome;
+      }),
+  };
+  return line;
+}
+
+/**
+ * The entry a block's own fresh result puts on screen, or `undefined` when it is identical to its
+ * source. One rule, used by the frame that translated the block and by every frame sharing it, so
+ * the two cannot disagree about whether a line has a box.
+ *
+ * "Identical" is exact equality after trimming - see the module comment - and never applies to a
+ * degraded result, which *is* the source by construction (design doc section 7).
+ */
+function freshEntry(block: TextBlock, text: string, origin: EntryOrigin): DisplayedEntry | undefined {
+  if (origin !== 'degraded' && text.trim() === block.text.trim()) return undefined;
+  return { text, sourceText: block.text, bbox: block.bbox, origin };
+}
+
+/**
+ * What a frame is, as far as ordering is concerned (#78). Fixed the moment the pipeline receives it.
+ *
+ * `order` is the pipeline's own count of frames received and is never reset; `generation` is the
+ * scene the frame was read from, bumped by every {@link TextPipeline.resetScene}. `seq` is the
+ * sidecar's number, kept for log lines and for the wire - it is no longer compared with anything.
+ */
+interface FrameTicket {
+  readonly seq: number;
+  readonly order: number;
+  readonly generation: number;
 }
 
 /**
@@ -400,16 +505,42 @@ export class TextPipeline {
   readonly #now: () => number;
 
   /**
-   * Highest `seq` handed to the renderer so far.
+   * Frames received so far - the source of {@link FrameTicket.order}. Never reset (#78).
    *
    * Frames arrive from an event handler that does not await, so a frame whose misses take 400ms
-   * can still be in flight when the next one lands. Without this guard the slow frame's complete
-   * payload lands *after* the newer one and the overlay reverts to stale text - which looks like
-   * flicker, not like a bug. `>=` rather than `>` so a frame's own partial payload does not lock
-   * out its complete one.
+   * can still be in flight when the next one lands. Without an ordering guard the slow frame's
+   * complete payload lands *after* the newer one and the overlay reverts to stale text - which
+   * looks like flicker, not like a bug.
+   *
+   * The guard used to compare the sidecar's `frame.seq`. That number belongs to a process, and a
+   * restarted sidecar is a new process counting from 1 again: every payload after a restart was
+   * "older" than the last one before it and was dropped, at debug level, until the new count
+   * caught up with the old one. What the guard means is "which frame did we receive later", and
+   * only this side can answer that.
    */
-  #lastEmittedSeq = Number.NEGATIVE_INFINITY;
+  #received = 0;
+  /** {@link FrameTicket.order} of the last payload handed to the renderer. */
+  #lastEmittedOrder = 0;
+  /**
+   * Which scene a frame was read from (#78). Bumped by {@link resetScene}.
+   *
+   * Resetting the memories does not stop a frame that is already waiting on the engine, and when
+   * that frame lands it refills them with the scene the reset was meant to forget - a dismissed
+   * snapshot's boxes come back about a second later and stay. A frame whose generation is not the
+   * current one is refused at emit, which is the one door every payload goes through.
+   */
+  #generation = 0;
   #cacheDisabledReported = false;
+
+  /**
+   * Lines that some frame has resolved and not yet delivered, by the key `#displayed` uses (#78).
+   *
+   * See `#publish`. Deliberately **not** cleared by {@link resetScene}: a translation is a
+   * function of the text alone, not of the scene it was read from, so a frame that starts after a
+   * reset may use a fenced frame's answer rather than paying for the same request twice. What the
+   * reset fences is the *payload*, and that is refused at emit.
+   */
+  readonly #inflight = new Map<string, SharedLine>();
 
   /**
    * What the overlay is showing, as of the last payload that reached it (#53).
@@ -452,8 +583,12 @@ export class TextPipeline {
    */
   async handleFrame(frame: FrameEvent, display: DisplayGeometry): Promise<OverlayPayload | undefined> {
     const startedAt = this.#now();
+    // #78. Taken before anything else, so both describe the moment the frame arrived rather than
+    // the moment it finished - which is the whole difference between them and `frame.seq`.
+    this.#received += 1;
+    const ticket: FrameTicket = { seq: frame.seq, order: this.#received, generation: this.#generation };
     try {
-      return await this.#run(frame, display, startedAt);
+      return await this.#run(frame, display, startedAt, ticket);
     } catch (error) {
       this.#logger.error('frame failed in the text pipeline; skipping it', {
         seq: frame.seq,
@@ -468,6 +603,7 @@ export class TextPipeline {
     frame: FrameEvent,
     display: DisplayGeometry,
     startedAt: number,
+    ticket: FrameTicket,
   ): Promise<OverlayPayload | undefined> {
     const nowMs = startedAt;
 
@@ -493,7 +629,17 @@ export class TextPipeline {
     const resolved = this.#resolve(survivors.observed);
     const absent = resolved.absent;
 
-    if (survivors.blocks.length === 0) {
+    /**
+     * Lines on this screen that an earlier frame has resolved and not delivered yet (#78).
+     *
+     * Such a line is neither a duplicate with nothing to show nor absent: its translation is on
+     * its way, and this frame waits for it and carries it. Treating it as a plain duplicate is how
+     * a subtitle that had been translated and cached was never drawn - this frame would emit
+     * without it, overtake the frame carrying it, and record the text as shown.
+     */
+    const sharing = this.#sharedWith(resolved.blocks);
+
+    if (survivors.blocks.length === 0 && sharing.size === 0) {
       if (absent.length === 0) {
         // "ไม่เหลืออะไรใหม่? จบรอบ" - and deliberately no payload at all. Everything on screen is
         // still on screen and already drawn, so the only payload this frame could produce is the
@@ -509,6 +655,7 @@ export class TextPipeline {
       const built = this.#buildEntries(resolved.blocks, [], []);
       this.#recordTotal(frame, startedAt);
       return this.#deliver(
+        ticket,
         {
           seq: frame.seq,
           complete: true,
@@ -556,6 +703,11 @@ export class TextPipeline {
     const blocks = survivors.blocks;
     const translated: (string | undefined)[] = blocks.map(() => undefined);
     const origins: EntryOrigin[] = blocks.map(() => 'engine');
+    /** Each fresh block's key, at its index in `blocks`. Aligned, never compacted. */
+    const keys = new Array<string | undefined>(blocks.length);
+    for (const item of resolved.blocks) {
+      if (item.slot !== null) keys[item.slot] = item.key;
+    }
 
     /** Indices into `blocks` that still need a translation from somewhere. */
     const pending: number[] = [];
@@ -568,6 +720,11 @@ export class TextPipeline {
         sameLanguage += 1;
         continue;
       }
+      // #78. Fresh, and yet another frame is already fetching it - dedup's window expired under a
+      // slow engine, or a reset cleared dedup. That frame's answer is this block's answer; asking
+      // again would pay for the same request twice. Filled in from `sharing` below.
+      const key = keys[index];
+      if (key !== undefined && sharing.has(key)) continue;
       pending.push(index);
     }
 
@@ -580,7 +737,8 @@ export class TextPipeline {
 
     /** Indices into `blocks`, for the blocks the cache could not answer. A scattered subset. */
     const misses: number[] = [];
-    let cacheHits = 0;
+    /** Indices into `blocks`, for the blocks the cache did answer. */
+    const answered: number[] = [];
     for (let slot = 0; slot < pending.length; slot += 1) {
       const index = pending[slot];
       if (index === undefined) continue;
@@ -592,8 +750,9 @@ export class TextPipeline {
       // Written at the *block's* index, never appended. See the module comment.
       translated[index] = hit;
       origins[index] = 'cache';
-      cacheHits += 1;
+      answered.push(index);
     }
+    const cacheHits = answered.length;
     this.#reportCacheStatus();
 
     const baseStats = {
@@ -603,10 +762,19 @@ export class TextPipeline {
       cacheMisses: misses.length,
     };
 
+    /**
+     * Shared lines this frame has to wait for (#78). One that is already settled - another frame's
+     * cache hit - is applied without waiting, so a frame that needs nothing still at an engine
+     * finishes as soon as it would have on its own.
+     */
+    const waiting = [...sharing.values()].filter((line) => line.outcome === undefined);
+
     // ---- progressive render: hits do not wait behind a 300-500ms round trip ---------------
+    // Nor behind somebody else's round trip (#78): a frame whose only wait is on a shared line
+    // still draws its own hits first.
     const partial =
-      cacheHits > 0 && misses.length > 0
-        ? this.#buildEntries(resolved.blocks, translated, origins)
+      cacheHits > 0 && (misses.length > 0 || waiting.length > 0)
+        ? this.#buildEntries(this.#applyShared(resolved.blocks, sharing), translated, origins)
         : undefined;
     // `partial.entries` can be empty even with hits: identical translations are cached (a proper
     // noun comes back unchanged from every engine), so the next frame's hit is suppressed as
@@ -619,7 +787,7 @@ export class TextPipeline {
     // this is the same trade made over a far smaller set - and `#displayed` is deliberately not
     // advanced here, so the in-flight blocks are not mistaken for gone on the next frame.
     if (partial !== undefined && partial.entries.length > 0) {
-      this.#emit({
+      this.#emit(ticket, {
         seq: frame.seq,
         complete: false,
         entries: partial.entries,
@@ -638,7 +806,33 @@ export class TextPipeline {
     }
 
     // ---- translate the misses, and only the misses ---------------------------------------
-    const outcome = misses.length === 0 ? NO_TRANSLATION : await this.#translateMisses(blocks, misses);
+    const translation = misses.length === 0 ? undefined : this.#translateMisses(blocks, misses);
+
+    // A frame with nothing to wait for does not `await` at all, exactly as before #78: it delivers
+    // in the same turn it started, so no other frame can observe it half-done.
+    let outcome = NO_TRANSLATION;
+    if (translation !== undefined || waiting.length > 0) {
+      if (waiting.length > 0) {
+        this.#logger.debug('waiting on lines an earlier frame is still translating', {
+          seq: frame.seq,
+          order: ticket.order,
+          shared: sharing.size,
+          waiting: waiting.length,
+        });
+      }
+      // Before the first `await`, and that placement is the point: from here until this frame
+      // delivers, any frame that starts can see what this one has already resolved.
+      const published = this.#publish(blocks, keys, answered, translated, misses, translation);
+      try {
+        // Started together, awaited together: a frame's own misses and the shared lines are in
+        // flight at the same time, so the wait is the longer of the two, not their sum.
+        const shared = Promise.all(waiting.map((line) => line.settled));
+        if (translation !== undefined) outcome = await translation;
+        await shared;
+      } finally {
+        this.#withdraw(published);
+      }
+    }
 
     const degraded = outcome.degraded;
     for (let slot = 0; slot < misses.length; slot += 1) {
@@ -661,7 +855,16 @@ export class TextPipeline {
     }
 
     // ---- payload --------------------------------------------------------------------------
-    const built = this.#buildEntries(resolved.blocks, translated, origins);
+    for (const line of sharing.values()) {
+      if (line.outcome?.failed === true) {
+        // The frame that owned this line has already reported its translator throwing, and skipped
+        // itself. This frame needed the same answer and does not have it; delivering without it
+        // would record the line as shown - the stranding #78 is about - so it is skipped the same
+        // way, through `handleFrame`'s error line.
+        throw new Error('a translation this frame was sharing failed in the frame that owned it');
+      }
+    }
+    const built = this.#buildEntries(this.#applyShared(resolved.blocks, sharing), translated, origins);
     const payload: OverlayPayload = {
       seq: frame.seq,
       complete: true,
@@ -696,7 +899,7 @@ export class TextPipeline {
       return undefined;
     }
 
-    return this.#deliver(payload, {
+    return this.#deliver(ticket, payload, {
       observed: survivors.observedTexts,
       next: built.next,
       absent,
@@ -717,6 +920,7 @@ export class TextPipeline {
    * *after* this payload, and none of them may move if the payload never reached it.
    */
   #deliver(
+    ticket: FrameTicket,
     payload: OverlayPayload,
     scene: {
       readonly observed: readonly string[];
@@ -725,7 +929,9 @@ export class TextPipeline {
       readonly degradedOnScreen: boolean;
     },
   ): OverlayPayload | undefined {
-    if (!this.#emit(payload)) return undefined;
+    // Every refusal - overtaken, fenced by a reset (#78), or turned away by the renderer - returns
+    // here, before any of the three memories below has moved.
+    if (!this.#emit(ticket, payload)) return undefined;
 
     this.#displayed = scene.next;
 
@@ -754,12 +960,21 @@ export class TextPipeline {
    *
    * Not folded into a config listener here: this module has no config subscription and gaining
    * one would give it a second route to its own behaviour. `src/main/index.ts` calls this.
+   *
+   * **And it fences off every frame already in progress (#78).** Clearing the memories is not
+   * enough on its own: a frame waiting on the engine when this runs lands afterwards, and its
+   * delivery writes the old scene straight back into all three - after a dismiss, the boxes the
+   * user just cleared reappear about a second later and stay. Bumping the generation makes that
+   * frame's payload refused at emit, whatever the reason for the reset. Frames that *start* after
+   * this call are unaffected; note that means started, not captured - a frame the sidecar had
+   * already sent before hearing about the change still counts as new here.
    */
   resetScene(reason: string): void {
     this.#stability.reset();
     this.#deduplicator.reset();
     this.#displayed = new Map();
-    this.#logger.debug('screen memory cleared', { reason });
+    this.#generation += 1;
+    this.#logger.debug('screen memory cleared', { reason, generation: this.#generation });
   }
 
   /**
@@ -845,6 +1060,111 @@ export class TextPipeline {
       best = { key, entry };
     }
     return best;
+  }
+
+  /**
+   * The lines on this screen that an earlier frame has published and not yet withdrawn (#78).
+   *
+   * Looked up by the same key `#displayed` uses, for both kinds of block: a duplicate's key is the
+   * text dedup recorded when the earlier frame admitted it, and a fresh block's is its own
+   * normalized text - the two agree whenever the earlier frame's line is the one being re-read.
+   */
+  #sharedWith(observed: readonly ObservedBlock[]): Map<string, SharedLine> {
+    const sharing = new Map<string, SharedLine>();
+    if (this.#inflight.size === 0) return sharing;
+    for (const item of observed) {
+      const line = this.#inflight.get(item.key);
+      if (line !== undefined) sharing.set(item.key, line);
+    }
+    return sharing;
+  }
+
+  /**
+   * The observed screen with every settled shared line standing in for what was remembered (#78).
+   *
+   * **A shared line outranks the displayed set**, and the case that decides it is the retry after
+   * an outage: `#displayed` holds the untranslated English, an earlier frame is re-translating it
+   * because dedup's window expired, and this frame sees it as a duplicate. Taking the remembered
+   * English and emitting would overtake the retry and drop its Thai - on every retry, for as long
+   * as anything else on the screen keeps changing.
+   *
+   * A line still pending keeps whatever was remembered, which is what the progressive half shows;
+   * by the final payload every line in `sharing` has settled. The rectangle still comes from this
+   * frame's block, in `#buildEntries`, so these count as `held` exactly like a remembered entry.
+   */
+  #applyShared(
+    observed: readonly RecalledBlock[],
+    sharing: ReadonlyMap<string, SharedLine>,
+  ): readonly RecalledBlock[] {
+    if (sharing.size === 0) return observed;
+    return observed.map((item) => {
+      const outcome = sharing.get(item.key)?.outcome;
+      if (outcome === undefined || outcome.failed) return item;
+      return { ...item, remembered: outcome.entry };
+    });
+  }
+
+  /**
+   * Make what this frame has resolved visible to frames that start before it delivers (#78).
+   *
+   * Everything, not only the misses. A cache hit is not in `#displayed` either until this frame's
+   * complete payload lands - `#displayed` never advances on the progressive half - so a frame that
+   * starts in the meantime sees the hit as a duplicate with nothing to show, exactly as it would
+   * a miss, and strands it the same way if it emits first.
+   *
+   * The first frame to publish a key owns it; nobody overwrites. A later frame that sees the key
+   * shares it instead of publishing its own, so there is only ever one answer in flight per line.
+   *
+   * @returns what was published, so that {@link #withdraw} removes exactly that and nothing a
+   *          later frame may have published under the same key.
+   */
+  #publish(
+    blocks: readonly TextBlock[],
+    keys: readonly (string | undefined)[],
+    answered: readonly number[],
+    translated: readonly (string | undefined)[],
+    misses: readonly number[],
+    translation: Promise<TranslationOutcome> | undefined,
+  ): (readonly [string, SharedLine])[] {
+    const published: (readonly [string, SharedLine])[] = [];
+    const publish = (index: number, line: () => SharedLine): void => {
+      const key = keys[index];
+      // An empty key is text that normalizes to nothing; two of those have nothing in common.
+      if (key === undefined || key.length === 0 || this.#inflight.has(key)) return;
+      const created = line();
+      this.#inflight.set(key, created);
+      published.push([key, created]);
+    };
+
+    for (const index of answered) {
+      const block = blocks[index];
+      const text = translated[index];
+      if (block === undefined || text === undefined) continue;
+      publish(index, () => settledLine(freshEntry(block, text, 'cache')));
+    }
+
+    if (translation !== undefined) {
+      misses.forEach((index, position) => {
+        const block = blocks[index];
+        if (block === undefined) return;
+        // `position` is the block's row in the miss batch - the same scatter-back `#run` does,
+        // for the same reason: the translator's answer is indexed by its input, not by ours.
+        publish(index, () =>
+          pendingLine(translation, (outcome) =>
+            freshEntry(block, outcome.texts[position] ?? block.text, outcome.degraded ? 'degraded' : 'engine'),
+          ),
+        );
+      });
+    }
+
+    return published;
+  }
+
+  /** Undo one {@link #publish}. Identity-checked, so a key republished since is left alone. */
+  #withdraw(published: readonly (readonly [string, SharedLine])[]): void {
+    for (const [key, line] of published) {
+      if (this.#inflight.get(key) === line) this.#inflight.delete(key);
+    }
   }
 
   /**
@@ -1047,13 +1367,13 @@ export class TextPipeline {
         continue;
       }
 
-      const origin = origins[slot ?? 0] ?? 'engine';
-      if (origin !== 'degraded' && text.trim() === block.text.trim()) {
+      const entry = freshEntry(block, text, origins[slot ?? 0] ?? 'engine');
+      if (entry === undefined) {
         identical += 1;
         continue;
       }
 
-      keep(key, { text, sourceText: block.text, bbox: block.bbox, origin }, block);
+      keep(key, entry, block);
     }
 
     return { entries, identical, held, degraded, next };
@@ -1081,8 +1401,8 @@ export class TextPipeline {
   }
 
   /**
-   * @returns whether the payload reached the renderer - both that it was not overtaken, and that
-   *          the consumer did not refuse it.
+   * @returns whether the payload reached the renderer - that it was not overtaken, that it was not
+   *          read from a scene reset since (#78), and that the consumer did not refuse it.
    *
    * The second half matters more than it looks. `src/main/index.ts` hands the payload to
    * `WindowManager.sendOverlayPayload`, which sends nothing while the overlay document is still
@@ -1091,17 +1411,33 @@ export class TextPipeline {
    * window produces would be suppressed, and the first subtitle of the session would never appear
    * - silently, which is the whole failure the emit-gated baseline exists to prevent.
    */
-  #emit(payload: OverlayPayload): boolean {
-    if (payload.seq < this.#lastEmittedSeq) {
-      // A slow frame finished after a newer one already drew. Its text is stale by definition.
-      this.#logger.debug('dropping a payload overtaken by a newer frame', {
-        seq: payload.seq,
-        lastEmittedSeq: this.#lastEmittedSeq,
+  #emit(ticket: FrameTicket, payload: OverlayPayload): boolean {
+    if (ticket.generation !== this.#generation) {
+      // #78. Read from a scene `resetScene` has since forgotten. Expected on every reset that
+      // lands mid-translation, so debug; the reset itself is what the user asked for.
+      this.#logger.debug('dropping a payload from before the screen memory was reset', {
+        seq: ticket.seq,
+        order: ticket.order,
+        generation: ticket.generation,
+        current: this.#generation,
         entries: payload.entries.length,
       });
       return false;
     }
-    this.#lastEmittedSeq = payload.seq;
+    // `>=` on the way in, so a frame's own partial payload does not lock out its complete one.
+    if (ticket.order < this.#lastEmittedOrder) {
+      // A slow frame finished after a newer one already drew. Its text is stale by definition -
+      // and since #78 anything it carried that the newer frame could still see, the newer frame
+      // waited for and carried itself, so nothing on screen is lost by dropping it.
+      this.#logger.debug('dropping a payload overtaken by a newer frame', {
+        seq: ticket.seq,
+        order: ticket.order,
+        lastEmittedOrder: this.#lastEmittedOrder,
+        entries: payload.entries.length,
+      });
+      return false;
+    }
+    this.#lastEmittedOrder = ticket.order;
     // `!== false` rather than a truthiness test: a consumer that returns nothing has not claimed
     // a failure, and only an explicit `false` is a refusal.
     return this.#onPayload(payload) !== false;
