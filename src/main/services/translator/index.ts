@@ -155,7 +155,20 @@ export class FallbackTranslator {
     }
 
     // Every engine failed. Show the user what was on screen, untranslated, and say so.
-    this.#logger.error('all translation engines failed; showing original text', {
+    //
+    // Not always an incident: when every failure is `unavailable`, no engine was actually
+    // called this frame - they were all still inside a backoff window opened by an earlier,
+    // already-logged failure. A chain refusing at the gate on every frame of a multi-second
+    // backoff would otherwise write one `error` line per frame for one underlying event
+    // (measured: 106 of 124 error lines in a real log were this). One real failure - a 429, a
+    // dropped connection, a bad response shape - still logs at error immediately, because that
+    // failure's `kind` cannot be `unavailable`; only the frames that follow, refused before the
+    // gate, are quiet. The degraded payload still carries `failures` to the UI either way
+    // (#41 `judgeTranslation`), so this only changes what reaches the log, not what the user
+    // is told.
+    const allUnavailable = failures.every((failure) => failure.kind === 'unavailable');
+    const level = allUnavailable ? 'debug' : 'error';
+    this.#logger[level]('all translation engines failed; showing original text', {
       engines: failures.map((failure) => failure.engine),
       kinds: failures.map((failure) => failure.kind),
       count: texts.length,

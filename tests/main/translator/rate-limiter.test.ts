@@ -10,7 +10,7 @@
  * backoff happened, but it cannot show that the backoff stayed where it belongs.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { FallbackTranslator } from '../../../src/main/services/translator/index.js';
 import {
@@ -224,6 +224,109 @@ describe('backoff - growth, cap and reset', () => {
 
   it('has a sane default ceiling', () => {
     expect(DEFAULT_MAX_BACKOFF_MS).toBe(60_000);
+  });
+});
+
+describe('#79 P4(a) - concurrent callers must not read the same reservation', () => {
+  /**
+   * `FakeClock` cannot stand in here: its `sleep` advances the clock *synchronously*, inside
+   * the call that registers it, rather than when a real timer would actually fire - which is
+   * exactly backwards for testing three calls racing each other. Real `setTimeout`, faked by
+   * vitest so the test does not actually wait, reproduces the ordering that matters: each
+   * caller's synchronous prelude (the reservation) runs to completion before the next caller's
+   * prelude starts, and only the *sleep* is deferred.
+   */
+  it('spaces three callers that arrive together, instead of letting them dispatch together', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const limiter = new RateLimiter({ minIntervalMs: 200 });
+      const dispatches: number[] = [];
+      const arrive = async (): Promise<void> => {
+        await limiter.acquire('e');
+        dispatches.push(Date.now());
+      };
+
+      // All three call `acquire` in the same synchronous turn - nobody awaits between them -
+      // which is what "arrive together" means for a rate limiter guarding an async gate.
+      const all = Promise.all([arrive(), arrive(), arrive()]);
+      await vi.advanceTimersByTimeAsync(1000);
+      await all;
+
+      // Bug (HEAD): the second and third callers both read the first's reservation before
+      // either had written their own, so both computed the same wait and landed on [0, 200,
+      // 200]. Fixed: each reserves its slot before sleeping, so the third sees the second's
+      // reservation and lands at 400.
+      expect(dispatches).toEqual([0, 200, 400]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('#79 P4(b) - a stale success must not clear a newer backoff', () => {
+  it('a success from a request dispatched before a later 429 does not cancel that backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const rl = new RateLimiter({
+        minIntervalMs: 0,
+        rateLimitBackoffMs: 2000,
+        networkBackoffMs: 500,
+        backoffMultiplier: 2,
+        maxBackoffMs: 60_000,
+      });
+
+      // Request A goes out at t=0 and is slow to answer.
+      const aDispatchedAt = await rl.acquire('e');
+
+      // Request B goes out later, at t=150, and fails immediately with a 429.
+      vi.setSystemTime(150);
+      await rl.acquire('e');
+      rl.recordFailure('rate-limit');
+      expect(rl.status.backingOff).toBe(true);
+      expect(rl.status.consecutiveFailures).toBe(1);
+
+      // A's answer, sent before the 429 ever happened, finally arrives at t=200 and succeeds.
+      vi.setSystemTime(200);
+      rl.recordSuccess(aDispatchedAt);
+
+      // Bug (HEAD): `recordSuccess` ignores which request it belongs to and always clears -
+      // `backingOff` flips to false and the streak resets to 0, so a 429 that keeps recurring
+      // never escalates. Fixed: a success dispatched before the backoff opened is stale and is
+      // ignored.
+      expect(rl.status.backingOff).toBe(true);
+      expect(rl.status.consecutiveFailures).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a success from a request dispatched after the backoff opened still clears it', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const rl = new RateLimiter({
+        minIntervalMs: 0,
+        rateLimitBackoffMs: 2000,
+        networkBackoffMs: 500,
+        backoffMultiplier: 2,
+        maxBackoffMs: 60_000,
+      });
+
+      rl.recordFailure('rate-limit');
+      expect(rl.status.backingOff).toBe(true);
+
+      // The window passes; the next request is dispatched afterwards and succeeds.
+      vi.setSystemTime(2500);
+      const dispatchedAt = await rl.acquire('e');
+      rl.recordSuccess(dispatchedAt);
+
+      expect(rl.status.backingOff).toBe(false);
+      expect(rl.status.consecutiveFailures).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

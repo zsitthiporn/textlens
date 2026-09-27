@@ -100,10 +100,14 @@ export class RateLimiter {
   readonly #now: () => number;
   readonly #sleep: (ms: number) => Promise<void>;
 
-  /** Clock value of the most recent dispatch. `-Infinity` so the first call never waits. */
+  /** Clock value of the most recent dispatch (reserved, not necessarily completed yet).
+   *  `-Infinity` so the first call never waits. */
   #lastDispatchAt = Number.NEGATIVE_INFINITY;
   #consecutiveFailures = 0;
   #backoffUntil = 0;
+  /** Clock value at which the current backoff was opened. `-Infinity` when there has never been
+   *  one, so a success always clears a limiter that has never failed. See `recordSuccess`. */
+  #backoffOpenedAt = Number.NEGATIVE_INFINITY;
 
   constructor(options: RateLimiterOptions = {}) {
     const multiplier = options.backoffMultiplier ?? DEFAULT_BACKOFF_MULTIPLIER;
@@ -145,13 +149,21 @@ export class RateLimiter {
   }
 
   /**
-   * Permission to dispatch.
+   * Permission to dispatch. Resolves to the clock value this call was allowed to go out at -
+   * pass it to {@link recordSuccess} so a success can be told apart from a stale one.
    *
-   * Throws `unavailable` immediately if the engine is backing off; otherwise sleeps out
-   * whatever is left of the minimum interval and returns. See the module comment for why those
-   * two cases are not symmetrical.
+   * Throws `unavailable` immediately if the engine is backing off; otherwise reserves the next
+   * free slot and sleeps out whatever is left of the minimum interval. See the module comment
+   * for why those two cases are not symmetrical.
+   *
+   * The slot is reserved *before* the sleep, synchronously, not after it. Two callers that both
+   * read `#lastDispatchAt` before either had reserved would compute the same wait and dispatch
+   * together - measured: three concurrent callers landed at [0, 200, 200] instead of
+   * [0, 200, 400] with a 200ms interval. Reserving first means the second caller's `acquire`,
+   * even one started microtasks later while the first is still asleep, sees the first's
+   * reservation and is spaced from *that*, not from the clock value both happened to read.
    */
-  async acquire(engineName: string): Promise<void> {
+  async acquire(engineName: string): Promise<number> {
     const now = this.#now();
 
     if (this.#backoffUntil > now) {
@@ -161,16 +173,40 @@ export class RateLimiter {
       );
     }
 
-    const readyAt = this.#lastDispatchAt + this.#minIntervalMs;
-    if (readyAt > now) await this.#sleep(readyAt - now);
+    const dispatchAt = Math.max(this.#lastDispatchAt + this.#minIntervalMs, now);
+    this.#lastDispatchAt = dispatchAt;
 
-    // Re-read the clock instead of trusting `readyAt`: the sleep may overshoot, and the next
-    // caller's spacing should be measured from when this request actually went out.
-    this.#lastDispatchAt = this.#now();
+    if (dispatchAt > now) await this.#sleep(dispatchAt - now);
+
+    // The wait may have been long enough for a concurrent caller to fail and open a backoff
+    // window in the meantime. A stale permission granted before that window opened must not be
+    // honoured - the whole point of a backoff is that nothing goes out during it.
+    const after = this.#now();
+    if (this.#backoffUntil > after) {
+      throw new TranslationError(
+        `${engineName}: backing off for another ${String(Math.ceil(this.#backoffUntil - after))}ms`,
+        { kind: 'unavailable', engine: engineName },
+      );
+    }
+
+    return dispatchAt;
   }
 
-  /** The attempt worked. Clears the failure streak and any backoff. */
-  recordSuccess(): void {
+  /**
+   * The attempt worked. Clears the failure streak and any backoff - unless a backoff was opened
+   * *after* this request was dispatched, in which case this success is stale and must not erase
+   * information that is newer and worse than it: a slow success from a request sent before a
+   * 429 must not cancel the backoff that 429 opened (measured: without this check, `backingOff`
+   * flips true -> false and the failure streak resets to 0, so a 429 that keeps recurring never
+   * escalates - each new backoff is wiped by a success that was already in flight).
+   *
+   * `dispatchedAt` is the value {@link acquire} resolved to for this request. It defaults to
+   * the current clock so a caller that does not track it (tests, and any future direct use)
+   * keeps the old always-clears behaviour, which is correct there is no concurrent request to
+   * be stale relative to.
+   */
+  recordSuccess(dispatchedAt: number = this.#now()): void {
+    if (dispatchedAt < this.#backoffOpenedAt) return;
     this.#consecutiveFailures = 0;
     this.#backoffUntil = 0;
   }
@@ -189,7 +225,8 @@ export class RateLimiter {
     const base = kind === 'rate-limit' ? this.#rateLimitBackoffMs : this.#networkBackoffMs;
     const growth = Math.pow(this.#multiplier, this.#consecutiveFailures - 1);
     const delay = Math.min(base * growth, this.#maxBackoffMs);
-    this.#backoffUntil = this.#now() + delay;
+    this.#backoffOpenedAt = this.#now();
+    this.#backoffUntil = this.#backoffOpenedAt + delay;
   }
 
   /** Forget everything. For tests and for a settings change that rebuilds the chain. */
@@ -197,6 +234,7 @@ export class RateLimiter {
     this.#lastDispatchAt = Number.NEGATIVE_INFINITY;
     this.#consecutiveFailures = 0;
     this.#backoffUntil = 0;
+    this.#backoffOpenedAt = Number.NEGATIVE_INFINITY;
   }
 }
 
@@ -227,11 +265,11 @@ export function withRateLimit(
     async translateBatch(texts: string[], src: string, tgt: string): Promise<string[]> {
       // Outside the try on purpose: a refusal here means the engine was never called, so it
       // must not be recorded as another failure by it. See `recordFailure`.
-      await limiter.acquire(engine.name);
+      const dispatchedAt = await limiter.acquire(engine.name);
 
       try {
         const results = await engine.translateBatch(texts, src, tgt);
-        limiter.recordSuccess();
+        limiter.recordSuccess(dispatchedAt);
         return results;
       } catch (error) {
         limiter.recordFailure(classifyError(error));

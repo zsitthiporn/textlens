@@ -231,6 +231,62 @@ describe('GoogleTranslateEngine - failures throw, they never return a plausible 
   });
 });
 
+describe('GoogleTranslateEngine - #79 P6: a transport failure carries its cause name, never its message', () => {
+  it('names a timeout without repeating anything the cause said', async () => {
+    const secret = 'Zorblatt the Unspeakable guards the ninth gate';
+    const fetchImpl: HttpFetch = async () => {
+      // A real timeout/abort throws a DOMException named TimeoutError or AbortError; the
+      // message text is invented here to prove it never reaches ours.
+      throw new DOMException(`aborted while sending ${secret}`, 'TimeoutError');
+    };
+
+    try {
+      await new GoogleTranslateEngine({ fetch: fetchImpl }).translateBatch([secret], 'en', 'th');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(TranslationError);
+      expect((error as TranslationError).kind).toBe('network');
+      const message = (error as Error).message;
+      expect(message).toContain('TimeoutError');
+      expect(message).not.toContain(secret);
+    }
+  });
+
+  it('names a TypeError - the shape undici throws for both a DNS failure and a reset', async () => {
+    const { fetch } = stubFetch(() => {
+      throw new TypeError('fetch failed: connect ECONNRESET 10.0.0.1:443');
+    });
+
+    try {
+      await new GoogleTranslateEngine({ fetch }).translateBatch(['hello'], 'en', 'th');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('TypeError');
+      expect(message).not.toContain('ECONNRESET');
+    }
+  });
+
+  it('names the cause when reading the response body fails too', async () => {
+    const fetchImpl: HttpFetch = async () => ({
+      ok: true,
+      status: 200,
+      text: () => {
+        throw new Error('stream aborted mid-body, had read "the gate is closed"');
+      },
+    });
+
+    try {
+      await new GoogleTranslateEngine({ fetch: fetchImpl }).translateBatch(['hello'], 'en', 'th');
+      expect.unreachable('should have thrown');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('Error');
+      expect(message).not.toContain('the gate is closed');
+    }
+  });
+});
+
 describe('parseBatchResponse', () => {
   it('accepts the flat array the endpoint returns for an explicit source language', () => {
     expect(parseBatchResponse('["ก","ข"]', 2)).toEqual(['ก', 'ข']);
