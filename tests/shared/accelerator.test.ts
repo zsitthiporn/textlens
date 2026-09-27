@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { acceleratorFromKeyStroke, type KeyStroke } from '../../src/shared/accelerator.js';
+import { acceleratorFromKeyStroke, classifyHotkeyCaution, type KeyStroke } from '../../src/shared/accelerator.js';
 
 function stroke(code: string, modifiers: Partial<Omit<KeyStroke, 'code'>> = {}): KeyStroke {
   return {
@@ -142,5 +142,73 @@ describe('acceleratorFromKeyStroke: capture flow', () => {
     // different symbol once Shift is held. `code` is what is printed on the key.
     const shifted = acceleratorFromKeyStroke(stroke('Digit2', { ctrlKey: true, shiftKey: true }));
     expect(shifted).toEqual({ kind: 'ok', accelerator: 'Control+Shift+2' });
+  });
+});
+
+/**
+ * `Shift`-only (or bare) accelerators that swallow a key someone types every day (issue #82).
+ *
+ * The real config this project ships with binds `snapshot` to `Shift+Space` - holding Shift while
+ * tapping Space to type an actual space is an ordinary typing motion, and this is not a `rejected`
+ * outcome: the binding must keep working. `caution` is purely informational.
+ */
+describe('classifyHotkeyCaution: the classification table', () => {
+  it.each([
+    ['Shift+Space', 'a space'],
+    ['Shift+.', 'a period'],
+    ['Space', 'a space'],
+  ])('flags %s as a caution', (accelerator, typedAs) => {
+    expect(classifyHotkeyCaution(accelerator)).toEqual({ reason: 'typing-key', typedAs });
+  });
+
+  it.each(['Control+Alt+S', 'F9', 'Shift+F9', 'Alt+A'])('does not flag %s', (accelerator) => {
+    expect(classifyHotkeyCaution(accelerator)).toBeUndefined();
+  });
+
+  it('is case-insensitive about the modifier, like Electron itself', () => {
+    expect(classifyHotkeyCaution('shift+space')).toEqual({ reason: 'typing-key', typedAs: 'a space' });
+  });
+
+  it('names a letter and a digit the way a sentence would say them', () => {
+    expect(classifyHotkeyCaution('Shift+A')).toEqual({ reason: 'typing-key', typedAs: 'the letter A' });
+    expect(classifyHotkeyCaution('Shift+5')).toEqual({ reason: 'typing-key', typedAs: 'the digit 5' });
+  });
+
+  it('flags a bare letter too - config can hold a string the capture flow would never produce', () => {
+    // `acceleratorFromKeyStroke` refuses a bare non-function key before this is ever reached, but
+    // `hotkey-service.ts` runs this over a raw config string that never went through capture at
+    // all - and a bare typing key is the most dangerous shape there is, not an exception to flag.
+    expect(classifyHotkeyCaution('A')).toEqual({ reason: 'typing-key', typedAs: 'the letter A' });
+  });
+
+  it('does not flag a key that produces no character even with no modifier at all', () => {
+    expect(classifyHotkeyCaution('Up')).toBeUndefined();
+    expect(classifyHotkeyCaution('Tab')).toBeUndefined();
+  });
+});
+
+describe('acceleratorFromKeyStroke: carries the caution through to the capture flow', () => {
+  it('attaches a caution to a captured Shift+Space, and still returns ok', () => {
+    const result = acceleratorFromKeyStroke(stroke('Space', { shiftKey: true }));
+    expect(result).toEqual({
+      kind: 'ok',
+      accelerator: 'Shift+Space',
+      caution: { reason: 'typing-key', typedAs: 'a space' },
+    });
+  });
+
+  it('attaches a caution to a captured Shift+period', () => {
+    const result = acceleratorFromKeyStroke(stroke('Period', { shiftKey: true }));
+    expect(result).toEqual({
+      kind: 'ok',
+      accelerator: 'Shift+.',
+      caution: { reason: 'typing-key', typedAs: 'a period' },
+    });
+  });
+
+  it('does not attach a caution when a stronger modifier is held', () => {
+    const result = acceleratorFromKeyStroke(stroke('Space', { ctrlKey: true, shiftKey: true }));
+    expect(result).toEqual({ kind: 'ok', accelerator: 'Control+Shift+Space' });
+    expect('caution' in result).toBe(false);
   });
 });

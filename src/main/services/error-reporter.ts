@@ -70,6 +70,8 @@
  * running sidecar, and it is why the wiring in `index.ts` stays declarative.
  */
 
+import type { HotkeyCaution } from '../../shared/accelerator.js';
+import { DISMISS_LABEL, MODE_NAMES } from '../../shared/mode-presentation.js';
 import type { ConfigIssue } from './config.js';
 import type { HotkeyRegistration } from './hotkey-service.js';
 import { nullLogger, type LogFields, type Logger } from './logger.js';
@@ -680,6 +682,15 @@ function matchesLanguage(wanted: string, available: readonly string[]): boolean 
   return available.some((tag) => (tag.split('-')[0]?.toLowerCase() ?? tag.toLowerCase()) === primary);
 }
 
+/** {@link HotkeyRegistration.action} in the words the settings window already uses for it (#82). */
+const HOTKEY_ACTION_LABELS: Record<HotkeyRegistration['action'], string> = {
+  toggleAuto: `${MODE_NAMES.auto} on/off`,
+  snapshot: MODE_NAMES.once,
+  selectRegion: 'select a region',
+  toggleOverlay: 'show/hide the boxes',
+  dismiss: DISMISS_LABEL,
+};
+
 /**
  * Hotkeys that did not bind (#32's own criterion, surfaced at last).
  *
@@ -689,12 +700,18 @@ function matchesLanguage(wanted: string, available: readonly string[]): boolean 
  * them apart. Sending a user hunting for a nonexistent third-party program because they typed the
  * same accelerator into two fields of their own config file is a message that costs more time than
  * it saves.
+ *
+ * **Takes every registration, not only the failed ones (#82).** A real failure still wins the
+ * single `hotkeys` alert slot outright - the branch below returns before {@link describeHotkeyCaution}
+ * is ever reached - but a registration that *succeeded* can still carry a {@link HotkeyCaution}, and
+ * this is the one place both are weighed against each other. Passing only the failed subset, as the
+ * caller did before #82, makes every caution invisible: there is nothing to see it in.
  */
 export function describeHotkeyFailures(
-  failures: readonly HotkeyRegistration[],
+  registrations: readonly HotkeyRegistration[],
 ): Omit<Alert, 'source'> | null {
-  const relevant = failures.filter((failure) => !failure.ok && failure.reason !== 'disabled');
-  if (relevant.length === 0) return null;
+  const relevant = registrations.filter((registration) => !registration.ok && registration.reason !== 'disabled');
+  if (relevant.length === 0) return describeHotkeyCaution(registrations);
 
   const first = relevant[0];
   if (first === undefined) return null;
@@ -736,6 +753,40 @@ export function describeHotkeyFailures(
         remedy: `rebind it in ${where}`,
       };
   }
+}
+
+/**
+ * A registration that worked exactly as configured, and also captures a key someone types every
+ * day (#82). Only ever consulted by {@link describeHotkeyFailures} once it has confirmed there is
+ * no real failure standing - a shortcut that does nothing is a worse problem than one that works
+ * too well, and the single `hotkeys` alert slot can only hold one message at a time.
+ *
+ * Unlike a real failure's remedy, this one does not need to steer the user away from `config.json`
+ * (see the comment above on why that file is avoided for #39's traps): the accelerator here is
+ * already live and already valid, so pointing at the file this project's own README documents for
+ * "hotkeys" is not recommending the failure mode this service exists to prevent - it is one more
+ * legitimate way to change a binding that already works.
+ */
+function describeHotkeyCaution(registrations: readonly HotkeyRegistration[]): Omit<Alert, 'source'> | null {
+  const cautioned = registrations.filter(
+    (registration): registration is HotkeyRegistration & { readonly caution: HotkeyCaution } =>
+      registration.ok && registration.caution !== undefined,
+  );
+  const first = cautioned[0];
+  if (first === undefined) return null;
+
+  const more = cautioned.length > 1 ? ` (and ${String(cautioned.length - 1)} more)` : '';
+  const key = first.accelerator ?? 'a shortcut';
+  const label = HOTKEY_ACTION_LABELS[first.action];
+  const where = 'the tray menu → "Settings…", under "Shortcuts", '
+    + 'or "hotkeys" in %APPDATA%\\textlens\\config.json (see the README)';
+
+  return {
+    severity: 'warning',
+    cause: `typing ${key} anywhere in Windows will trigger "${label}" instead of typing `
+      + `${first.caution.typedAs}${more}`,
+    remedy: `pick a different key for it in ${where}`,
+  };
 }
 
 /**

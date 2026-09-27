@@ -683,6 +683,60 @@ describe('hotkey failures: a duplicate is not a conflict', () => {
   });
 });
 
+/**
+ * A hotkey that registered exactly as configured, and also swallows a key the user types every
+ * day (issue #82). `describeHotkeyFailures` now takes every registration - not only the failed
+ * ones - because this is the only way both a real failure and a caution can be weighed against
+ * each other for the single `hotkeys` alert slot.
+ */
+describe('hotkey failures: a caution never displaces a real failure (#82)', () => {
+  const cautioned: HotkeyRegistration = {
+    action: 'snapshot',
+    accelerator: 'Shift+Space',
+    ok: true,
+    caution: { reason: 'typing-key', typedAs: 'a space' },
+  };
+  const uncautioned: HotkeyRegistration = { action: 'toggleAuto', accelerator: 'Control+Alt+A', ok: true };
+
+  it('warns about the caution when every key actually bound', () => {
+    const alert = describeHotkeyFailures([uncautioned, cautioned]);
+
+    expect(alert?.severity).toBe('warning');
+    expect(alert?.cause).toContain('Shift+Space');
+    expect(alert?.cause).toContain('Translate once');
+    expect(alert?.cause).toContain('a space');
+  });
+
+  it('says how to change it, pointing at both the settings window and the config file', () => {
+    // Unlike a real failure's remedy, this one may name config.json: the accelerator is already
+    // live and already valid, so this is not the #39 trap of recommending a typed string that
+    // Electron would silently mangle.
+    const alert = describeHotkeyFailures([cautioned]);
+
+    expect(alert?.remedy).toContain('Shortcuts');
+    expect(alert?.remedy).toContain('config.json');
+  });
+
+  it('lets a real failure on another action win the single hotkeys alert slot', () => {
+    const conflict: HotkeyRegistration = {
+      action: 'selectRegion',
+      accelerator: 'Control+Alt+R',
+      ok: false,
+      reason: 'conflict',
+    };
+
+    const alert = describeHotkeyFailures([cautioned, conflict]);
+
+    // The failure wins outright - the caution is not merged in, not appended, not mentioned.
+    expect(alert?.cause).toContain('another program');
+    expect(alert?.cause).not.toContain('Shift+Space');
+  });
+
+  it('says nothing when nothing is bound to a caution-worthy key', () => {
+    expect(describeHotkeyFailures([uncautioned])).toBeNull();
+  });
+});
+
 describe('config issues reach the user, not just the log (#38 reopen signal)', () => {
   it('names the fields that were rejected', () => {
     const issues: ConfigIssue[] = [
