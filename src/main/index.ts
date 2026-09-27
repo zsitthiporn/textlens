@@ -145,6 +145,26 @@ process.on('unhandledRejection', (reason: unknown) => {
   reportRejection(reason);
 });
 
+/**
+ * Single-instance lock (#86 - "ไม่มี app.requestSingleInstanceLock()"). Requested here,
+ * immediately under the crash handlers and above everything else this file builds - the
+ * `ErrorReporter`, the logger, the config service, the sidecar client, every window, the hotkey
+ * registrations, the translation cache. A second launch that loses this race must not have
+ * created a single one of them: two of any of them is the failure this closes (#73's
+ * `SQLITE_BUSY`, a second sidecar, a second overlay).
+ *
+ * Held as a value rather than acted on immediately - the branch that does something with it
+ * lives at the bottom of this file, next to `app.whenReady()`, which is the only place
+ * `bootstrap` is ever called from. Nothing between this line and that one creates any of the
+ * resources above, so the decision does not need to be made any earlier than that to keep the
+ * invariant true.
+ *
+ * Placed below `process.on('uncaughtException'/'unhandledRejection')` rather than above them, to
+ * keep this file's one hard ordering rule intact: nothing above those two lines may throw, and a
+ * native call - however unlikely to - belongs under that net rather than ahead of it.
+ */
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
 /** How long a crash report waits for the log to reach disk before leaving anyway. */
 const CRASH_FLUSH_TIMEOUT_MS = 2_000;
 
@@ -1211,14 +1231,45 @@ app.on('before-quit', (event) => {
     });
 });
 
-// #67. `bootstrap` is ~200 lines with no try/catch of its own, and its first `await` is
-// `createLogger` - so the one failure it is most likely to have is also the one that arrives before
-// a log file, a window or a tray exists to say anything about it. Unhandled, that is an app the
-// user double-clicks and watches do nothing at all. `reportFatal` falls back to `showErrorBox`
-// precisely because the disk is the thing that may have failed.
-void app
-  .whenReady()
-  .then(bootstrap)
-  .catch((error: unknown) => {
-    reportFatal('startup failed', error);
+if (!gotSingleInstanceLock) {
+  // Another instance already holds the lock and will receive `second-instance` (below) instead
+  // of this process ever reaching `bootstrap`. `app.exit(0)`, not `app.quit()`: nothing above
+  // this line has created a window, a tray icon, a sidecar or a logger, so there is nothing for
+  // `before-quit` to await and no `shutdown()` worth running - the same reasoning `reportFatal`
+  // uses `app.exit(1)` for, a little further up in this file. Exit code 0: losing this race is
+  // not a failure, it is the point of asking (#86).
+  app.exit(0);
+} else {
+  /**
+   * The running instance's side of #86. Fires once for every later launch Windows tried to start
+   * as a separate process, and only on the instance that holds the lock - a losing instance never
+   * reaches this line at all (see the branch above).
+   *
+   * Routed through `AppOrchestrator.openSettings()` - the exact call the tray's "Settings…" item
+   * makes (see `startTray`'s `onOpenSettings` above) - rather than a second call to
+   * `WindowManager.openSettings()` here, so a second launch is indistinguishable from the user
+   * opening settings from the tray themselves: focuses the window if it is already open, creates
+   * and shows it if it is not.
+   *
+   * `if (shuttingDown) return` mirrors `window-all-closed`'s own guard just above: a second
+   * launch that lands mid-`closeAll()` must not recreate a settings window the shutdown is in the
+   * middle of destroying.
+   */
+  app.on('second-instance', () => {
+    if (shuttingDown) return;
+    logger?.child('app').info('a second instance was launched; showing settings instead (#86)');
+    orchestrator?.openSettings();
   });
+
+  // #67. `bootstrap` is ~200 lines with no try/catch of its own, and its first `await` is
+  // `createLogger` - so the one failure it is most likely to have is also the one that arrives before
+  // a log file, a window or a tray exists to say anything about it. Unhandled, that is an app the
+  // user double-clicks and watches do nothing at all. `reportFatal` falls back to `showErrorBox`
+  // precisely because the disk is the thing that may have failed.
+  void app
+    .whenReady()
+    .then(bootstrap)
+    .catch((error: unknown) => {
+      reportFatal('startup failed', error);
+    });
+}
