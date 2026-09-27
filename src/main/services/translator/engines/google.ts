@@ -160,9 +160,10 @@ export class GoogleTranslateEngine implements TranslationEngine {
     } catch (error) {
       // A transport-level throw covers DNS failure, connection reset and our own timeout. All
       // three are "try again shortly", which is the short backoff. The original is kept as
-      // `cause` for a debug-level dump; the message we construct carries nothing from it,
-      // because a transport error message can quote the URL or a body fragment.
-      throw new TranslationError('google: request failed or timed out', {
+      // `cause` for a debug-level dump; the message we construct carries nothing from it beyond
+      // its constructor/`.name` (e.g. `TimeoutError`, `AbortError`, `TypeError`), because a
+      // transport error's own message can quote the URL or a body fragment - see `causeName`.
+      throw new TranslationError(`google: request failed or timed out (${causeName(error)})`, {
         kind: 'network',
         engine: this.name,
         cause: error,
@@ -182,13 +183,22 @@ export class GoogleTranslateEngine implements TranslationEngine {
     try {
       return await response.text();
     } catch (error) {
-      throw new TranslationError('google: could not read the response body', {
+      throw new TranslationError(`google: could not read the response body (${causeName(error)})`, {
         kind: 'network',
         engine: this.name,
         cause: error,
       });
     }
   }
+}
+
+/**
+ * A cause's constructor identity, safe to log: `TimeoutError`, `AbortError`, `TypeError`, and so
+ * on carry no request or response content, unlike the cause's own `.message` (see the two call
+ * sites above - a transport error's message can quote the URL or a body fragment).
+ */
+function causeName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
 }
 
 /**

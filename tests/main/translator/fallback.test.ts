@@ -255,6 +255,54 @@ describe('FallbackTranslator - when everything is down', () => {
   });
 });
 
+describe('FallbackTranslator - #79 P5: an all-unavailable chain is not a new incident', () => {
+  it('does not log the total-failure line at error when every engine only refused at the gate', async () => {
+    const logger = new RecordingLogger();
+    const translator = new FallbackTranslator(
+      [
+        new FakeEngine('primary', () => {
+          throw new TranslationError('primary: backing off for another 500ms', { kind: 'unavailable' });
+        }),
+        new FakeEngine('fallback', () => {
+          throw new TranslationError('fallback: backing off for another 500ms', { kind: 'unavailable' });
+        }),
+      ],
+      { logger },
+    );
+
+    await translator.translate(TEXTS, 'en', 'th');
+
+    const totalFailureLines = logger.lines.filter((line) =>
+      line.message.startsWith('all translation engines failed'),
+    );
+    expect(totalFailureLines).toHaveLength(1);
+    expect(totalFailureLines[0]?.level).toBe('debug');
+  });
+
+  it('still logs at error when even one failure is a real incident, not just a refusal', async () => {
+    const logger = new RecordingLogger();
+    const translator = new FallbackTranslator(
+      [
+        new FakeEngine('primary', () => {
+          throw new TranslationError('primary: backing off for another 500ms', { kind: 'unavailable' });
+        }),
+        new FakeEngine('fallback', () => {
+          throw new TranslationError('fallback: HTTP 500', { kind: 'network', status: 500 });
+        }),
+      ],
+      { logger },
+    );
+
+    await translator.translate(TEXTS, 'en', 'th');
+
+    const totalFailureLines = logger.lines.filter((line) =>
+      line.message.startsWith('all translation engines failed'),
+    );
+    expect(totalFailureLines).toHaveLength(1);
+    expect(totalFailureLines[0]?.level).toBe('error');
+  });
+});
+
 describe('FallbackTranslator - screen text must not reach the default log level', () => {
   it('logs counts and engine names, never the text being translated', async () => {
     const logger = new RecordingLogger();
