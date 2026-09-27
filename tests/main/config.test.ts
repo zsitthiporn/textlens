@@ -390,6 +390,189 @@ describe('ConfigService.set', () => {
   });
 });
 
+/**
+ * Issue #75: a config file that failed to load was one unrelated `set()` away from being
+ * destroyed, because `#override` stays `{}` on a failed load (by design, #38) and the next write
+ * overwrites the file with an override containing only that one change.
+ *
+ * Every fixture below uses a real file and a real filesystem failure, matching the rest of this
+ * suite's own stated policy (see the file header) - `set()` here always runs against the real
+ * `fs.copyFile`. The one scenario that needs to force `fs.copyFile` itself to fail while the
+ * directory otherwise stays fully writable is not reachable that way and lives in
+ * `config-preserve.test.ts` instead, with its own note about why it stubs `fs`.
+ */
+describe('ConfigService: preserving a config it could not load (#75)', () => {
+  it('preserves an invalid file byte-for-byte in a sibling copy, and writes only the new override', async () => {
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    // The issue's own repro: two good fields and one out of range (render.fontSize max is 48).
+    const original = JSON.stringify({
+      capture: { intervalActive: 1234 },
+      hotkeys: { snapshot: 'Shift+Space' },
+      render: { fontSize: 999 },
+    });
+    writeConfig(filePath, original);
+    const originalBytes = fs.readFileSync(filePath);
+
+    const service = await ConfigService.load({ filePath });
+    expect(service.issues[0]?.kind).toBe('invalid');
+    const fieldsBefore = service.issues[0]?.fields;
+
+    const result = await service.set({ render: { opacity: 0.5 } });
+
+    expect(result).toMatchObject({ applied: true, persisted: true });
+
+    const siblings = fs.readdirSync(dir).filter((name) => /^config\.rejected-.*\.json$/.test(name));
+    expect(siblings).toHaveLength(1);
+    const preservedPath = path.join(dir, siblings[0]!);
+    expect(fs.readFileSync(preservedPath).equals(originalBytes)).toBe(true);
+
+    // config.json itself holds only the new override - #38's own requirement - not a merge with
+    // whatever was rejected, and not the file that was there before.
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ render: { opacity: 0.5 } });
+
+    // The user is told where the original went, through the same issue that already named the
+    // bad field - `fields` is untouched (it feeds a different sentence in error-reporter.ts and
+    // must not gain a filesystem path), `message` gains the location.
+    expect(service.issues[0]?.kind).toBe('invalid');
+    expect(service.issues[0]?.fields).toEqual(fieldsBefore);
+    expect(service.issues[0]?.message).toContain(preservedPath);
+  });
+
+  it('preserves a malformed file (BOM + trailing comma + CRLF) byte-for-byte before overwriting it', async () => {
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    const original = `﻿{\r\n  "capture": { "intervalActive": 1234, },\r\n}`;
+    writeConfig(filePath, original);
+    const originalBytes = fs.readFileSync(filePath);
+
+    const service = await ConfigService.load({ filePath });
+    expect(service.issues[0]?.kind).toBe('malformed');
+
+    const result = await service.set({ render: { opacity: 0.25 } });
+    expect(result).toMatchObject({ applied: true, persisted: true });
+
+    const siblings = fs.readdirSync(dir).filter((name) => /^config\.rejected-.*\.json$/.test(name));
+    expect(siblings).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, siblings[0]!)).equals(originalBytes)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ render: { opacity: 0.25 } });
+    expect(service.issues[0]?.message).toContain(path.join(dir, siblings[0]!));
+  });
+
+  it('does not copy again on a second set() in the same session', async () => {
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    writeConfig(filePath, JSON.stringify({ render: { fontSize: 999 } }));
+
+    const service = await ConfigService.load({ filePath });
+    await service.set({ render: { opacity: 0.5 } });
+    await service.set({ render: { opacity: 0.75 } });
+
+    const siblings = fs.readdirSync(dir).filter((name) => /^config\.rejected-.*\.json$/.test(name));
+    expect(siblings).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ render: { opacity: 0.75 } });
+  });
+
+  it('preserves the file when a later reload - not the first load - is what failed', async () => {
+    // Rule 1 is "the most recent load failed", not "the first load failed": a config that loaded
+    // fine, was then corrupted by something else, and is now about to be `set()` deserves the
+    // same protection as one that was bad from the start.
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    writeConfig(filePath, JSON.stringify({ capture: { intervalActive: 1750 } }));
+
+    const service = await ConfigService.load({ filePath });
+    expect(service.issues).toEqual([]);
+
+    writeConfig(filePath, 'not json at all');
+    const corruptedBytes = fs.readFileSync(filePath);
+    await service.reload();
+    expect(service.issues[0]?.kind).toBe('malformed');
+
+    await service.set({ render: { opacity: 0.5 } });
+
+    const siblings = fs.readdirSync(dir).filter((name) => /^config\.rejected-.*\.json$/.test(name));
+    expect(siblings).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, siblings[0]!)).equals(corruptedBytes)).toBe(true);
+  });
+
+  it('makes no sibling copy once a later reload succeeds (a good load resets the guard)', async () => {
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    writeConfig(filePath, 'not json at all');
+
+    const service = await ConfigService.load({ filePath });
+    expect(service.issues[0]?.kind).toBe('malformed');
+
+    writeConfig(filePath, JSON.stringify({ capture: { intervalActive: 900 } }));
+    await service.reload();
+    expect(service.issues).toEqual([]);
+
+    await service.set({ render: { opacity: 0.5 } });
+
+    expect(fs.readdirSync(dir).some((name) => name.includes('rejected'))).toBe(false);
+  });
+
+  it('makes no sibling copy when the file loaded cleanly (no regression on the common case)', async () => {
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    const service = await ConfigService.load({ filePath });
+
+    await service.set({ capture: { intervalActive: 1500 } });
+
+    expect(fs.readdirSync(dir).some((name) => name.includes('rejected'))).toBe(false);
+  });
+
+  it('refuses to overwrite a config path that cannot even be copied, and reports why instead of writing', async () => {
+    // The config path is itself a directory: the existing `unreadable` fixture. `fs.copyFile`
+    // fails on it exactly as `fs.readFile` did, so this is also the one case where the failure
+    // that blocks the copy and the failure that would have blocked the write are the same
+    // failure - the message text is what tells a preserve-first write apart from the old
+    // behaviour, not the fact that persisted ends up false (old code reached false here too).
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    fs.mkdirSync(filePath);
+    const { logger, lines } = collectingLogger();
+
+    const service = await ConfigService.load({ filePath, logger });
+    expect(service.issues[0]?.kind).toBe('unreadable');
+
+    const result = await service.set({ render: { opacity: 0.5 } });
+
+    expect(result.applied).toBe(true);
+    expect(result.persisted).toBe(false);
+    expect(
+      service.issues.some(
+        (issue) => issue.kind === 'not-persisted' && issue.message.includes('backed up'),
+      ),
+    ).toBe(true);
+    // Still a directory: nothing was created or renamed over it, and no partial sibling either.
+    expect(fs.statSync(filePath).isDirectory()).toBe(true);
+    expect(fs.readdirSync(dir).some((name) => name.includes('rejected'))).toBe(false);
+    expect(lines.some((line) => line.level === 'error')).toBe(true);
+  });
+
+  it('proceeds with a normal write when the file that failed to load has since been deleted', async () => {
+    // e.g. the user followed the tray's own remedy - "delete the file to start from defaults"
+    // (error-reporter.ts) - before touching a setting. Refusing to write from here on would trap
+    // that user in a permanent, unexplained "not saved".
+    const dir = tempDir();
+    const filePath = path.join(dir, 'config.json');
+    writeConfig(filePath, JSON.stringify({ render: { fontSize: 999 } }));
+
+    const service = await ConfigService.load({ filePath });
+    expect(service.issues[0]?.kind).toBe('invalid');
+
+    fs.rmSync(filePath);
+
+    const result = await service.set({ render: { opacity: 0.5 } });
+
+    expect(result).toMatchObject({ applied: true, persisted: true });
+    expect(fs.readdirSync(dir).some((name) => name.includes('rejected'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(filePath, 'utf8'))).toEqual({ render: { opacity: 0.5 } });
+  });
+});
+
 describe('ConfigService.reload', () => {
   it('picks up a change written by someone else and notifies subscribers', async () => {
     const filePath = tempConfigPath();

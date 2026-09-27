@@ -29,6 +29,17 @@
  * modes (editors write via rename, half-written files parse as truncated JSON) and no issue
  * asking for it. {@link ConfigService.reload} exists for a caller that wants it explicitly.
  *
+ * ## Never overwrite what we could not load (#75)
+ *
+ * `#override` stays `{}` when a load fails (the paragraph above), which means the very next
+ * `set()` writes an override containing only that one change - atomically renamed over whatever
+ * was on disk, no matter how it got there. A file with one bad field, or a BOM plus a trailing
+ * comma, was one unrelated settings change away from silent, total loss: the old content was
+ * never read into `#override`, so nothing held it once the rename completed. `#write` now copies
+ * the file it is about to replace to a timestamped sibling, once per failed load, before it
+ * writes anything at all - and if that copy cannot be made, it does not write, because writing
+ * without a copy first is exactly the data-loss window this closes.
+ *
  * This module imports no Electron: it is handed a path, so it stays importable from a plain
  * Node test process like every other file in `services/`.
  */
@@ -120,6 +131,19 @@ export class ConfigService {
   /** The user layer as last validated. What gets written back, and what `set` merges into. */
   #override: ConfigOverride = {};
   #issues: ConfigIssue[] = [];
+  /**
+   * True whenever the most recent {@link reload} could not use the file on disk - `invalid`,
+   * `malformed`, or `unreadable` - and no write has preserved a copy of it yet (#75).
+   *
+   * This is what makes `#write` stop and copy the original before it replaces it. It clears the
+   * moment that copy succeeds, not the moment the following write succeeds, so a write that then
+   * fails for an unrelated reason (disk full) does not trigger a second, needless copy attempt
+   * next time. And it is set again by a *later* failed reload even if an earlier one already
+   * cleared it - the rule is "the most recent load failed", not "any load ever failed", which is
+   * why a good load resets it (rule 5) and a first run with no file at all never sets it (there
+   * is nothing to protect from being overwritten).
+   */
+  #preservePending = false;
 
   private constructor(options: ConfigServiceOptions) {
     this.#filePath = options.filePath;
@@ -197,6 +221,7 @@ export class ConfigService {
         const merged = configSchema.safeParse(mergeDeep(DEFAULT_CONFIG, parsed.data));
         if (merged.success) {
           this.#override = parsed.data;
+          this.#preservePending = false;
           this.#setIssues(issues);
           this.#commit(merged.data);
           return;
@@ -210,6 +235,11 @@ export class ConfigService {
       }
     }
 
+    // Every branch above that did not already return pushed an issue, except "no file at all"
+    // (`raw` is `undefined` with nothing pushed) - the one non-problem (module doc, "missing is
+    // deliberately absent"). Only a genuine failure arms the preserve-before-write guard; a first
+    // run must not try to copy a file that was never there.
+    this.#preservePending = issues.length > 0;
     this.#setIssues(issues);
   }
 
@@ -295,10 +325,44 @@ export class ConfigService {
    * launch as "malformed JSON" and loses every setting the user had. `rename` within one
    * filesystem is atomic, so the file is either the old one or the new one.
    *
+   * If the last {@link reload} could not use this file, the first call here since then copies it
+   * to a sibling before touching it at all (#75) - see `#preservePending` above. A copy that fails
+   * cancels the write outright, on the theory that a file we could not load and
+   * could not back up is not safe to erase on a guess.
+   *
    * @returns whether it reached the disk. False is reported, never thrown - the value is
    *          already live by the time this runs.
    */
   async #write(override: ConfigOverride): Promise<boolean> {
+    if (this.#preservePending) {
+      const preserved = await this.#preserveOriginal();
+      if (preserved.outcome === 'failed') {
+        this.#log.error('could not preserve the config file that failed to load; refusing to overwrite it', {
+          filePath: this.#filePath,
+          message: preserved.message,
+        });
+        this.#recordNotPersisted(
+          `your previous settings file could not be safely backed up (${preserved.message}), `
+            + 'so this change was kept for this session only and not saved',
+        );
+        return false;
+      }
+
+      this.#preservePending = false;
+      if (preserved.outcome === 'preserved') {
+        this.#log.warn('preserved a config file that failed to load before overwriting it', {
+          filePath: this.#filePath,
+          preservedPath: preserved.path,
+        });
+        this.#notePreserved(preserved.path);
+      }
+      // preserved.outcome === 'nothing-to-preserve': the file the last reload failed on is
+      // already gone by the time we got here (the user deleted it, or an editor's rename-based
+      // save replaced it). There is nothing left to copy, and refusing to write from here on
+      // would trap a user who followed the tray's own remedy ("delete the file to start from
+      // defaults", error-reporter.ts) into a permanent, unexplained "not saved".
+    }
+
     const temp = `${this.#filePath}.tmp`;
     try {
       await fs.mkdir(path.dirname(this.#filePath), { recursive: true });
@@ -316,18 +380,83 @@ export class ConfigService {
         filePath: this.#filePath,
         message,
       });
-      // **Replaces** any previous `not-persisted` rather than appending to it. The old code
-      // appended, so a read-only config directory grew this list by one entry per save for the
-      // life of the process - every entry saying the same thing, and every one of them re-rendered
-      // by the settings window that now reads it.
-      this.#setIssues([
-        ...this.#issues.filter((issue) => issue.kind !== 'not-persisted'),
-        { kind: 'not-persisted', message, fields: [] },
-      ]);
+      this.#recordNotPersisted(message);
       // Best effort - a leftover temp file is untidy, not harmful, and the write already failed.
       await fs.rm(temp, { force: true }).catch(() => undefined);
       return false;
     }
+  }
+
+  /**
+   * Copy the file the last {@link reload} could not use, byte-for-byte, to a timestamped sibling
+   * - before the write that is about to replace it (#75).
+   *
+   * `fs.copyFile` rather than read-then-write: the goal is a faithful copy of whatever bytes are
+   * actually on disk right now - BOM, trailing comma, wrong encoding and all - not a copy of
+   * whatever this process last parsed, which can differ if the file changed between the failed
+   * `reload` and this `set`. `COPYFILE_EXCL` is what makes "a later rejection never clobbers an
+   * earlier copy" true rather than merely likely.
+   *
+   * ENOENT is reported as `nothing-to-preserve`, not `failed`: see the caller for why a missing
+   * source must not block the write.
+   */
+  async #preserveOriginal(): Promise<
+    | { readonly outcome: 'preserved'; readonly path: string }
+    | { readonly outcome: 'nothing-to-preserve' }
+    | { readonly outcome: 'failed'; readonly message: string }
+  > {
+    const { dir, name } = path.parse(this.#filePath);
+    // Filesystem-safe and still readable: `:` is illegal in a Windows filename, so the default
+    // ISO string (`...T12:34:56.789Z`) cannot be used as-is.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    // A `.json` extension regardless of the original's, so the copy opens in an editor the same
+    // way the file it came from did.
+    const copyPath = path.join(dir, `${name}.rejected-${stamp}.json`);
+
+    try {
+      await fs.copyFile(this.#filePath, copyPath, fs.constants.COPYFILE_EXCL);
+      return { outcome: 'preserved', path: copyPath };
+    } catch (error) {
+      if (isNotFound(error)) {
+        this.#log.info('the config file that failed to load is gone; nothing to preserve', {
+          filePath: this.#filePath,
+        });
+        return { outcome: 'nothing-to-preserve' };
+      }
+      return { outcome: 'failed', message: describeError(error) };
+    }
+  }
+
+  /**
+   * Add the sibling copy's path to the message of whatever issue the last failed reload left
+   * behind, so a user reading the settings window's issue list can find where their original file
+   * went.
+   *
+   * This is the only route available: the tray/overlay alert built by
+   * `error-reporter.ts#describeConfigIssues` constructs its text from `kind` and `fields` alone
+   * and never reads `message`, so it cannot be extended from here without editing that file.
+   * `fields` is left untouched on purpose - it is joined into "capture.diffThreshold is not
+   * valid" there, and a filesystem path spliced into that list would read as an invalid setting
+   * name rather than a location.
+   */
+  #notePreserved(copyPath: string): void {
+    const note = `Textlens saved your previous file to ${copyPath} before writing this change.`;
+    this.#setIssues(
+      this.#issues.map((issue) => (issue.kind === 'not-persisted' ? issue : { ...issue, message: `${issue.message}. ${note}` })),
+    );
+  }
+
+  /**
+   * Replace any previous `not-persisted` entry with one carrying `message`, rather than appending
+   * to it. The old code appended, so a read-only config directory grew this list by one entry per
+   * save for the life of the process - every entry saying the same thing, and every one of them
+   * re-rendered by the settings window that reads it.
+   */
+  #recordNotPersisted(message: string): void {
+    this.#setIssues([
+      ...this.#issues.filter((issue) => issue.kind !== 'not-persisted'),
+      { kind: 'not-persisted', message, fields: [] },
+    ]);
   }
 
   /**
