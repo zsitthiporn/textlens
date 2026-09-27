@@ -15,6 +15,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  HOTKEY_REPEAT_GUARD_MS,
   HotkeyService,
   type HotkeyHandlers,
   type ShortcutRegistrar,
@@ -291,6 +292,70 @@ describe('HotkeyService.register', () => {
   });
 });
 
+/**
+ * Registering a `caution` accelerator - one whose only modifier is Shift, or none at all, and
+ * whose key types a character (issue #82). Registration itself is untouched: `ok` is exactly what
+ * it would have been without this, on every path below.
+ */
+describe('HotkeyService.register: hotkey caution (#82)', () => {
+  it('flags a successfully-registered Shift+Space, and still reports ok', () => {
+    const shortcuts = fakeRegistrar();
+    const { logger, lines } = collectingLogger();
+    const service = new HotkeyService({ shortcuts, logger });
+
+    const results = service.register({ ...DEFAULT_HOTKEYS, snapshot: 'Shift+Space' }, noopHandlers());
+
+    expect(results[1]).toMatchObject({
+      action: 'snapshot',
+      accelerator: 'Shift+Space',
+      ok: true,
+      caution: { reason: 'typing-key', typedAs: 'a space' },
+    });
+    expect(shortcuts.isRegistered('Shift+Space')).toBe(true);
+    // #82: logged, not just returned - the log must not be the only place this is visible, but it
+    // must still be there for anyone who does look.
+    const warned = lines.find((line) => line.level === 'warn');
+    expect(warned?.fields).toMatchObject({ action: 'snapshot', accelerator: 'Shift+Space', typedAs: 'a space' });
+  });
+
+  it('does not flag an ordinary accelerator', () => {
+    const shortcuts = fakeRegistrar();
+    const { lines } = collectingLogger();
+    const service = new HotkeyService({ shortcuts });
+
+    const results = service.register(DEFAULT_HOTKEYS, noopHandlers());
+
+    for (const result of results) expect(result.caution).toBeUndefined();
+    expect(lines.some((line) => line.level === 'warn')).toBe(false);
+  });
+
+  it('does not flag a registration that failed - nothing is live to swallow a key', () => {
+    const taken = 'Shift+Space';
+    const shortcuts = fakeRegistrar([taken]);
+    const service = new HotkeyService({ shortcuts });
+
+    const results = service.register({ ...DEFAULT_HOTKEYS, snapshot: taken }, noopHandlers());
+
+    expect(results[1]).toMatchObject({ action: 'snapshot', ok: false, reason: 'conflict' });
+    expect(results[1]?.caution).toBeUndefined();
+  });
+
+  it('computes the same caution regardless of source - config default, rebind, or an older build', () => {
+    // #82 asked for one code path that every source funnels through. There is only one call site
+    // (`#registerOne`), so a config-sourced accelerator and one from `acceleratorFromKeyStroke`
+    // land on the same result as long as the string is the same.
+    const shortcuts = fakeRegistrar();
+    const service = new HotkeyService({ shortcuts });
+
+    const results = service.register({ ...DEFAULT_HOTKEYS, toggleOverlay: 'Shift+.' }, noopHandlers());
+
+    expect(results[3]).toMatchObject({
+      action: 'toggleOverlay',
+      caution: { reason: 'typing-key', typedAs: 'a period' },
+    });
+  });
+});
+
 describe('HotkeyService.unregisterAll', () => {
   it('releases every key it took, so nothing is left registered after quit', () => {
     const shortcuts = fakeRegistrar();
@@ -332,9 +397,10 @@ describe('HotkeyService.unregisterAll', () => {
 });
 
 describe('HotkeyService key repeat', () => {
-  it('lets synchronous presses through every time', () => {
+  it('lets synchronous presses through every time, spaced at human speed', () => {
     const shortcuts = fakeRegistrar();
-    const service = new HotkeyService({ shortcuts });
+    let now = 0;
+    const service = new HotkeyService({ shortcuts, now: () => now });
     let calls = 0;
     service.register(DEFAULT_HOTKEYS, {
       ...noopHandlers(),
@@ -343,13 +409,16 @@ describe('HotkeyService key repeat', () => {
       },
     });
 
+    // Three deliberate presses, each a clear guard interval apart - not the ~31ms auto-repeat
+    // #82 measured live. Two toggles are a toggle back, not corruption - suppressing these would
+    // swallow a deliberate double-tap.
     const accelerator = DEFAULT_HOTKEYS.toggleAuto ?? '';
     shortcuts.press(accelerator);
+    now += HOTKEY_REPEAT_GUARD_MS;
     shortcuts.press(accelerator);
+    now += HOTKEY_REPEAT_GUARD_MS;
     shortcuts.press(accelerator);
 
-    // Two toggles are a toggle back, not corruption - suppressing these would swallow a
-    // deliberate double-tap.
     expect(calls).toBe(3);
   });
 
@@ -409,7 +478,8 @@ describe('HotkeyService key repeat', () => {
   it('does not let a throwing handler escape into the shortcut callback', () => {
     const shortcuts = fakeRegistrar();
     const { logger, lines } = collectingLogger();
-    const service = new HotkeyService({ shortcuts, logger });
+    let now = 0;
+    const service = new HotkeyService({ shortcuts, logger, now: () => now });
     service.register(DEFAULT_HOTKEYS, {
       ...noopHandlers(),
       toggleAuto: () => {
@@ -418,10 +488,117 @@ describe('HotkeyService key repeat', () => {
     });
 
     const accelerator = DEFAULT_HOTKEYS.toggleAuto ?? '';
-    // Unhandled here would be an uncaught exception in the main process.
+    // Unhandled here would be an uncaught exception in the main process. Spaced past the repeat
+    // guard, so this is testing the throw path, not the guard added for #82 (that has its own
+    // describe block below).
     expect(() => shortcuts.press(accelerator)).not.toThrow();
+    now += HOTKEY_REPEAT_GUARD_MS;
     expect(() => shortcuts.press(accelerator)).not.toThrow();
     expect(lines.filter((line) => line.level === 'error')).toHaveLength(2);
+  });
+});
+
+/**
+ * The auto-repeat guard itself (issue #82).
+ *
+ * `index.ts` wires every action's handler as `() => { modes.snapshot(); }` - a block statement
+ * that discards whatever `modes.snapshot()` returns, so `#invoke` never sees a Promise for any of
+ * the five real actions and the pre-existing `#inFlight` guard (tested above) never engages for
+ * them. This is the guard that actually stops a held key from firing dozens of times.
+ */
+describe('HotkeyService key repeat: the auto-repeat guard (#82)', () => {
+  it('drops a repeat press of a synchronous action inside the guard interval', () => {
+    const shortcuts = fakeRegistrar();
+    let now = 0;
+    const service = new HotkeyService({ shortcuts, now: () => now });
+    let calls = 0;
+    service.register(DEFAULT_HOTKEYS, {
+      ...noopHandlers(),
+      toggleOverlay: () => {
+        calls += 1;
+      },
+    });
+
+    // 31ms apart, matching what a held key was measured to produce live.
+    const accelerator = DEFAULT_HOTKEYS.toggleOverlay ?? '';
+    shortcuts.press(accelerator);
+    now += 31;
+    shortcuts.press(accelerator);
+    now += 31;
+    shortcuts.press(accelerator);
+
+    expect(calls).toBe(1);
+  });
+
+  it('treats a key held for seconds as one press, not one per guard interval', () => {
+    const shortcuts = fakeRegistrar();
+    let now = 0;
+    const service = new HotkeyService({ shortcuts, now: () => now });
+    let calls = 0;
+    service.register(DEFAULT_HOTKEYS, {
+      ...noopHandlers(),
+      toggleOverlay: () => {
+        calls += 1;
+      },
+    });
+
+    // The live measurement: 46 repeats about 31ms apart over ~2.6s. Measuring only from the last
+    // press that fired would let one through every HOTKEY_REPEAT_GUARD_MS of the hold.
+    const accelerator = DEFAULT_HOTKEYS.toggleOverlay ?? '';
+    for (let i = 0; i < 46; i += 1) {
+      shortcuts.press(accelerator);
+      now += 31;
+    }
+    expect(calls).toBe(1);
+
+    // Released, then pressed again deliberately: that one still counts.
+    now += HOTKEY_REPEAT_GUARD_MS;
+    shortcuts.press(accelerator);
+    expect(calls).toBe(2);
+  });
+
+  it('accepts the next press once the guard interval has fully passed', () => {
+    const shortcuts = fakeRegistrar();
+    let now = 0;
+    const service = new HotkeyService({ shortcuts, now: () => now });
+    let calls = 0;
+    service.register(DEFAULT_HOTKEYS, {
+      ...noopHandlers(),
+      toggleOverlay: () => {
+        calls += 1;
+      },
+    });
+
+    const accelerator = DEFAULT_HOTKEYS.toggleOverlay ?? '';
+    shortcuts.press(accelerator);
+    now += HOTKEY_REPEAT_GUARD_MS;
+    shortcuts.press(accelerator);
+
+    expect(calls).toBe(2);
+  });
+
+  it('does not apply the synchronous guard to an async action, which #inFlight already covers', async () => {
+    const shortcuts = fakeRegistrar();
+    // No `now` injected: real time between these two calls, in the same tick, is far less than
+    // HOTKEY_REPEAT_GUARD_MS. If the guard applied here too, the second press would be dropped.
+    const service = new HotkeyService({ shortcuts });
+    let calls = 0;
+    service.register(DEFAULT_HOTKEYS, {
+      ...noopHandlers(),
+      snapshot: async () => {
+        calls += 1;
+      },
+    });
+
+    const accelerator = DEFAULT_HOTKEYS.snapshot ?? '';
+    shortcuts.press(accelerator);
+    await Promise.resolve();
+    await Promise.resolve();
+    shortcuts.press(accelerator);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(calls).toBe(2);
   });
 });
 

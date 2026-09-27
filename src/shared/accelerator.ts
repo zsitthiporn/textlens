@@ -50,13 +50,77 @@ export interface KeyStroke {
 
 export type AcceleratorCapture =
   /** A complete, registerable accelerator. */
-  | { readonly kind: 'ok'; readonly accelerator: string }
+  | { readonly kind: 'ok'; readonly accelerator: string; readonly caution?: HotkeyCaution }
   /** Only modifiers are down so far; keep listening. */
   | { readonly kind: 'pending' }
   /** The user pressed Escape. Abandon the capture and keep the previous binding. */
   | { readonly kind: 'cancel' }
   /** Nothing registerable can be made of this. `message` is for the field, not the log. */
   | { readonly kind: 'rejected'; readonly message: string };
+
+/**
+ * Why an otherwise-valid accelerator is worth a second look before it goes live (issue #82).
+ *
+ * `RegisterHotKey` is not scoped to this app: a global accelerator whose only modifier is Shift -
+ * or none at all - intercepts a key the user relies on for ordinary typing, everywhere in Windows,
+ * the instant it is bound. The real config this project ships with binds `snapshot` to
+ * `Shift+Space`, and holding Shift while tapping Space to type an actual space is an entirely
+ * ordinary typing motion. This is deliberately not a `rejected` outcome: #82 is explicit that the
+ * binding must keep working, because it already does for a real user. It is "the user should know
+ * what they signed up for", which is what {@link classifyHotkeyCaution} feeds into the alert and
+ * the log - registration succeeds exactly as it would without this.
+ */
+export interface HotkeyCaution {
+  readonly reason: 'typing-key';
+  /** What pressing this key normally produces, e.g. "a space", "a period", "the letter S". */
+  readonly typedAs: string;
+}
+
+/** Punctuation tokens Electron accepts as the final key, named the way a sentence would say them. */
+const TYPING_PUNCTUATION: Readonly<Record<string, string>> = {
+  '-': 'a hyphen',
+  '=': 'an equals sign',
+  '[': 'an opening bracket',
+  ']': 'a closing bracket',
+  '\\': 'a backslash',
+  ';': 'a semicolon',
+  "'": 'an apostrophe',
+  '`': 'a backtick',
+  ',': 'a comma',
+  '.': 'a period',
+  '/': 'a slash',
+};
+
+/** What a key token normally types, or `undefined` for a key that does not produce a character. */
+function typedAs(key: string): string | undefined {
+  if (key.toLowerCase() === 'space') return 'a space';
+  if (/^[A-Za-z]$/.test(key)) return `the letter ${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `the digit ${key}`;
+  return TYPING_PUNCTUATION[key];
+}
+
+/**
+ * Whether an *already-valid* accelerator string swallows a key the user types normally (#82).
+ *
+ * Two conditions, both required. Every modifier present must be Shift - Control, Alt and Super
+ * each rule out a combination anyone produces by accident while typing, which is why `Alt+A` is
+ * not flagged even though `A` is. And the final key must be one a person types: a letter, a digit,
+ * `Space`, or a punctuation mark - which is why `F9` and `Shift+F9` are not flagged even though no
+ * modifier, or only Shift, is held. `Shift+Space`, `Shift+.` and a bare `Space` satisfy both.
+ *
+ * Takes the accelerator string directly rather than a {@link KeyStroke}, so `hotkey-service.ts` can
+ * run it over a string that came from a config file or an older build and never passed through
+ * {@link acceleratorFromKeyStroke} at all - not only over a fresh capture.
+ */
+export function classifyHotkeyCaution(accelerator: string): HotkeyCaution | undefined {
+  const parts = accelerator.split('+').map((part) => part.trim());
+  const key = parts[parts.length - 1] ?? '';
+  const modifiers = parts.slice(0, -1).map((part) => part.toLowerCase());
+  if (!modifiers.every((modifier) => modifier === 'shift')) return undefined;
+
+  const description = typedAs(key);
+  return description === undefined ? undefined : { reason: 'typing-key', typedAs: description };
+}
 
 /**
  * Physical keys that are modifiers. A `keydown` for one of these alone is the user still
@@ -184,5 +248,7 @@ export function acceleratorFromKeyStroke(stroke: KeyStroke): AcceleratorCapture 
     };
   }
 
-  return { kind: 'ok', accelerator: [...modifiers, key].join('+') };
+  const accelerator = [...modifiers, key].join('+');
+  const caution = classifyHotkeyCaution(accelerator);
+  return caution === undefined ? { kind: 'ok', accelerator } : { kind: 'ok', accelerator, caution };
 }

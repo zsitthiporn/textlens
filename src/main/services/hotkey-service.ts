@@ -56,6 +56,7 @@
  * technique, and the same reason, as `DisplayGeometry` in `utils/coordinates.ts`.
  */
 
+import { classifyHotkeyCaution, type HotkeyCaution } from '../../shared/accelerator.js';
 import { HOTKEY_ACTIONS, type HotkeyAction, type HotkeyConfig } from '../../shared/config-schema.js';
 import { nullLogger, type Logger } from './logger.js';
 
@@ -92,6 +93,12 @@ export interface HotkeyRegistration {
   readonly reason?: HotkeyFailureReason;
   /** Human-readable detail: the thrown message, or the action that took the key first. */
   readonly detail?: string;
+  /**
+   * Set only when `ok` is `true` (issue #82). A registration that failed is not live, so it
+   * cannot be the thing swallowing a key from the rest of Windows - only a binding that actually
+   * took effect can, which is why this is computed after `register` succeeds and never before.
+   */
+  readonly caution?: HotkeyCaution;
 }
 
 export type HotkeyHandlers = Readonly<Record<HotkeyAction, () => void | Promise<void>>>;
@@ -111,21 +118,49 @@ export interface HotkeyServiceOptions {
   /** Electron's `globalShortcut`, or a fake in tests. */
   readonly shortcuts: ShortcutRegistrar;
   readonly logger?: Logger;
+  /** Injected clock for {@link HOTKEY_REPEAT_GUARD_MS}. Defaults to `Date.now`. */
+  readonly now?: () => number;
 }
+
+/**
+ * Minimum time between two presses of the same action that both run *synchronously*, before the
+ * second is treated as OS auto-repeat rather than a second deliberate press (issue #82).
+ *
+ * Measured live: holding a bound key down produced 46 presses in 2.6s, about 31ms apart. An async
+ * handler already cannot be re-entered inside a gap that small - {@link HotkeyService.#inFlight}
+ * covers the whole time it is awaited - but every handler `index.ts` wires up today is a
+ * synchronous wrapper (`() => { modes.snapshot(); }` discards whatever `modes.snapshot()` itself
+ * returns), so `#inFlight` never sees a pending promise for any of the five real actions, and a
+ * key held down fires the handler on every one of those 31ms repeats.
+ *
+ * 300ms is about ten times that measured interval - clear of it even on a keyboard set to a slower
+ * repeat rate - while sitting below the ~500ms Windows default for how far apart two clicks must
+ * be to *not* register as one double-click. A user tapping a toggle twice on purpose is not
+ * usually trying to beat that clock, so this only ever discards the presses a human did not make.
+ */
+export const HOTKEY_REPEAT_GUARD_MS = 300;
 
 export class HotkeyService {
   readonly #shortcuts: ShortcutRegistrar;
   readonly #log: Logger;
+  readonly #now: () => number;
 
   /** Accelerators this service registered, so `unregisterAll` only removes its own. */
   #registered = new Map<HotkeyAction, string>();
   #results: HotkeyRegistration[] = [];
   /** Actions whose handler is still running, so a repeat press cannot overlap it. */
   #inFlight = new Set<HotkeyAction>();
+  /**
+   * When an action last completed *synchronously*, for {@link HOTKEY_REPEAT_GUARD_MS}. An action
+   * whose handler returns a Promise never appears here - see that constant's comment - so this
+   * guard only ever engages for the actions it can actually engage safely for.
+   */
+  #lastSyncFired = new Map<HotkeyAction, number>();
 
   constructor(options: HotkeyServiceOptions) {
     this.#shortcuts = options.shortcuts;
     this.#log = (options.logger ?? nullLogger()).child('hotkeys');
+    this.#now = options.now ?? Date.now;
   }
 
   /** Every action's outcome from the last {@link register}, in `HOTKEY_ACTIONS` order. */
@@ -257,6 +292,7 @@ export class HotkeyService {
     this.#registered.clear();
     this.#results = [];
     this.#inFlight.clear();
+    this.#lastSyncFired.clear();
   }
 
   // -------------------------------------------------------------------------
@@ -288,6 +324,19 @@ export class HotkeyService {
     if (!ok) return { action, accelerator, ok: false, reason: 'conflict' };
 
     this.#registered.set(action, accelerator);
+
+    // Computed for every source that reaches this point - a fresh capture, a rebind from the
+    // settings window, or a string an older build already had in config.json - because this is
+    // the one place all three funnel through before a key goes live (#82).
+    const caution = classifyHotkeyCaution(accelerator);
+    if (caution !== undefined) {
+      this.#log.warn('hotkey binds a key that types normally while only Shift is held', {
+        action,
+        accelerator,
+        typedAs: caution.typedAs,
+      });
+      return { action, accelerator, ok: true, caution };
+    }
     return { action, accelerator, ok: true };
   }
 
@@ -309,6 +358,20 @@ export class HotkeyService {
       return;
     }
 
+    // Auto-repeat guard (#82). Only an action that has already completed synchronously once can
+    // have an entry here - see HOTKEY_REPEAT_GUARD_MS - so this never engages the first time an
+    // action fires, and never engages at all for an action whose handler returns a Promise.
+    const lastSyncFired = this.#lastSyncFired.get(action);
+    if (lastSyncFired !== undefined && this.#now() - lastSyncFired < HOTKEY_REPEAT_GUARD_MS) {
+      // A dropped press moves the window forward too. Measuring only from the last press that
+      // *fired* let a key held down fire again every HOTKEY_REPEAT_GUARD_MS - about nine toggles
+      // in the 2.6s hold measured live, instead of 46 but still not one. A held key keeps
+      // repeating well inside the guard, so sliding the window makes the whole hold one press.
+      this.#lastSyncFired.set(action, this.#now());
+      this.#log.debug('ignored a hotkey press; too soon after the last one to be deliberate', { action });
+      return;
+    }
+
     this.#inFlight.add(action);
     let settled = false;
     const done = (): void => {
@@ -325,9 +388,13 @@ export class HotkeyService {
           this.#log.error('a hotkey handler failed', { action, message: describeError(error) });
         });
       } else {
+        this.#lastSyncFired.set(action, this.#now());
         done();
       }
     } catch (error) {
+      // Still a synchronous completion, and still worth guarding against a repeat of the same
+      // throw - a key held down over a handler that always throws must not spam the log forever.
+      this.#lastSyncFired.set(action, this.#now());
       done();
       this.#log.error('a hotkey handler threw', { action, message: describeError(error) });
     }

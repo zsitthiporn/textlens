@@ -738,7 +738,9 @@ function applyHotkeys(): void {
   // 'duplicate' get different text - see its comment on why that distinction is not cosmetic.
   // Since #39 the remedy it names is reachable: the settings window rebinds from a captured
   // keystroke, so "pick a different key" is a thing the user can do rather than advice.
-  reporter.set('hotkeys', describeHotkeyFailures(service.failures));
+  // Every registration, not `failures` (#82): a binding that worked can still swallow a key the
+  // user types every day, and the only thing that can see that is the successful registration.
+  reporter.set('hotkeys', describeHotkeyFailures(service.registrations));
   settingsIpc?.publish();
 }
 
