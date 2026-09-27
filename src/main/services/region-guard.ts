@@ -70,6 +70,60 @@ export function padRegion(region: Rect, padding: number, monitorSize: readonly [
 }
 
 /**
+ * Move any edge of `region` that stops within `slop` px of the monitor's edge onto it (#80, L1).
+ *
+ * ## The gap this closes
+ *
+ * A region whose edge is one or two pixels short of the screen's is not pinned by
+ * {@link findEdgeContact}'s #59 rule - that rule compares exactly, because one pixel of room is
+ * room. But that pixel is not room the user can use: text sitting at the very top of the screen
+ * lands a pixel or two inside such a region, which is inside {@link EDGE_SLOP_PX} of its edge, so
+ * it is reported as clipped and the user is told to "widen it" in a direction that has one pixel
+ * left to give. Measured on the live app: saved `[7, 9, 3430, 1421]` on a 3440x1440 monitor, padded
+ * by 8, became `[0, 1, 3440, 1437]` - 1px short of the top, 2px short of the bottom - and every one
+ * of the 65 edge warnings logged that day was on that region, all of them top or bottom.
+ *
+ * It is also a gap the user cannot close by dragging more carefully. The region picker's cursor
+ * stops on the last pixel of the screen, so at scale 1 a drag to the bottom-right corner is
+ * `W - 1` wide, and padding 0 leaves it there.
+ *
+ * ## Why the threshold is `EDGE_SLOP_PX`, not the padding
+ *
+ * The two numbers answer different questions. Padding is how far to grow past what the user drew;
+ * the slop is how close to an edge text has to come to count as touching it. The gap that produces
+ * a warning nobody can act on is exactly the one the slop cannot see past, so that is the number
+ * that decides which gaps to close - a gap wider than the slop leaves text clear of the edge and
+ * the rule above works as it always did.
+ *
+ * ## Not part of `padRegion`, and not a second clamp
+ *
+ * {@link clampRegion} is `padRegion(region, 0, ...)`, and it runs at pick time on the rectangle that
+ * gets *stored*; that one must stay the raw drag, so this runs only where the wire region is built.
+ * Only a gap strictly between 0 and `slop` is moved: an edge already on the monitor's edge needs
+ * nothing, and an edge past it is {@link padRegion}'s to clamp, not this function's.
+ *
+ * @param monitorSize `[width, height]` of the monitor in physical px - the same value
+ * {@link padRegion} clamped against.
+ */
+export function snapToMonitorEdges(
+  region: Rect,
+  monitorSize: readonly [number, number],
+  slop = EDGE_SLOP_PX,
+): Rect {
+  const [monitorWidth, monitorHeight] = monitorSize;
+  const [x, y, width, height] = region;
+
+  const closes = (gap: number): boolean => gap > 0 && gap <= slop;
+
+  const left = closes(x) ? 0 : x;
+  const top = closes(y) ? 0 : y;
+  const right = closes(monitorWidth - (x + width)) ? monitorWidth : x + width;
+  const bottom = closes(monitorHeight - (y + height)) ? monitorHeight : y + height;
+
+  return [left, top, right - left, bottom - top];
+}
+
+/**
  * Confine a region to a monitor without padding it.
  *
  * Used for a region that was saved when the monitor was larger. It is deliberately **not** the
@@ -294,8 +348,11 @@ export function checkRegionSize(region: Rect, minimum = MIN_REGION_PX): RegionAc
  * pixel inside the region is not meaningfully different from one that ends exactly on the edge
  * - both mean the user is about to lose the end of a word. Two pixels of slack catches the
  * real case without firing on text that merely sits near the edge.
+ *
+ * Also the threshold {@link snapToMonitorEdges} uses to close a region's gap to the screen edge
+ * (#80) - see that function for why it is this number and not the padding.
  */
-const EDGE_SLOP_PX = 2;
+export const EDGE_SLOP_PX = 2;
 
 export interface EdgeReport {
   /** Which edges recognised text is up against. Empty means nothing is clipped. */
@@ -331,7 +388,9 @@ export interface EdgeReport {
  * pixel-exact; region and monitor rectangles are exact integers in the same physical-px space
  * (`FrameEvent.region` is relative to the monitor's top-left, `MonitorInfo.bounds` is the
  * monitor's own rect), and a region one pixel inside the screen genuinely does have one pixel to
- * grow into.
+ * grow into. That pixel is too small to be worth a warning, which is why the region that reaches
+ * the wire has already been through {@link snapToMonitorEdges} (#80) - the gap is closed where the
+ * region is built, and this rule stays exact.
  *
  * @param monitorSize `[width, height]` of the monitor the region sits on, physical px - the same
  * value {@link padRegion} clamped against. Required rather than optional: an omitted monitor
@@ -417,8 +476,10 @@ export class EdgeWarningThrottle {
   shouldReport(report: EdgeReport): boolean {
     if (report.edges.length === 0) {
       // Nothing is clipped. Clear the memo so that when it starts again it is reported at once
-      // rather than waiting out an interval that began the last time it happened.
-      this.#lastKey = '';
+      // rather than waiting out an interval that began the last time it happened. Callers whose
+      // clean observations are noisier than their clears should use {@link reset} instead of
+      // passing clean reports here - see there.
+      this.reset();
       return false;
     }
 
@@ -430,5 +491,19 @@ export class EdgeWarningThrottle {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Forget the last report, so the next dirty one is surfaced at once (#80, F8).
+   *
+   * The same effect a clean report has on {@link shouldReport}, available without one. It exists
+   * because a clean *frame* is not the condition ending: real subtitle text drifts in and out of
+   * edge contact from one frame to the next (#65), and a caller that fed every clean frame in here
+   * re-armed the throttle each time and logged every dirty frame after it - 65 lines in about 12
+   * minutes on the live app. `AppOrchestrator` calls this instead when the warning the user sees
+   * actually clears, which is the moment "it started again" becomes news.
+   */
+  reset(): void {
+    this.#lastKey = '';
   }
 }
